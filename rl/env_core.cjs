@@ -89,10 +89,11 @@ class FarmEnv {
     const p = this.player(), f = this.farm(), st = this.room.state;
     const inv = new Array(ITEMS.length).fill(0);
     p.inventory.forEach((v, k) => { const i = ITEMS.indexOf(k); if (i >= 0) inv[i] = v; });
-    const grid = []; const crops = [];
+    const grid = []; const crops = []; const watered = [];
     for (const t of f.tiles) {
       grid.push(TILE_STATE[t.type] ?? 0);
       crops.push(CROP_ID[t.crop] ?? 0);
+      watered.push(t.watered ? 1 : 0);
     }
     const goal = this.task && this.task.goal ? this.task.goal.progress(p, st) : null;
     return {
@@ -101,7 +102,7 @@ class FarmEnv {
       isDay: st.isDay ? 1 : 0, festival: st.festival ? 1 : 0, festivalClaimed: st.festivalClaimed ? 1 : 0,
       tool: TOOL_ID[p.tool] ?? 0, married: p.marriedTo ? 1 : 0,
       questsCurrent: p.quests.current, questsCompleted: p.quests.completed.length, arcDone: p.quests.arcDone ? 1 : 0,
-      inventory: inv, farmState: grid, farmCrop: crops,
+      inventory: inv, farmState: grid, farmCrop: crops, farmWatered: watered,
       friendships: Object.fromEntries(p.friendships),
       goalProgress: goal,   // 0..1 toward the task goal (null in sandbox)
     };
@@ -135,7 +136,7 @@ class FarmEnv {
       case 'water': {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
-        const wasWaterable = t && (t.type === 'seeded' || t.type === 'growing');
+        const wasWaterable = t && !t.watered && (t.type === 'seeded' || t.type === 'growing');
         room.onWater(client, action);
         if (wasWaterable) r += this.w.watered;
         ok = !!wasWaterable;

@@ -12,8 +12,9 @@ import numpy as np
 from rl.python.env_gym import ACTION_LABELS, FarmGymEnv
 
 
-def parse_action(text: str, mask: np.ndarray) -> int:
+def parse_action(text: str | None, mask: np.ndarray) -> int:
     """Parse a model response and guarantee a currently valid action."""
+    text = text or ""
     candidates: list[Any] = []
     cleaned = text.strip().replace(chr(96) * 3 + "json", "").replace(chr(96) * 3, "").strip()
     try:
@@ -64,6 +65,7 @@ class OpenAIActionPolicy:
                 "empty": obs["farmState"].count(0), "tilled": obs["farmState"].count(1),
                 "seeded": obs["farmState"].count(2), "growing": obs["farmState"].count(3),
                 "mature": obs["farmState"].count(4),
+                "watered": sum(int(v) for v in obs.get("farmWatered", [])),
             },
         }
 
@@ -81,7 +83,11 @@ class OpenAIActionPolicy:
                 {"role": "system", "content": "You control a deterministic farming simulation. Return JSON only."},
                 {"role": "user", "content": json.dumps(prompt, separators=(",", ":"))},
             ],
-            "temperature": 0, "max_tokens": 80,
+            "temperature": 0,
+            "max_tokens": 80,
+            "chat_template_kwargs": {
+                "enable_thinking": False, "reasoning_effort": "low",
+            },
         }).encode("utf-8")
         request = urllib.request.Request(
             self.base_url + "/chat/completions", data=body,
@@ -90,4 +96,6 @@ class OpenAIActionPolicy:
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             payload = json.load(response)
-        return parse_action(payload["choices"][0]["message"]["content"], mask)
+        message = payload["choices"][0]["message"]
+        text = message.get("content") or message.get("reasoning_content")
+        return parse_action(text, mask)

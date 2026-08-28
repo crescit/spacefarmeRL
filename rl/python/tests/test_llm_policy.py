@@ -17,6 +17,11 @@ class LlmPolicyTests(unittest.TestCase):
         mask[ACTION_LABELS.index("advance_day")] = 1
         self.assertEqual(parse_action('{"action":"mine"}', mask), ACTION_LABELS.index("advance_day"))
 
+    def test_null_content_falls_back_to_valid(self):
+        mask = np.zeros(len(ACTION_LABELS), dtype=np.int8)
+        mask[ACTION_LABELS.index("advance_day")] = 1
+        self.assertEqual(parse_action(None, mask), ACTION_LABELS.index("advance_day"))
+
     def test_numeric_action(self):
         mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
         self.assertEqual(parse_action('{"action_index":5}', mask), 5)

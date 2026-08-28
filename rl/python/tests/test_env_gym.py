@@ -54,6 +54,23 @@ class GymTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_water_mask_tracks_watered_tiles(self):
+        env = FarmGymEnv(horizon_days=4)
+        try:
+            env.reset(seed=42)
+            env.step(ACTION_LABELS.index("till"))
+            env.step(ACTION_LABELS.index("plant"))
+            water = ACTION_LABELS.index("water")
+            self.assertEqual(env.action_masks()[water], 1)
+            _obs, _reward, _terminated, _truncated, info = env.step(water)
+            self.assertEqual(env.raw_obs["farmWatered"][0], 1)
+            self.assertEqual(info["action_mask"][water], 0)
+            env.step(ACTION_LABELS.index("advance_day"))
+            self.assertEqual(env.raw_obs["farmWatered"][0], 0)
+            self.assertEqual(env.action_masks()[water], 1)
+        finally:
+            env.close()
+
     def test_same_seed_same_macro_trajectory(self):
         actions = [6, 6, 5, 13, 6, 4]
         outputs = []

@@ -134,6 +134,7 @@ def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
     values.extend(float(v) / 99.0 for v in list(obs.get("inventory") or [])[:item_count])
     values.extend(float(v) / 4.0 for v in list(obs.get("farmState") or [])[:64])
     values.extend(float(v) / 6.0 for v in list(obs.get("farmCrop") or [])[:64])
+    values.extend(float(v) for v in list(obs.get("farmWatered") or [])[:64])
     friendships = obs.get("friendships") or {}
     values.extend(float(friendships.get(name, 0)) / 100.0 for name in FRIENDS)
     return np.clip(np.asarray(values, dtype=np.float32), -1.0, 100.0)
@@ -147,9 +148,15 @@ class MacroActionCodec:
         self.item_index = {name: index for index, name in enumerate(self.items)}
 
     @staticmethod
-    def _tile(obs: dict[str, Any], states: set[int]) -> tuple[int, int]:
+    def _tile(
+        obs: dict[str, Any], states: set[int], *, require_unwatered: bool = False
+    ) -> tuple[int, int]:
         grid = list(obs.get("farmState") or [])
-        index = next((i for i, state in enumerate(grid) if int(state) in states), 0)
+        watered = list(obs.get("farmWatered") or [0] * len(grid))
+        index = next((
+            i for i, state in enumerate(grid)
+            if int(state) in states and (not require_unwatered or not bool(watered[i]))
+        ), 0)
         return index % 8, index // 8
 
     def _count(self, obs: dict[str, Any], item: str) -> int:
@@ -161,7 +168,7 @@ class MacroActionCodec:
         action = ACTION_LABELS[int(label)]
         if action in {"till", "plant", "water", "harvest"}:
             required = {"till": {0}, "plant": {1}, "water": {2, 3}, "harvest": {4}}[action]
-            x, y = self._tile(obs, required)
+            x, y = self._tile(obs, required, require_unwatered=action == "water")
             native: dict[str, Any] = {"type": action, "tileX": x, "tileY": y}
             if action == "plant":
                 crops = {0: "space-wheat", 1: "star-berry", 2: "nebula-pepper", 3: "glow-kelp"}
@@ -184,12 +191,14 @@ class MacroActionCodec:
         return {"type": action}
 
     def mask(self, obs: dict[str, Any]) -> np.ndarray:
-        grid = {int(v) for v in (obs.get("farmState") or [])}
+        states = [int(v) for v in (obs.get("farmState") or [])]
+        watered = list(obs.get("farmWatered") or [0] * len(states))
+        grid = set(states)
         energy = float(obs.get("energy", 0))
         mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
         mask[0] = int(0 in grid and energy > 0)
         mask[1] = int(1 in grid and self._count(obs, "seeds") > 0 and energy > 0)
-        mask[2] = int(bool({2, 3} & grid) and energy > 0)
+        mask[2] = int(any(s in {2, 3} and not bool(watered[i]) for i, s in enumerate(states)) and energy > 0)
         mask[3] = int(4 in grid)
         mask[4] = int(any(self._count(obs, name) > 0 for name in SALEABLE))
         mask[5] = int(energy >= 10)
@@ -213,7 +222,7 @@ class FarmGymEnv(gym.Env):
         self.bridge._start()
         self.codec = MacroActionCodec(self.bridge.spec["items"])
         self.action_space = spaces.Discrete(len(ACTION_LABELS))
-        size = len(SCALARS) + 1 + len(self.bridge.spec["items"]) + 64 + 64 + len(FRIENDS)
+        size = len(SCALARS) + 1 + len(self.bridge.spec["items"]) + 64 + 64 + 64 + len(FRIENDS)
         self.observation_space = spaces.Box(low=-1.0, high=100.0, shape=(size,), dtype=np.float32)
         self.raw_obs: dict[str, Any] | None = None
 
