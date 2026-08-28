@@ -1,0 +1,36 @@
+{
+  "name": "space-farmer",
+  "version": "1.0.0",
+  "description": "A cozy multiplayer space-farming game and deterministic reinforcement-learning environment.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node scripts/test.mjs",
+    "dev": "node server.js",
+    "test:offline": "node scripts/test.mjs --offline",
+    "test:rl": "node rl/smoke.cjs 8",
+    "test:python": "python3 -m unittest discover -s rl/python/tests -v",
+    "benchmark": "python3 -m rl.python.benchmark",
+    "train:ppo": "python3 -m rl.python.train_ppo",
+    "check:public": "bash scripts/public_check.sh"
+  },
+  "keywords": [
+    "game",
+    "reinforcement-learning",
+    "gymnasium",
+    "phaser",
+    "colyseus"
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "@colyseus/core": "^0.17.50",
+    "@colyseus/schema": "^4.0.30",
+    "@colyseus/sdk": "^0.17.43",
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  },
+  "private": false,
+  "engines": {
+    "node": ">=20"
+  }
+}

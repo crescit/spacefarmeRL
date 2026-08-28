@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Space Farmer 🌾</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #080817; }
+    /* Use the dynamic viewport height (100dvh) so the layout tracks the live
+       mobile browser chrome — with height:100%, iOS Safari's bottom toolbar
+       overlays the bottom of the page and covers the on-screen touch controls. */
+    body { color: #eee; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; display: flex; flex-direction: column; }
+    #wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100dvh; gap: 0;
+      padding-bottom: env(safe-area-inset-bottom, 0px); }
+    /* Game canvas fills the usable screen; FIT letterboxes as needed. Touch bar sits below. */
+    #game { width: 100%; flex: 1 1 auto; min-height: 0; background: #000; position: relative; overflow: hidden; }
+    /* Touch controls live BELOW the canvas in their own bar, not on the game. */
+    #touchbar { width: min(100vw, 960px); flex: 0 0 auto;
+      background: linear-gradient(180deg, #1a2038 0%, #121a2c 100%); border-top: 2px solid #39c5bb;
+      box-shadow: 0 0 14px rgba(57,197,187,.22), inset 0 1px 0 rgba(120,220,215,.18);
+      padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+    #touchbar.hidden { display: none; }
+    .tbtn { border: 2px solid #39c5bb; background: linear-gradient(180deg, #232a48 0%, #181e34 100%); color: #bfeeff;
+      font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .04em;
+      padding: 14px 12px; min-width: 66px; border-radius: 10px; user-select: none; -webkit-user-select: none;
+      touch-action: none; text-align: center; box-shadow: inset 0 1px 0 rgba(150,230,225,.22), 0 6px rgba(57,197,187,.18); }
+    .tbtn:active { background: linear-gradient(180deg, #39c5bb 0%, #2aa 100%); color: #04141a; box-shadow: 0 0 12px rgba(57,197,187,.55); }
+    .tbtn.primary { border-color: #9ddd72; color: #c8ffd8; box-shadow: inset 0 1px 0 rgba(160,240,170,.22), 0 0 6px rgba(157,221,114,.22); }
+    .tbtn.danger { border-color: #ff6b6b; color: #ffc0c0; }
+    .tbtn.amber { border-color: #ffdd44; color: #ffe9a0; }
+    .tdpad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 40px); gap: 4px; }
+    .tdpad .tbtn { min-width: 0; padding: 4px; font-size: 16px; }
+    #touch-toggle { border: 1px solid rgba(150,160,190,.5); background: rgba(30,34,54,0.9); color: #cfd6ff; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif;
+      font-size: 11px; padding: 10px 12px; border-radius: 6px; cursor: pointer; }
+    /* Always-visible floating toggle so touch controls can be re-enabled
+       even after the bar is hidden (desktop). Sits bottom-right, above scanlines. */
+    #touch-float { position: fixed; right: 10px; bottom: 10px; z-index: 40; border: 2px solid #39c5bb;
+      background: linear-gradient(180deg, #232a48 0%, #181e34 100%); color: #bfeeff; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; font-size: 13px; font-weight: 600;
+      box-shadow: 0 0 12px rgba(57,197,187,.30); width: 48px; height: 48px; border-radius: 50%; cursor: pointer; display: grid; place-content: center; }
+    #loading { position: fixed; z-index: 10; inset: 0; display: grid; place-content: center; gap: 12px; padding: 24px; background: #0a0a1a; text-align: center; transition: opacity .35s; }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    .spinner { width: 42px; height: 42px; margin: auto; border: 3px solid #333; border-top-color: #7c5; border-radius: 50%; animation: spin 1s linear infinite; }
+    .title { color: #9ddd72; font-size: 24px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+    @keyframes spin { to { transform: rotate(1turn); } }
+    #controls-info { position: fixed; bottom: 8px; left: 8px; color: #39c5bb; font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; z-index: 5; background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid #39c5bb33; pointer-events: none; }
+    /* Touch-friendly note */
+    #touch-note { position: fixed; bottom: 8px; right: 8px; color: #9ddd72; font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; z-index: 5; background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid #9ddd7233; pointer-events: none; display: none; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="game"></div>
+    <div id="touchbar">
+      <div class="tdpad">
+        <button class="tbtn" data-dir="up" style="grid-column:2;grid-row:1">▲</button>
+        <button class="tbtn" data-dir="left" style="grid-column:1;grid-row:2">◀</button>
+        <button class="tbtn" data-dir="right" style="grid-column:3;grid-row:2">▶</button>
+        <button class="tbtn" data-dir="down" style="grid-column:2;grid-row:3">▼</button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="tbtn primary" data-act="a">A</button>
+        <button class="tbtn danger" data-act="b">B</button>
+        <button class="tbtn" data-act="menu">MENU</button>
+      </div>
+      <button class="tbtn amber" data-act="sleep">🛏 SLEEP</button>
+    </div>
+  </div>
+  <button id="touch-float" title="Toggle touch controls">🎮</button>
+  <div id="loading">
+    <div class="spinner"></div>
+    <div class="title">🌾 SPACE FARMER</div>
+    <div id="message">Loading…</div>
+  </div>
+  <div id="controls-info">
+    WASD/Arrows: Move · SPACE/E: Interact · TAB: Grand Exchange · I: Shop · ESC: Close
+  </div>
+  <div id="touch-note">📱 Touch: D-pad moves · A: interact · B: close</div>
+
+  <!-- Phaser 3 (vendored locally — no CDN dependency) -->
+  <script src="vendor/phaser.min.js"></script>
+
+  <!-- Colyseus client (vendored locally) -->
+  <script src="vendor/colyseus.js"></script>
+
+  <!-- Game client (module) -->
+  <script type="module" src="client/game.js"></script>
+
+  <!-- Loading overlay logic -->
+  <script>
+    const loading = document.getElementById('loading');
+    const msg = document.getElementById('message');
+
+    // Show touch hint on mobile
+    if ('ontouchstart' in document.documentElement) {
+      document.getElementById('touch-note').style.display = 'block';
+    }
+
+    window.addEventListener('load', () => {
+      msg.textContent = 'Initializing game…';
+    });
+
+    const checkGame = () => {
+      if (window.SpaceFarmer?.game) {
+        loading.classList.add('hidden');
+      } else {
+        setTimeout(checkGame, 500);
+      }
+    };
+    setTimeout(checkGame, 1000);
+  </script>
+</body>
+</html>
+

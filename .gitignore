@@ -1,0 +1,17 @@
+saves/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.coverage
+.pytest_cache/
+dist/
+artifacts/
+trajectories/
+checkpoints/
+*.tmp
+*.orig
+*.rej
+.hermes/
+.env
+.DS_Store
