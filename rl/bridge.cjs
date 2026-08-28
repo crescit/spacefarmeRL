@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+'use strict';
+
+console.log = (...args) => console.error(...args);
+const readline = require('node:readline');
+const { FarmEnv, ITEMS, ACTION_TYPES } = require('./env_core.cjs');
+
+let env = null;
+const reply = (payload) => process.stdout.write(JSON.stringify({ ok: true, ...payload }) + '\n');
+const fail = (error) => process.stdout.write(JSON.stringify({
+  ok: false, error: String(error && error.message ? error.message : error),
+}) + '\n');
+
+async function handle(command) {
+  switch (command.cmd) {
+    case 'spec':
+      return reply({ protocolVersion: 1, items: ITEMS, actionTypes: ACTION_TYPES, observationVersion: 1 });
+    case 'reset': {
+      if (env) env.close();
+      env = new FarmEnv({ horizonDays: command.horizonDays || 28 });
+      const obs = env.reset({ seed: command.seed ?? 1 });
+      return reply({ obs, info: { seed: command.seed ?? 1 } });
+    }
+    case 'step':
+      if (!env) throw new Error('reset must be called before step');
+      return reply(env.step(command.action));
+    case 'save':
+      if (!env) throw new Error('reset must be called before save');
+      return reply({ path: env.save(command.path || null) });
+    case 'load':
+      if (!env) env = new FarmEnv();
+      return reply({ obs: env.load(command.path), info: { loaded: true } });
+    case 'close':
+      if (env) env.close();
+      env = null;
+      reply({ closed: true });
+      return process.exit(0);
+    default:
+      throw new Error('unknown command: ' + command.cmd);
+  }
+}
+
+const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+lines.on('line', async (line) => {
+  try { await handle(JSON.parse(line)); } catch (error) { fail(error); }
+});
+lines.on('close', () => { if (env) env.close(); });
