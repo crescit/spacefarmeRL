@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+.venv
+saves
+artifacts
+trajectories
+checkpoints
+rl
+tests
+gen_*.py
+__pycache__
+*.pyc
+.env*
+tests/shots
