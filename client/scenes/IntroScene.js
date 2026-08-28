@@ -89,21 +89,30 @@ class IntroScene extends Phaser.Scene {
 
     // ── Title card (hidden until the crawl finishes) ──
     this.titleCard = this.add.container(width / 2, height / 2).setVisible(false);
+    const orbit = this.add.graphics();
+    orbit.lineStyle(1, 0x67e1cd, 0.28).strokeEllipse(0, -116, 310, 102);
+    orbit.lineStyle(2, 0xf2bd68, 0.5).beginPath().arc(0, -116, 155, 2.8, 4.7).strokePath();
+    const titlePlate = this.add.rectangle(0, 36, Math.min(620, width * 0.78), 190, 0x071a20, 0.8)
+      .setStrokeStyle(1, 0x67e1cd, 0.5);
     this.houseImg = this.add.image(0, -150, 'bld.house').setScale(2.2);
     this.houseGlow = this.add.image(0, -120, 'bld.house_glow').setBlendMode(Phaser.BlendModes.ADD).setScale(2.2).setAlpha(0.8);
-    this.titleText = this.add.text(0, 30, 'SPACE FARMER', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '44px', color: '#ffe9a0',
-      stroke: '#7a4a16', strokeThickness: 6, shadow: { color: '#ffd98a', blur: 18, offset: 0, fill: true },
+    const eyebrow = this.add.text(0, -28, 'A  B-612  FRONTIER  STORY', {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold', color: '#83c6ba',
     }).setOrigin(0.5);
-    this.subtitle = this.add.text(0, 84, 'Asteroid B-612 · Year 2987', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#a8d8d8',
-      stroke: '#103a3a', strokeThickness: 3,
+    this.titleText = this.add.text(0, 22, 'SPACE FARMER', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '48px', fontStyle: 'bold', color: '#f7d698',
+      stroke: '#3b2915', strokeThickness: 5, shadow: { color: '#f2bd68', blur: 20, offset: 0, fill: true },
     }).setOrigin(0.5);
-    this.pressStart = this.add.text(0, 150, 'PRESS SPACE / TAP TO BEGIN', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe9a0',
-      stroke: '#000', strokeThickness: 3,
+    const rule = this.add.rectangle(0, 66, 190, 2, 0x67e1cd, 0.7);
+    this.subtitle = this.add.text(0, 89, 'Grow a future at the edge of the known sky', {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '13px', color: '#c6e8df',
+      stroke: '#061116', strokeThickness: 3,
     }).setOrigin(0.5);
-    this.titleCard.add([this.houseImg, this.houseGlow, this.titleText, this.subtitle, this.pressStart]);
+    this.pressStart = this.add.text(0, 142, 'SPACE  /  TAP  TO  ARRIVE', {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', fontStyle: 'bold', color: '#f7d698',
+      stroke: '#061116', strokeThickness: 3,
+    }).setOrigin(0.5);
+    this.titleCard.add([orbit, titlePlate, this.houseImg, this.houseGlow, eyebrow, this.titleText, rule, this.subtitle, this.pressStart]);
 
     // ── Text crawl (big, bright, on a dark panel for legibility) ──
     // Sliding window: only the last few lines stay on screen, so a long story

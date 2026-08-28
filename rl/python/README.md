@@ -55,14 +55,17 @@ python -m rl.python.train_ppo --timesteps 10000 --seed 7
 
 PPO uses `sb3-contrib` MaskablePPO and the environment's live action mask.
 
-## OpenAI-compatible policies
+## OpenAI-compatible policy evaluation
 
 ~~~bash
-OPENAI_BASE_URL=http://127.0.0.1:4000/v1 \
-OPENAI_API_KEY=sk-local \
-OPENAI_MODEL=local-coder \
-python -m rl.python.rollout_llm
+export OPENAI_BASE_URL=http://127.0.0.1:4000/v1
+export OPENAI_API_KEY=sk-local
+export OPENAI_MODEL=local-coder
+python -m rl.python.eval_local_model --seeds 10 --horizon-days 12
 ~~~
 
-The model receives a compact state summary and valid action names. Invalid or
-malformed responses deterministically fall back to the first valid action.
+The model receives a compact state summary and only currently valid macro
+actions. The report includes reward, final credits, steps, request latency,
+random/economic baselines, and per-seed replayable trajectories. Keep
+`--seeds`, `--seed-start`, and `--horizon-days` fixed when comparing models.
+Malformed responses deterministically fall back to the first valid action.

@@ -204,6 +204,28 @@ class PlanetScene extends Phaser.Scene {
       }
     }
 
+    // Raised agri-decks unify the farm tiles into two intentional fields.
+    // This is presentation-only: the simulation and its 8x8 RL farm state
+    // keep exactly the same coordinates and semantics.
+    this.fieldDeck = this.add.graphics().setDepth(0.12);
+    this.fieldDeck.lineStyle(3, 0x263d35, 0.82);
+    this.fieldDeck.strokeRoundedRect(7 * T + 3, 16 * T + 3, 11 * T - 6, 13 * T - 6, 9);
+    this.fieldDeck.strokeRoundedRect(19 * T + 3, 16 * T + 3, 13 * T - 6, 13 * T - 6, 9);
+    this.fieldDeck.lineStyle(1, 0xd6b477, 0.18);
+    for (let fy = 16; fy <= 28; fy++) {
+      this.fieldDeck.lineBetween(7 * T + 8, fy * T + T / 2, 18 * T - 8, fy * T + T / 2);
+      this.fieldDeck.lineBetween(19 * T + 8, fy * T + T / 2, 32 * T - 8, fy * T + T / 2);
+    }
+    this.world.add(this.fieldDeck);
+    const deckLabelStyle = {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '8px', fontStyle: 'bold',
+      color: '#f1d69b', stroke: '#17231f', strokeThickness: 3,
+    };
+    this.fieldDeckLabels = [
+      this.add.text(7 * T + 10, 16 * T + 8, 'AGRI-DECK 01', deckLabelStyle).setDepth(0.2),
+      this.add.text(19 * T + 10, 16 * T + 8, 'AGRI-DECK 02', deckLabelStyle).setDepth(0.2),
+    ];
+    this.world.add(this.fieldDeckLabels);
     // ── fence line ──
     this.fenceBeams = [];
     const spans = fenceSpans();
@@ -482,22 +504,30 @@ class PlanetScene extends Phaser.Scene {
 
   // ── UI builders ──
   buildHUD(width, height) {
-    const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', fontStyle: 'bold' };
-    // colony-tech status bar across the bottom (matches the touch bar language)
-    this.hudBar = this.add.rectangle(width / 2, height - 46, width, 28, 0x141628, 0.88)
-      .setStrokeStyle(1, 0x39c5bb).setDepth(997);
-    this.hudText = this.add.text(14, height - 46, '', {
-      ...f, color: '#b8ffcf', stroke: '#0a1020', strokeThickness: 4,
+    const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', fontStyle: 'bold' };
+    const y = height - 48;
+    // Floating glass telemetry keeps status scannable without hiding the world.
+    this.hudBar = this.add.rectangle(width / 2, y, width - 24, 44, 0x081a20, 0.88)
+      .setStrokeStyle(1, 0x6be7d0, 0.7).setDepth(997);
+    this.hudAccent = this.add.rectangle(24, y, 4, 28, 0xf3bd67, 1).setDepth(998);
+    this.hudText = this.add.text(38, y - 7, '', {
+      ...f, color: '#effff9', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(0, 0.5).setDepth(1000);
-    this.hudDay = this.add.text(width - 14, height - 46, '', {
-      ...f, color: '#ffe9a0', align: 'right', stroke: '#0a1020', strokeThickness: 4,
+    this.energyTrack = this.add.rectangle(38, y + 11, 170, 5, 0x16363a, 1).setOrigin(0, 0.5).setDepth(999);
+    this.energyFill = this.add.rectangle(38, y + 11, 170, 5, 0x6be7d0, 1).setOrigin(0, 0.5).setDepth(1000);
+    this.hudDay = this.add.text(width - 34, y, '', {
+      ...f, fontSize: '11px', color: '#f8d797', align: 'right', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0.5).setDepth(1000);
-    // ── 'The Stardust Story' quest chip — top-left, the arc's always-on spine ──
-    this.questChip = this.add.text(14, 10, '', {
-      ...f, color: '#b8ffcf', stroke: '#0a1020', strokeThickness: 4,
+    this.colonyMark = this.add.text(width - 34, 12, 'B-612  /  FRONTIER AGRICULTURE', {
+      ...f, fontSize: '9px', color: '#8dc9c0',
+      stroke: '#061015', strokeThickness: 3,
+    }).setOrigin(1, 0).setDepth(1000);
+    this.questPlate = this.add.rectangle(12, 8, Math.min(430, width * 0.54), 38, 0x081a20, 0.78)
+      .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997);
+    this.questChip = this.add.text(24, 18, '', {
+      ...f, fontSize: '10px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(0, 0).setDepth(1000);
   }
-
   buildDialogue(width, height) {
     const bw = width - 96, bh = 148, cx = width / 2, cy = height - 92;
     const boxL = cx - bw / 2, boxT = cy - bh / 2;
@@ -2057,7 +2087,12 @@ rations, and your name on the manifest.
     }
     const SEASONS = ['SPRING', 'SUMMER', 'FALL', 'WINTER'];
     const sName = SEASONS[this.season ?? 0] || 'SPRING';
-    this.hudText.setText(`${this.credits} CR | ${this.energy} EN | ${seeds} SEEDS | ${this.tool.toUpperCase()} | ${sName}${this.roomState && this.roomState.festival ? ' | FESTIVAL!' : ''}`);
+    this.hudText.setText(`${this.credits} CR   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${this.roomState && this.roomState.festival ? '   ·   FESTIVAL' : ''}`);
+    if (this.energyFill) {
+      const energyRatio = Math.max(0, Math.min(1, this.energy / 100));
+      this.energyFill.width = 170 * energyRatio;
+      this.energyFill.setFillStyle(energyRatio < 0.25 ? 0xf06f68 : energyRatio < 0.55 ? 0xf3bd67 : 0x6be7d0);
+    }
     const animals = this.animals || {};
     const hasAnimals = Object.keys(animals).some(k => animals[k] > 0);
     this.hudDay.setText(

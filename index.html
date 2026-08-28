@@ -47,6 +47,27 @@
     #controls-info { position: fixed; bottom: 8px; left: 8px; color: #39c5bb; font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; z-index: 5; background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid #39c5bb33; pointer-events: none; }
     /* Touch-friendly note */
     #touch-note { position: fixed; bottom: 8px; right: 8px; color: #9ddd72; font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; z-index: 5; background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid #9ddd7233; pointer-events: none; display: none; }
+    /* 2026 visual system: bioluminescent frontier glass + warm harvest accents. */
+    :root { --ink:#061116; --teal:#67e1cd; --amber:#f2bd68; --coral:#ef786d; }
+    html, body { background:#061116; }
+    body { color:#eefbf6; background:radial-gradient(circle at 50% -20%,#174047 0%,#08191e 48%,#050c11 100%); }
+    #game { background:#061116; box-shadow:0 24px 80px rgba(0,0,0,.55); }
+    #touchbar { background:linear-gradient(180deg,rgba(13,43,46,.97),rgba(6,25,30,.98));
+      border-top:1px solid rgba(103,225,205,.62); box-shadow:0 -12px 40px rgba(3,14,18,.5),inset 0 1px 0 rgba(190,255,235,.12);
+      padding:11px 14px calc(11px + env(safe-area-inset-bottom,0px)); backdrop-filter:blur(18px); }
+    .tbtn { border:1px solid rgba(103,225,205,.72); background:linear-gradient(160deg,rgba(29,77,79,.92),rgba(10,35,40,.96));
+      color:#d9fff3; font-family:inherit; font-size:12px; font-weight:750; letter-spacing:.08em; border-radius:14px;
+      box-shadow:inset 0 1px 0 rgba(220,255,245,.16),0 5px 16px rgba(0,0,0,.28); }
+    .tbtn:active { transform:translateY(2px) scale(.98); background:var(--teal); color:var(--ink); box-shadow:0 0 20px rgba(103,225,205,.42); }
+    .tbtn.primary { border-color:#a8e68f; color:#ddffd1; }
+    .tbtn.danger { border-color:var(--coral); color:#ffd3cf; }
+    .tbtn.amber { border-color:var(--amber); color:#ffe4ad; }
+    #loading { background:radial-gradient(circle at 50% 42%,#17464a 0%,#0a2026 30%,#050c12 72%); transition:opacity .55s; }
+    .spinner { width:76px; height:76px; border:1px solid rgba(103,225,205,.18); border-top:3px solid var(--teal);
+      border-right:3px solid var(--amber); animation:spin 1.4s cubic-bezier(.5,.1,.5,.9) infinite; box-shadow:0 0 36px rgba(103,225,205,.12); }
+    .eyebrow { color:#82bcb3; font-size:10px; font-weight:800; letter-spacing:.32em; text-transform:uppercase; }
+    .title { color:#f7d698; font-size:clamp(28px,5vw,46px); font-weight:850; letter-spacing:.08em; text-shadow:0 8px 30px rgba(0,0,0,.7); }
+    #message { color:#a6c9c3; font-size:12px; letter-spacing:.08em; }
   </style>
 </head>
 <body>
@@ -69,8 +90,9 @@
   </div>
   <button id="touch-float" title="Toggle touch controls">🎮</button>
   <div id="loading">
+    <div class="eyebrow">B-612 Colony Link</div>
     <div class="spinner"></div>
-    <div class="title">🌾 SPACE FARMER</div>
+    <div class="title">SPACE FARMER</div>
     <div id="message">Loading…</div>
   </div>
   <div id="controls-info">

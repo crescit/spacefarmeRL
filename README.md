@@ -82,20 +82,28 @@ npm run train:ppo -- --timesteps 10000 --eval-episodes 5
 
 Artifacts are written to the ignored `artifacts/` directory.
 
-## Local-model rollouts
+## Evaluate local models
 
-Any OpenAI-compatible chat endpoint can act as a policy. This matches the
-gateway exposed by the sibling `ml-infra` project.
+Any OpenAI-compatible chat endpoint can act as a policy, including the gateway
+in the sibling `ml-infra` project.
 
 ~~~bash
 export OPENAI_BASE_URL=http://127.0.0.1:4000/v1
 export OPENAI_API_KEY=sk-local
 export OPENAI_MODEL=local-coder
+
+# quick deterministic smoke episode
 python -m rl.python.rollout_llm --seed 42
+
+# portfolio-quality comparison over 10 identical seeds
+npm run eval:local-model -- --seeds 10 --horizon-days 12
 ~~~
 
-The resulting `trajectories/llm-episode.jsonl` is replayed immediately to
-prove that the recorded episode is deterministic.
+The evaluator compares the model with masked-random and economic baselines,
+reports mean reward, final credits, action latency, and steps, then writes
+`artifacts/evals/local-model.json`. Every model episode is stored under
+`trajectories/local-model-eval/` and replayed against the authoritative rules.
+Use the same seeds and horizon for every model you compare.
 
 ## Verification
 
