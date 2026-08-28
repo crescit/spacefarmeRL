@@ -107,6 +107,9 @@ Use the same seeds and horizon for every model you compare.
 
 ## Verification
 
+Compact committed reports and the generated leaderboard live in
+[`reports/evals/`](reports/evals/README.md). Run `npm run compare:models`
+to validate and compare additional model reports.
 ~~~bash
 npm test                 # complete offline + live-network suite
 npm run test:offline     # no listening socket

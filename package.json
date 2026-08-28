@@ -13,7 +13,8 @@
     "benchmark": "python3 -m rl.python.benchmark",
     "train:ppo": "python3 -m rl.python.train_ppo",
     "check:public": "bash scripts/public_check.sh",
-    "eval:local-model": "python3 -m rl.python.eval_local_model"
+    "eval:local-model": "python3 -m rl.python.eval_local_model",
+    "compare:models": "python3 -m rl.python.compare_evals"
   },
   "keywords": [
     "game",

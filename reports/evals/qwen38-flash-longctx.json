@@ -1,0 +1,303 @@
+{
+  "environment": {
+    "action_interface": "masked-macro-v1",
+    "horizon_days": 12,
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "episodes": {
+    "economic": [
+      {
+        "credits": 1730.0,
+        "policy": "economic",
+        "reward": 9.3,
+        "seed": 1,
+        "steps": 116
+      },
+      {
+        "credits": 1780.0,
+        "policy": "economic",
+        "reward": 9.8,
+        "seed": 2,
+        "steps": 100
+      },
+      {
+        "credits": 1795.0,
+        "policy": "economic",
+        "reward": 9.150000000000004,
+        "seed": 3,
+        "steps": 115
+      },
+      {
+        "credits": 1690.0,
+        "policy": "economic",
+        "reward": 7.9,
+        "seed": 4,
+        "steps": 115
+      },
+      {
+        "credits": 1535.0,
+        "policy": "economic",
+        "reward": 6.950000000000003,
+        "seed": 5,
+        "steps": 100
+      },
+      {
+        "credits": 1920.0,
+        "policy": "economic",
+        "reward": 11.400000000000002,
+        "seed": 6,
+        "steps": 100
+      },
+      {
+        "credits": 1595.0,
+        "policy": "economic",
+        "reward": 6.949999999999999,
+        "seed": 7,
+        "steps": 117
+      },
+      {
+        "credits": 1805.0,
+        "policy": "economic",
+        "reward": 9.650000000000002,
+        "seed": 8,
+        "steps": 117
+      },
+      {
+        "credits": 1840.0,
+        "policy": "economic",
+        "reward": 8.800000000000002,
+        "seed": 9,
+        "steps": 117
+      },
+      {
+        "credits": 1845.0,
+        "policy": "economic",
+        "reward": 7.85,
+        "seed": 10,
+        "steps": 118
+      }
+    ],
+    "model": [
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1876.9111979399222,
+        "p95_latency_ms": 3647.737839957699,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 1,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-1.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1794.0795613103546,
+        "p95_latency_ms": 3309.9644100293517,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 2,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-2.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1790.757617650174,
+        "p95_latency_ms": 3331.9360880414024,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 3,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-3.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1790.3082237893682,
+        "p95_latency_ms": 3332.20381103456,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 4,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-4.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1793.6648811317152,
+        "p95_latency_ms": 3343.956601107493,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 5,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-5.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1790.4479212356146,
+        "p95_latency_ms": 3327.8880229918286,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 6,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-6.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1792.2014352559388,
+        "p95_latency_ms": 3341.224013012834,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 7,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-7.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1791.7542655723755,
+        "p95_latency_ms": 3335.1085289614275,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 8,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-8.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1791.2744606836457,
+        "p95_latency_ms": 3357.5478279963136,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 9,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-9.jsonl"
+      },
+      {
+        "credits": 450.0,
+        "mean_latency_ms": 1797.558077397601,
+        "p95_latency_ms": 3295.338848954998,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -2.5000000000000004,
+        "seed": 10,
+        "steps": 54,
+        "trajectory": "trajectories/qwen38-flash-longctx/seed-10.jsonl"
+      }
+    ],
+    "random": [
+      {
+        "credits": 80.0,
+        "policy": "random",
+        "reward": -8.249999999999993,
+        "seed": 1,
+        "steps": 131
+      },
+      {
+        "credits": 140.0,
+        "policy": "random",
+        "reward": -8.499999999999996,
+        "seed": 2,
+        "steps": 159
+      },
+      {
+        "credits": 90.0,
+        "policy": "random",
+        "reward": -8.099999999999994,
+        "seed": 3,
+        "steps": 138
+      },
+      {
+        "credits": 20.0,
+        "policy": "random",
+        "reward": -7.649999999999997,
+        "seed": 4,
+        "steps": 66
+      },
+      {
+        "credits": 135.0,
+        "policy": "random",
+        "reward": -7.099999999999995,
+        "seed": 5,
+        "steps": 125
+      },
+      {
+        "credits": 65.0,
+        "policy": "random",
+        "reward": -8.849999999999994,
+        "seed": 6,
+        "steps": 143
+      },
+      {
+        "credits": 20.0,
+        "policy": "random",
+        "reward": -8.699999999999994,
+        "seed": 7,
+        "steps": 118
+      },
+      {
+        "credits": 80.0,
+        "policy": "random",
+        "reward": -8.399999999999993,
+        "seed": 8,
+        "steps": 163
+      },
+      {
+        "credits": 65.0,
+        "policy": "random",
+        "reward": -6.799999999999999,
+        "seed": 9,
+        "steps": 46
+      },
+      {
+        "credits": 105.0,
+        "policy": "random",
+        "reward": -15.649999999999995,
+        "seed": 10,
+        "steps": 173
+      }
+    ]
+  },
+  "model": {
+    "base_url": "http://127.0.0.1:8000/v1",
+    "name": "qwen38-flash-longctx"
+  },
+  "schema_version": 1,
+  "summary": {
+    "economic": {
+      "episodes": 10.0,
+      "mean_credits": 1753.5,
+      "mean_reward": 8.775000000000002,
+      "mean_steps": 111.5
+    },
+    "model": {
+      "episodes": 10.0,
+      "mean_credits": 450.0,
+      "mean_latency_ms": 1800.895764196671,
+      "mean_reward": -2.5000000000000004,
+      "mean_steps": 54.0,
+      "p95_episode_latency_ms": 3647.737839957699
+    },
+    "random": {
+      "episodes": 10.0,
+      "mean_credits": 80.0,
+      "mean_reward": -8.799999999999995,
+      "mean_steps": 126.2
+    }
+  }
+}
