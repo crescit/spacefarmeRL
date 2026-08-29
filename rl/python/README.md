@@ -58,10 +58,10 @@ PPO uses `sb3-contrib` MaskablePPO and the environment's live action mask.
 ## OpenAI-compatible policy evaluation
 
 ~~~bash
-export OPENAI_BASE_URL=http://127.0.0.1:4000/v1
+export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
 export OPENAI_API_KEY=sk-local
 export OPENAI_MODEL=local-coder
-python -m rl.python.eval_local_model --seeds 10 --horizon-days 12
+python -m rl.python.eval_local_model --seeds 10 --horizon-days 12 --resume
 ~~~
 
 The model receives a compact state summary and only currently valid macro
@@ -69,3 +69,7 @@ actions. The report includes reward, final credits, steps, request latency,
 random/economic baselines, and per-seed replayable trajectories. Keep
 `--seeds`, `--seed-start`, and `--horizon-days` fixed when comparing models.
 Malformed responses deterministically fall back to the first valid action.
+The npm evaluator enables `--resume` by default. Each completed seed is
+checkpointed in the output JSON, and replay-valid partial trajectories continue
+at their next step. With `--resume`, a
+compatible report skips those seeds; an interrupted in-progress seed restarts.

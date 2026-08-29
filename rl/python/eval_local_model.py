@@ -24,10 +24,11 @@ class ModelEpisode:
     reward: float
     steps: int
     credits: float
-    mean_latency_ms: float
-    p95_latency_ms: float
+    mean_latency_ms: float | None
+    p95_latency_ms: float | None
     trajectory: str
     replay_ok: bool
+    capped: bool = False
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -45,14 +46,32 @@ def evaluate_episode(
     horizon_days: int,
     max_steps: int,
     trajectory_dir: Path,
+    *,
+    resume: bool = False,
 ) -> ModelEpisode:
     path = trajectory_dir / f"seed-{seed}.jsonl"
     recorder = TrajectoryRecorder(FarmGymEnv(horizon_days=horizon_days), path)
     total_reward = 0.0
     latencies: list[float] = []
+    capped = False
+    had_prior_steps = False
+    terminated = truncated = False
     try:
-        recorder.reset(seed=seed)
-        for _step in range(max_steps):
+        if resume and path.exists():
+            _obs, _info, total_reward, terminated, truncated = recorder.resume(
+                seed=seed
+            )
+            had_prior_steps = recorder.steps > 0
+            print(f"seed={seed} resume=CONTINUE steps={recorder.steps}")
+        elif path.exists():
+            raise FileExistsError(
+                f"trajectory already exists: {path}; use --resume or a new directory"
+            )
+        else:
+            recorder.reset(seed=seed)
+        for _step in range(recorder.steps, max_steps):
+            if terminated or truncated:
+                break
             started = time.perf_counter()
             action = policy.choose(recorder.env)
             latencies.append((time.perf_counter() - started) * 1000.0)
@@ -66,10 +85,8 @@ def evaluate_episode(
             if terminated or truncated:
                 break
         else:
-            raise RuntimeError(
-                f"seed {seed} exceeded --max-steps={max_steps}; "
-                "raise the limit or inspect the policy"
-            )
+            capped = True
+            print(f"seed={seed} capped=YES max_steps={max_steps}")
         credits = float(recorder.env.raw_obs["credits"])
         steps = recorder.steps
     finally:
@@ -82,10 +99,59 @@ def evaluate_episode(
         reward=total_reward,
         steps=steps,
         credits=credits,
-        mean_latency_ms=float(statistics.fmean(latencies)) if latencies else 0.0,
-        p95_latency_ms=percentile(latencies, 0.95),
+        mean_latency_ms=(
+            None if had_prior_steps else
+            (float(statistics.fmean(latencies)) if latencies else 0.0)
+        ),
+        p95_latency_ms=(None if had_prior_steps else percentile(latencies, 0.95)),
         trajectory=str(path),
         replay_ok=replay["steps"] == steps,
+        capped=capped,
+    )
+
+
+def recover_capped_episode(
+    policy: OpenAIActionPolicy,
+    seed: int,
+    horizon_days: int,
+    max_steps: int,
+    trajectory_dir: Path,
+) -> ModelEpisode | None:
+    """Adopt a replay-valid trajectory left by the old max-step exception."""
+    path = trajectory_dir / f"seed-{seed}.jsonl"
+    if not path.exists():
+        return None
+    records = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    if not records:
+        return None
+    header, transitions = records[0], records[1:]
+    if (
+        header.get("kind") != "space-farmer-trajectory"
+        or int(header.get("seed", -1)) != seed
+        or int(header.get("horizon_days", -1)) != horizon_days
+        or len(transitions) != max_steps
+        or not transitions
+        or bool(transitions[-1].get("terminated"))
+        or bool(transitions[-1].get("truncated"))
+    ):
+        return None
+    replay = replay_trajectory(path)
+    final_observation = transitions[-1]["observation"]
+    return ModelEpisode(
+        policy=policy.model,
+        seed=seed,
+        reward=float(replay["total_reward"]),
+        steps=int(replay["steps"]),
+        credits=float(final_observation["credits"]),
+        mean_latency_ms=None,
+        p95_latency_ms=None,
+        trajectory=str(path),
+        replay_ok=True,
+        capped=True,
     )
 
 
@@ -98,12 +164,75 @@ def aggregate(episodes: list[dict[str, Any]]) -> dict[str, float]:
         "mean_credits": mean("credits"),
         "mean_steps": mean("steps"),
     }
-    if episodes and "mean_latency_ms" in episodes[0]:
-        result["mean_latency_ms"] = mean("mean_latency_ms")
+    latency_rows = [
+        row for row in episodes if row.get("mean_latency_ms") is not None
+    ]
+    if latency_rows:
+        result["mean_latency_ms"] = float(statistics.fmean(
+            float(row["mean_latency_ms"]) for row in latency_rows
+        ))
         result["p95_episode_latency_ms"] = percentile(
-            [float(row["p95_latency_ms"]) for row in episodes], 0.95
+            [float(row["p95_latency_ms"]) for row in latency_rows], 0.95
         )
+        result["latency_episodes"] = float(len(latency_rows))
     return result
+
+
+ACTION_INTERFACE = "masked-macro-v2"
+
+
+def build_result(
+    policy: OpenAIActionPolicy,
+    seeds: list[int],
+    horizon_days: int,
+    policies: dict[str, list[dict[str, Any]]],
+    *,
+    complete: bool,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "complete": complete,
+        "environment": {
+            "horizon_days": horizon_days,
+            "seeds": seeds,
+            "action_interface": ACTION_INTERFACE,
+        },
+        "model": {"name": policy.model, "base_url": policy.base_url},
+        "summary": {
+            name: aggregate(rows) for name, rows in policies.items() if rows
+        },
+        "episodes": policies,
+    }
+
+
+def write_result(path: Path, result: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def load_completed(
+    path: Path,
+    policy: OpenAIActionPolicy,
+    seeds: list[int],
+    horizon_days: int,
+) -> list[ModelEpisode]:
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    environment = saved.get("environment") or {}
+    expected = {
+        "horizon_days": horizon_days,
+        "seeds": seeds,
+        "action_interface": ACTION_INTERFACE,
+    }
+    actual = {key: environment.get(key) for key in expected}
+    if actual != expected or (saved.get("model") or {}).get("name") != policy.model:
+        raise ValueError(
+            "resume report does not match model, seeds, horizon, or action interface"
+        )
+    return [
+        ModelEpisode(**row) for row in (saved.get("episodes") or {}).get("model", [])
+    ]
 
 
 def main() -> None:
@@ -127,25 +256,64 @@ def main() -> None:
     parser.add_argument(
         "--no-baselines", action="store_true", help="skip random/economic comparisons"
     )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="reuse completed seeds from a compatible partial output report",
+    )
     args = parser.parse_args()
     if args.seeds < 1:
         parser.error("--seeds must be positive")
 
     policy = OpenAIActionPolicy(args.base_url, args.model, args.api_key, timeout=args.timeout)
     seeds = list(range(args.seed_start, args.seed_start + args.seeds))
-    print(f"model={policy.model} endpoint={policy.base_url} seeds={seeds}")
+    model_episodes: list[ModelEpisode] = []
+    if args.resume and args.output.exists():
+        try:
+            model_episodes = load_completed(
+                args.output, policy, seeds, args.horizon_days
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+    completed = {episode.seed for episode in model_episodes}
+    print(
+        f"model={policy.model} endpoint={policy.base_url} seeds={seeds} "
+        f"resume={sorted(completed)}"
+    )
 
     try:
-        model_episodes = [
-            evaluate_episode(
-                policy, seed, args.horizon_days, args.max_steps, args.trajectory_dir
+        for seed in seeds:
+            if seed in completed:
+                print(f"seed={seed} resume=SKIP completed")
+                continue
+            episode = None
+            if args.resume:
+                episode = recover_capped_episode(
+                    policy, seed, args.horizon_days, args.max_steps,
+                    args.trajectory_dir,
+                )
+                if episode is not None:
+                    print(
+                        f"seed={seed} resume=RECOVER capped trajectory={episode.trajectory}"
+                    )
+            if episode is None:
+                episode = evaluate_episode(
+                    policy, seed, args.horizon_days, args.max_steps,
+                    args.trajectory_dir, resume=args.resume,
+                )
+            model_episodes.append(episode)
+            model_episodes.sort(key=lambda item: item.seed)
+            partial = {"model": [asdict(item) for item in model_episodes]}
+            write_result(
+                args.output,
+                build_result(
+                    policy, seeds, args.horizon_days, partial, complete=False
+                ),
             )
-            for seed in seeds
-        ]
+            print(f"checkpoint={args.output} completed_seed={seed}")
     except (urllib.error.URLError, TimeoutError) as exc:
         raise SystemExit(
             f"Model endpoint unavailable at {policy.base_url}: {exc}\n"
-            "Start your OpenAI-compatible server and verify its /v1/chat/completions route."
+            "Restart with --resume after the endpoint is healthy."
         ) from exc
 
     policies: dict[str, list[dict[str, Any]]] = {
@@ -157,22 +325,10 @@ def main() -> None:
                 asdict(run_episode(name, seed, args.horizon_days)) for seed in seeds
             ]
 
-    result = {
-        "schema_version": 1,
-        "environment": {
-            "horizon_days": args.horizon_days,
-            "seeds": seeds,
-            "action_interface": "masked-macro-v1",
-        },
-        "model": {
-            "name": policy.model,
-            "base_url": policy.base_url,
-        },
-        "summary": {name: aggregate(rows) for name, rows in policies.items()},
-        "episodes": policies,
-    }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    result = build_result(
+        policy, seeds, args.horizon_days, policies, complete=True
+    )
+    write_result(args.output, result)
 
     print("\npolicy       mean reward    mean credits    mean steps    latency")
     for name, values in result["summary"].items():

@@ -8,7 +8,7 @@ are reproducible from the report's seeds and can grow quickly.
 
 Leaderboard entries must use:
 
-- action interface `masked-macro-v1`;
+- action interface `masked-macro-v2`;
 - seeds 1 through 10;
 - a 12-day horizon;
 - deterministic model sampling;
@@ -27,6 +27,7 @@ npm run eval:local-model -- \
   --horizon-days 12 \
   --max-steps 500 \
   --timeout 120 \
+  --resume \
   --output reports/evals/model-id.json \
   --trajectory-dir trajectories/model-id
 ~~~
@@ -34,6 +35,17 @@ npm run eval:local-model -- \
 Use a filesystem-safe model slug for the filename. The JSON report is the
 committed result; trajectories are retained locally for inspection and are
 validated automatically through exact replay.
+
+Reaching `--max-steps` is recorded as a capped episode rather than a crash.
+The evaluator writes a partial report after every completed seed. If a run is
+interrupted, repeat the identical command with `--resume`; completed seeds are
+skipped and the interrupted seed restarts. With `--resume`, a replay-valid
+trajectory left by the older max-step exception is recovered as capped; because
+that JSONL did not store request timing, its latency is omitted from the latency
+mean and the leaderboard shows the number of latency-bearing episodes. Reports from
+the earlier
+`masked-macro-v1` protocol are retained under `archive/` for provenance but
+must not be mixed into the current leaderboard.
 
 Rebuild the comparison table after adding reports:
 

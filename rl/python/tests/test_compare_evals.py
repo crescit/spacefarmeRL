@@ -43,7 +43,11 @@ class CompareEvalTests(unittest.TestCase):
         self.assertEqual(row["vs_random"], 4.0)
         self.assertEqual(row["oracle_gap"], 3.0)
         self.assertTrue(row["replay_ok"])
-        markdown = render_markdown([row])
+        report = fixture()
+        report["episodes"]["model"][0]["mean_latency_ms"] = None
+        partial_latency = report_row(report, Path("model-a.json"))
+        self.assertEqual(partial_latency["latency_ms"], 101.0)
+        markdown = render_markdown([partial_latency])
         self.assertIn("| model-a |", markdown)
         self.assertIn("2.000 ± 1.000", markdown)
 

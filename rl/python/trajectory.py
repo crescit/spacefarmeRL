@@ -30,6 +30,49 @@ class TrajectoryRecorder:
         self.steps = 0
         return obs, info
 
+    def resume(self, *, seed: int):
+        """Replay and append to an existing deterministic trajectory."""
+        records = [
+            json.loads(line)
+            for line in self.path.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        if not records or records[0].get("kind") != "space-farmer-trajectory":
+            raise ValueError(f"cannot resume invalid trajectory: {self.path}")
+        header, transitions = records[0], records[1:]
+        if (
+            int(header.get("seed", -1)) != int(seed)
+            or int(header.get("horizon_days", -1)) != self.env.horizon_days
+        ):
+            raise ValueError("trajectory seed or horizon does not match resume command")
+        obs, info = self.env.reset(seed=seed)
+        if self.env.raw_obs != header.get("initial_observation"):
+            raise AssertionError("trajectory initial observation does not replay")
+        total_reward = 0.0
+        terminated = truncated = False
+        for transition in transitions:
+            obs, reward, terminated, truncated, info = self.env.step(
+                int(transition["action"])
+            )
+            expected = (
+                transition["native_action"], transition["observation"],
+                float(transition["reward"]), bool(transition["terminated"]),
+                bool(transition["truncated"]),
+            )
+            actual = (
+                info["native_action"], self.env.raw_obs, float(reward),
+                bool(terminated), bool(truncated),
+            )
+            if actual != expected:
+                raise AssertionError(
+                    f"trajectory diverged at step {transition['step']}"
+                )
+            total_reward += reward
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a", encoding="utf-8")
+        self.steps = len(transitions)
+        return obs, info, total_reward, terminated, truncated
+
     def step(self, action: int):
         if self.handle is None:
             raise RuntimeError("reset() must be called before step()")

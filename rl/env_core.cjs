@@ -26,6 +26,7 @@ const ITEMS = [
 const TILE_STATE = { empty: 0, tilled: 1, seeded: 2, growing: 3, mature: 4 };
 const CROP_ID = { '': 0, 'space-wheat': 1, 'star-berry': 2, 'moon-melon': 3, 'plasma-tomato': 4, 'nebula-pepper': 5, 'glow-kelp': 6 };
 const TOOL_ID = { base: 0, iron: 1, silver: 2, gold: 3, stardust: 4 };
+const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 
 const ACTION_TYPES = ['till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
 
@@ -95,10 +96,15 @@ class FarmEnv {
       crops.push(CROP_ID[t.crop] ?? 0);
       watered.push(t.watered ? 1 : 0);
     }
+    const animals = ANIMAL_TYPES.map((species) => p.animals.get(species) || 0);
+    const animalsFedToday = ANIMAL_TYPES.map(
+      (species) => p.animalsFedDay.get(species) === st.day ? 1 : 0);
     const goal = this.task && this.task.goal ? this.task.goal.progress(p, st) : null;
     return {
       credits: p.credits, energy: p.energy, day: st.day, season: st.season,
       mineHp: p.mineHp || 0, mineMax: p.mineMax || 0,
+      animals, animalsFedToday,
+      talkedRheaToday: p.lastTalkDay.get('rhea') === st.day ? 1 : 0,
       isDay: st.isDay ? 1 : 0, festival: st.festival ? 1 : 0, festivalClaimed: st.festivalClaimed ? 1 : 0,
       tool: TOOL_ID[p.tool] ?? 0, married: p.marriedTo ? 1 : 0,
       questsCurrent: p.quests.current, questsCompleted: p.quests.completed.length, arcDone: p.quests.arcDone ? 1 : 0,

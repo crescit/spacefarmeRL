@@ -67,6 +67,14 @@ class OpenAIActionPolicy:
                 "mature": obs["farmState"].count(4),
                 "watered": sum(int(v) for v in obs.get("farmWatered", [])),
             },
+            "livestock": {
+                name: {
+                    "owned": int((obs.get("animals") or [0, 0, 0])[index]),
+                    "fed_today": bool((obs.get("animalsFedToday") or [0, 0, 0])[index]),
+                }
+                for index, name in enumerate(("chicken", "cow", "sheep"))
+            },
+            "talked_to_rhea_today": bool(obs.get("talkedRheaToday", 0)),
         }
 
     def choose(self, env: FarmGymEnv) -> int:

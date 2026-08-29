@@ -10,7 +10,7 @@ from typing import Any
 
 
 def mean_std(rows: list[dict[str, Any]], key: str) -> tuple[float, float]:
-    values = [float(row[key]) for row in rows]
+    values = [float(row[key]) for row in rows if row.get(key) is not None]
     if not values:
         return 0.0, 0.0
     return float(statistics.fmean(values)), float(statistics.pstdev(values))
@@ -41,6 +41,9 @@ def report_row(report: dict[str, Any], source: Path) -> dict[str, Any]:
         "credits_std": credits_std,
         "steps": steps,
         "latency_ms": latency,
+        "latency_episodes": sum(
+            row.get("mean_latency_ms") is not None for row in model_episodes
+        ),
         "vs_random": reward - random_reward if random_episodes else None,
         "oracle_gap": economic_reward - reward if economic_episodes else None,
         "replay_ok": all(bool(row.get("replay_ok")) for row in model_episodes),
@@ -89,10 +92,13 @@ def render_markdown(rows: list[dict[str, Any]]) -> str:
         "|---|---:|---:|---:|---:|---:|---:|:---:|",
     ]
     for row in rows:
+        latency = f"{row['latency_ms']:.1f} ms"
+        if row["latency_episodes"] != row["episodes"]:
+            latency += f" ({row['latency_episodes']}/{row['episodes']} eps)"
         lines.append(
             f"| {row['model']} | {row['reward']:.3f} ± {row['reward_std']:.3f} "
             f"| {row['credits']:.1f} ± {row['credits_std']:.1f} "
-            f"| {row['steps']:.1f} | {row['latency_ms']:.1f} ms "
+            f"| {row['steps']:.1f} | {latency} "
             f"| {metric(row['vs_random'], 3)} | {metric(row['oracle_gap'], 3)} "
             f"| {'✓' if row['replay_ok'] else '✗'} |"
         )

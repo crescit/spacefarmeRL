@@ -23,6 +23,7 @@ ACTION_LABELS = (
     "buy_animal", "upgrade_tool", "gift", "talk", "claim_festival",
     "advance_day",
 )
+ANIMALS = ("chicken", "cow", "sheep")
 FRIENDS = ("luna", "zephyr", "vega", "quasar", "rhea", "astra", "orion", "comet")
 SALEABLE = (
     "space-wheat", "star-berry", "moon-melon", "plasma-tomato",
@@ -135,6 +136,8 @@ def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
     values.extend(float(v) / 4.0 for v in list(obs.get("farmState") or [])[:64])
     values.extend(float(v) / 6.0 for v in list(obs.get("farmCrop") or [])[:64])
     values.extend(float(v) for v in list(obs.get("farmWatered") or [])[:64])
+    values.extend(float(v) / 10.0 for v in list(obs.get("animals") or [])[:3])
+    values.extend(float(v) for v in list(obs.get("animalsFedToday") or [])[:3])
     friendships = obs.get("friendships") or {}
     values.extend(float(friendships.get(name, 0)) / 100.0 for name in FRIENDS)
     return np.clip(np.asarray(values, dtype=np.float32), -1.0, 100.0)
@@ -180,7 +183,13 @@ class MacroActionCodec:
         if action == "fish":
             return {"type": action, "spot": "stardust", "night": not bool(obs.get("isDay", 1))}
         if action == "feed":
-            return {"type": action, "species": "chicken"}
+            counts = list(obs.get("animals") or [0] * len(ANIMALS))
+            fed = list(obs.get("animalsFedToday") or [0] * len(ANIMALS))
+            index = next((
+                i for i, count in enumerate(counts)
+                if int(count) > 0 and not bool(fed[i])
+            ), 0)
+            return {"type": action, "species": ANIMALS[index]}
         if action == "buy_animal":
             return {"type": action, "species": "chicken", "quantity": 1}
         if action == "gift":
@@ -203,7 +212,17 @@ class MacroActionCodec:
         mask[4] = int(any(self._count(obs, name) > 0 for name in SALEABLE))
         mask[5] = int(energy >= 10)
         mask[6] = int(energy >= 5)
+        counts = list(obs.get("animals") or [0] * len(ANIMALS))
+        fed = list(obs.get("animalsFedToday") or [0] * len(ANIMALS))
+        mask[7] = int(any(
+            int(count) > 0 and not bool(fed[i]) for i, count in enumerate(counts)
+        ))
+        mask[8] = int(float(obs.get("credits", 0)) >= 100)
+        tool = int(obs.get("tool", 0))
+        credits = float(obs.get("credits", 0))
+        mask[9] = int((tool == 0 and credits >= 150) or (tool == 1 and credits >= 400))
         mask[10] = int(sum(int(v) for v in (obs.get("inventory") or [])) > 0)
+        mask[11] = int(not bool(obs.get("talkedRheaToday", 0)))
         mask[12] = int(bool(obs.get("festival")) and not bool(obs.get("festivalClaimed")))
         mask[13] = 1
         return mask
@@ -222,7 +241,7 @@ class FarmGymEnv(gym.Env):
         self.bridge._start()
         self.codec = MacroActionCodec(self.bridge.spec["items"])
         self.action_space = spaces.Discrete(len(ACTION_LABELS))
-        size = len(SCALARS) + 1 + len(self.bridge.spec["items"]) + 64 + 64 + 64 + len(FRIENDS)
+        size = len(SCALARS) + 1 + len(self.bridge.spec["items"]) + 64 + 64 + 64 + 3 + 3 + len(FRIENDS)
         self.observation_space = spaces.Box(low=-1.0, high=100.0, shape=(size,), dtype=np.float32)
         self.raw_obs: dict[str, Any] | None = None
 

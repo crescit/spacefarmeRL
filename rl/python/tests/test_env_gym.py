@@ -71,6 +71,30 @@ class GymTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_livestock_and_daily_masks(self):
+        env = FarmGymEnv(horizon_days=4)
+        try:
+            env.reset(seed=42)
+            feed = ACTION_LABELS.index("feed")
+            buy = ACTION_LABELS.index("buy_animal")
+            talk = ACTION_LABELS.index("talk")
+            self.assertEqual(env.action_masks()[feed], 0)
+            self.assertEqual(env.action_masks()[buy], 1)
+            env.step(buy)
+            self.assertEqual(env.raw_obs["animals"][0], 1)
+            self.assertEqual(env.action_masks()[feed], 1)
+            env.step(feed)
+            self.assertEqual(env.raw_obs["animalsFedToday"][0], 1)
+            self.assertEqual(env.action_masks()[feed], 0)
+            self.assertEqual(env.action_masks()[talk], 1)
+            env.step(talk)
+            self.assertEqual(env.action_masks()[talk], 0)
+            env.step(ACTION_LABELS.index("advance_day"))
+            self.assertEqual(env.action_masks()[feed], 1)
+            self.assertEqual(env.action_masks()[talk], 1)
+        finally:
+            env.close()
+
     def test_same_seed_same_macro_trajectory(self):
         actions = [6, 6, 5, 13, 6, 4]
         outputs = []
