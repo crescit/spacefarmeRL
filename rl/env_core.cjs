@@ -54,6 +54,11 @@ const FESTIVAL_TEXT = {
   'galactic-harvest': 'The Exchange boards run gold and the air smells of boiling wine — it is the Galactic Harvest Festival, and the fields gave their last, full answer.',
   hearthnight: 'Every dome is lit at once, every table set, every door open — it is Hearthnight, the colony\u2019s shared holiday. And tonight they eat Earth rations, the meal that tastes like grief and salt.',
 };
+// Fallback for any festival the calendar has no named flavor for yet — an
+// injected/test festival id must never borrow a *named* festival's prose.
+const GENERIC_FESTIVAL_TEXT = 'The lamps come up across the plaza and the colony turns out — some festival is on, and B-612 gathers to keep it together.';
+const festivalFlair = (fest, fallback = GENERIC_FESTIVAL_TEXT) =>
+  (fest && FESTIVAL_TEXT[fest.id]) || fallback;
 const PRESSURES = [
   'The debt is older this morning, and the ledger does not sleep.',
   'Somewhere in the generator housing, a knock repeats like a word you almost know.',
@@ -555,7 +560,7 @@ class FarmEnv {
     lines.push(`BRIEFING — Day ${day} · ${season.charAt(0).toUpperCase() + season.slice(1)} on B-612`);
     lines.push(SEASON_TEXT[season]);
     const fest = cal.festivalForDay(day);
-    if (fest) lines.push(FESTIVAL_TEXT[fest.id] || FESTIVAL_TEXT.hearthnight);
+    if (fest) lines.push(festivalFlair(fest));
     if (qid && QUESTS[qid]) {
       const q = QUESTS[qid];
       lines.push(`Quest :: ${q.title} — ${q.brief}`);
@@ -614,7 +619,7 @@ class FarmEnv {
       case 'colony':
         return `The colony: ${this.colonyLog.slice(-14).join(' ') || 'days have passed in quiet.'} Friendships: ${Object.entries(Object.fromEntries(p.friendships || [])).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(', ') || 'none yet'}.`;
       case 'weather':
-        return `${SEASON_TEXT[season]}${fest ? ' ' + FESTIVAL_TEXT[fest.id] : ''}`;
+        return `${SEASON_TEXT[season]}${fest ? ' ' + festivalFlair(fest) : ''}`;
       case 'quest': {
         const qid = p.quests ? p.quests.current : '';
         if (qid && QUESTS[qid]) {

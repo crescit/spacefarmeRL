@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 import gymnasium as gym
 import numpy as np
@@ -324,6 +324,13 @@ class FarmGymEnv(gym.Env):
         if self.raw_obs is None:
             return None
         return json.dumps({key: self.raw_obs[key] for key in ("day", "credits", "energy")}, sort_keys=True)
+
+    def __enter__(self) -> "FarmGymEnv":
+        return self
+
+    def __exit__(self, *args: object) -> Literal[False]:
+        self.close()
+        return False
 
     def close(self) -> None:
         self.bridge.close()
