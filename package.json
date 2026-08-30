@@ -16,6 +16,8 @@
     "eval:local-model": "python3 -m rl.python.eval_local_model --resume",
     "compare:models": "python3 -m rl.python.compare_evals",
     "report:models": "python3 -m rl.python.render_eval_report",
+    "rollout:tools": "python3 -m rl.python.rollout_tools",
+    "transcript": "python3 -m rl.python.transcript",
     "eval:alignment": "python3 -m rl.python.eval_alignment"
   },
   "keywords": [

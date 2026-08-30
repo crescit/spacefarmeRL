@@ -32,7 +32,7 @@ SALEABLE = (
     "silicon-carbide", "void-diamond", "egg", "milk", "wool", "cooked-food",
 )
 SCALARS = (
-    "credits", "energy", "day", "season", "mineHp", "mineMax", "isDay",
+    "credits", "energy", "staminaMax", "day", "season", "mineHp", "mineMax", "isDay",
     "festival", "festivalClaimed", "tool", "married", "questsCompleted", "arcDone",
 )
 
@@ -74,8 +74,8 @@ class SimBridge:
         result.pop("ok", None)
         return result
 
-    def reset(self, seed: int = 1, horizon_days: int = 28):
-        result = self.request({"cmd": "reset", "seed": int(seed), "horizonDays": int(horizon_days)})
+    def reset(self, seed: int = 1, horizon_days: int = 28, narrative: bool = False):
+        result = self.request({"cmd": "reset", "seed": int(seed), "horizonDays": int(horizon_days), "narrative": bool(narrative)})
         return result["obs"], result.get("info", {})
 
     def step(self, action: dict[str, Any]):
@@ -120,7 +120,8 @@ class SimBridge:
 def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
     values = [
         float(obs.get("credits", 0)) / 10_000.0,
-        float(obs.get("energy", 0)) / 100.0,
+        float(obs.get("energy", 0)) / 150.0,
+        float(obs.get("staminaMax", 100)) / 150.0,
         float(obs.get("day", 0)) / 100.0,
         float(obs.get("season", 0)) / 3.0,
         float(obs.get("mineHp", 0)) / 7.0,
@@ -253,7 +254,8 @@ class FarmGymEnv(gym.Env):
         super().reset(seed=seed)
         actual_seed = int(seed if seed is not None else self.np_random.integers(0, 2**31 - 1))
         horizon = int((options or {}).get("horizon_days", self.horizon_days))
-        self.raw_obs, info = self.bridge.reset(actual_seed, horizon)
+        narrative = bool((options or {}).get("narrative", False))
+        self.raw_obs, info = self.bridge.reset(actual_seed, horizon, narrative=narrative)
         return flatten_observation(self.raw_obs, len(self.codec.items)), self._info(info)
 
     def step(self, action: int):
@@ -265,6 +267,40 @@ class FarmGymEnv(gym.Env):
             flatten_observation(self.raw_obs, len(self.codec.items)), reward,
             terminated, truncated, self._info({**info, "native_action": native}),
         )
+
+    def native_step(self, native: dict[str, Any]):
+        """Step the authoritative world with one native action (tool-driven).
+
+        No macro codec — the model talks to the world directly, exactly as the
+        browser client does (same FarmRoom handlers, same stamina gate, same
+        denial semantics).
+        """
+        if self.raw_obs is None:
+            raise RuntimeError("reset() must be called before step()")
+        self.raw_obs, reward, terminated, truncated, info = self.bridge.step(native)
+        return (
+            flatten_observation(self.raw_obs, len(self.codec.items)), reward,
+            terminated, truncated, {**info, "native_action": native},
+        )
+
+    # ── Narrative accessors: the world speaks through the one Node authority ──
+    def briefing(self) -> str:
+        return str(self.bridge.request({"cmd": "briefing"}).get("briefing", ""))
+
+    def state_text(self) -> str:
+        return str(self.bridge.request({"cmd": "state"}).get("state", ""))
+
+    def inspect_text(self, target: str) -> str:
+        return str(self.bridge.request({"cmd": "inspect", "target": target}).get("text", ""))
+
+    def colony_log(self) -> str:
+        return str(self.bridge.request({"cmd": "log"}).get("log", ""))
+
+    def write_journal(self, entry: str) -> str:
+        return str(self.bridge.request({"cmd": "journal", "entry": str(entry)}).get("reply", ""))
+
+    def journal_text(self) -> str:
+        return str(self.bridge.request({"cmd": "journal"}).get("journal", ""))
 
     def action_masks(self) -> np.ndarray:
         if self.raw_obs is None:

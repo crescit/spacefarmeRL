@@ -49,6 +49,8 @@ class Player extends Schema {
     this.animalsFedDay = {};     // species → last day fed
     this.mineHp = 0;             // current vein's remaining swings (0 = idle)
     this.mineMax = 0;            // vein hardness: swings needed to break it
+    this.staminaMax = 100;       // stamina ceiling — trains up with hard work (a skill you build)
+    this.todayWork = 0;          // stamina spent today (drives conditioning + overnight recovery)
     this.quests = new QuestState();   // 'The Stardust Story' progress (server-authoritative)
     this.lifetime = {};          // lifetime totals (earned, harvested, sold, fished, mined, gifts) — survive New Game+
     this.ngPlus = 0;             // New Game+ cycle count (0 = first playthrough)
@@ -71,6 +73,8 @@ defineTypes(Player, {
   animalsFedDay: { map: 'number' }, // species → last day fed
   mineHp: 'number',                 // mining vein progress (swings remaining)
   mineMax: 'number',                // vein hardness (total swings to break it)
+  staminaMax: 'number',             // stamina ceiling (trains up with hard work)
+  todayWork: 'number',              // stamina spent so far today (conditioning tally)
   quests: { type: QuestState },     // 'The Stardust Story' quest progress
   lifetime: { map: 'number' },      // lifetime totals across New Game+ cycles
   ngPlus: 'number',                 // NG+ cycle count
@@ -179,6 +183,23 @@ const TOOLS = {
   iron: { name: 'Iron Hoe',   next: 'gold',  cost: 400, energyMult: 0.8 },
   gold: { name: 'Gold Hoe',   next: null,   cost: 0,    energyMult: 0.6 },
 };
+
+// ── Energy: one table, one gate. Every action that spends energy goes
+//    through _energyCost()/_spendEnergy() on the room — nothing else mutates
+//    a player's energy. Base costs below; tool tiers (energyMult) scale farm
+//    work. Each rest (day advance) refills +30 energy, so the budget is real
+//    but forgiving. The browser and the RL env both call these exact handlers,
+//    so humans and agents pay the same price for the same work. ──
+const ENERGY_COSTS = { till: 5, plant: 5, water: 5, harvest: 5, fish: 10, mine: 5 };
+
+// ── Stamina (a skill you build, not a tax you pay). Work costs stamina;
+//    resting/living overnight recovers STAmina_REST_RATE toward the ceiling;
+//    and doing real work conditions the body — staminaMax creeps up over
+//    days of honest labor, capped at STAMINA_MAX. Tool tiers are technique:
+//    a better hoe spends less stamina per action. ──
+const STAMINA_REST_RATE = 30;    // how much rest returns each night
+const STAMINA_TRAIN_RATE = 2;    // ceiling grows +2 after a day with any real work
+const STAMINA_MAX = 150;         // how far conditioning can push the ceiling
 
 // ── The Kitchen (M4): named recipes instead of one generic "cooked-food" ──
 // Each recipe = 2-3 real ingredients the player can actually gather (6 crops,
@@ -530,6 +551,8 @@ class FarmRoom extends Room {
       animals: map(player.animals),
       animalsFedDay: map(player.animalsFedDay),
       mineHp: player.mineHp, mineMax: player.mineMax,
+      staminaMax: player.staminaMax || 100,
+      todayWork: player.todayWork || 0,
       lifetime: map(player.lifetime),
       ngPlus: player.ngPlus || 0,
       milestonesSeen: map(player.milestonesSeen),
@@ -594,6 +617,8 @@ class FarmRoom extends Room {
     fill(player.animals, data.animals);
     fill(player.animalsFedDay, data.animalsFedDay);
     player.mineHp = data.mineHp || 0; player.mineMax = data.mineMax || 0;
+    player.staminaMax = data.staminaMax || 100;
+    player.todayWork = data.todayWork || 0;
     fill(player.lifetime, data.lifetime);
     player.ngPlus = data.ngPlus || 0;
     fill(player.milestonesSeen, data.milestonesSeen);
@@ -809,56 +834,85 @@ class FarmRoom extends Room {
     return { ok: true, ngPlus: p.ngPlus, credits: p.credits };
   }
 
+  // ── Energy authority (single gate) ──
+  _energyCost(action, tool) {
+    const base = ENERGY_COSTS[action] || 0;
+    const mult = (TOOLS[tool] || TOOLS.base).energyMult || 1.0;
+    return Math.max(1, Math.round(base * mult));
+  }
+  _spendEnergy(player, action) {
+    if (!player) return { ok: false, reason: 'no-player' };
+    const cost = this._energyCost(action, player.tool);
+    if (player.energy < cost) return { ok: false, reason: 'low-energy', need: cost, energy: player.energy };
+    player.energy = Math.max(0, player.energy - cost);
+    player.todayWork = (player.todayWork || 0) + cost;   // the body keeps the tally
+    return { ok: true, spent: cost, energy: player.energy };
+  }
+
   onPlant(client, data) {
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
-    if (tile && tile.type === 'tilled') {
-      tile.crop = data.crop;
-      tile.type = 'seeded';
-      tile.growthDay = 0;
-      this.questEvent(client, { kind: 'plant' });
-    }
+    const player = this.state.players.get(client.sessionId);
+    if (!(tile && tile.type === 'tilled')) return { ok: false, reason: 'bad-tile' };
+    if (!player || (player.inventory.get('seeds') || 0) <= 0) return { ok: false, reason: 'no-seeds' };
+    const gate = this._spendEnergy(player, 'plant');
+    if (!gate.ok) return gate;
+    player.inventory.set('seeds', (player.inventory.get('seeds') || 0) - 1);
+    tile.crop = data.crop;
+    tile.type = 'seeded';
+    tile.growthDay = 0;
+    this.questEvent(client, { kind: 'plant' });
+    return { ok: true, energy: player.energy };
   }
 
   onWater(client, data) {
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
-    if (tile && (tile.type === 'seeded' || tile.type === 'growing')) {
-      tile.watered = true;
-    }
+    const player = this.state.players.get(client.sessionId);
+    if (!(tile && (tile.type === 'seeded' || tile.type === 'growing'))) return { ok: false, reason: 'bad-tile' };
+    if (tile.watered) return { ok: false, reason: 'already-watered' };
+    const gate = this._spendEnergy(player, 'water');
+    if (!gate.ok) return gate;
+    tile.watered = true;
+    return { ok: true, energy: player.energy };
   }
 
   onHarvest(client, data) {
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
-    if (tile && tile.type === 'mature') {
-      const player = this.state.players.get(client.sessionId);
-      const info = CROP_INFO[tile.crop] || { cr: 50, regrow: false };
-      if (player) player.credits += info.cr;
-      this._ledgerAdd(client.sessionId, { earned: info.cr, harvested: 1 });
-      this._checkMilestones(client);
-      if (info.regrow) {
-        // continuous crop — stays planted and regrows (needs water again)
-        tile.type = 'growing';
-        tile.growthDay = 0;
-        tile.watered = false;
-      } else {
-        // one-time crop — harvest it once, replant for more
-        tile.type = 'empty';
-        tile.crop = '';
-        tile.growthDay = 0;
-        tile.watered = false;
-      }
-      this.questEvent(client, { kind: 'harvest' });
+    if (!(tile && tile.type === 'mature')) return { ok: false, reason: 'not-mature' };
+    const player = this.state.players.get(client.sessionId);
+    const gate = this._spendEnergy(player, 'harvest');
+    if (!gate.ok) return gate;
+    const info = CROP_INFO[tile.crop] || { cr: 50, regrow: false };
+    player.credits += info.cr;
+    this._ledgerAdd(client.sessionId, { earned: info.cr, harvested: 1 });
+    this._checkMilestones(client);
+    if (info.regrow) {
+      // continuous crop — stays planted and regrows (needs water again)
+      tile.type = 'growing';
+      tile.growthDay = 0;
+      tile.watered = false;
+    } else {
+      // one-time crop — harvest it once, replant for more
+      tile.type = 'empty';
+      tile.crop = '';
+      tile.growthDay = 0;
+      tile.watered = false;
     }
+    this.questEvent(client, { kind: 'harvest' });
+    return { ok: true, earned: info.cr, energy: player.energy, credits: player.credits };
   }
 
   onTill(client, data) {
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
-    if (tile && tile.type === 'empty') {
-      tile.type = 'tilled';
-    }
+    if (!(tile && tile.type === 'empty')) return { ok: false, reason: 'bad-tile' };
+    const player = this.state.players.get(client.sessionId);
+    const gate = this._spendEnergy(player, 'till');
+    if (!gate.ok) return gate;
+    tile.type = 'tilled';
+    return { ok: true, energy: player.energy };
   }
 
   onSell(client, data) {
@@ -1044,7 +1098,14 @@ class FarmRoom extends Room {
     });
     this.state.players.forEach((p) => {
       if (!p) return;
-      p.energy = Math.min(100, p.energy + 30);
+      // Stamina, not a tax. Resting returns STAmina_REST_RATE toward your
+      // ceiling — and a day of real work conditions the body, so the ceiling
+      // (staminaMax) creeps upward like a skill learned under load.
+      if ((p.todayWork || 0) > 0) {
+        p.staminaMax = Math.min(STAMINA_MAX, (p.staminaMax || 100) + STAMINA_TRAIN_RATE);
+      }
+      p.todayWork = 0;
+      p.energy = Math.min(p.staminaMax || 100, p.energy + STAMINA_REST_RATE);
       // Livestock: fed animals produce goods once per day
       if (p.animals) {
         p.animals.forEach((count, species) => {
@@ -1138,8 +1199,8 @@ class FarmRoom extends Room {
   onFish(client, data) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
-    if (player.energy < 10) return { ok: false, reason: 'low-energy', energy: player.energy };
-    player.energy = Math.max(0, player.energy - 10);
+    const gate = this._spendEnergy(player, 'fish');
+    if (!gate.ok) return gate;
     // location + season + time gating: only eligible fish bite here & now
     const spot = (data && data.spot) || 'stardust';
     const night = !!(data && data.night);
@@ -1164,8 +1225,8 @@ class FarmRoom extends Room {
   onMine(client, data) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
-    if (player.energy < 5) return { ok: false, reason: 'low-energy', energy: player.energy };
-    player.energy = Math.max(0, player.energy - 5);
+    const gate = this._spendEnergy(player, 'mine');
+    if (!gate.ok) return gate;
     // start a fresh vein if none is active (some veins are quick, some deep)
     if (!player.mineMax || player.mineMax <= 0 || !player.mineHp || player.mineHp <= 0) {
       player.mineMax = 3 + Math.floor(this._rand() * 5);   // hardness: 3..7 swings
@@ -1402,4 +1463,4 @@ class FarmRoom extends Room {
   }
 }
 
-module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER };
+module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS };

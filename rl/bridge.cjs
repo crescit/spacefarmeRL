@@ -3,7 +3,7 @@
 
 console.log = (...args) => console.error(...args);
 const readline = require('node:readline');
-const { FarmEnv, ITEMS, ACTION_TYPES } = require('./env_core.cjs');
+const { FarmEnv, ITEMS, ACTION_TYPES, TOOLS, SEASONS, DAYS_PER_SEASON, NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS } = require('./env_core.cjs');
 
 let env = null;
 const reply = (payload) => process.stdout.write(JSON.stringify({ ok: true, ...payload }) + '\n');
@@ -14,13 +14,39 @@ const fail = (error) => process.stdout.write(JSON.stringify({
 async function handle(command) {
   switch (command.cmd) {
     case 'spec':
-      return reply({ protocolVersion: 1, items: ITEMS, actionTypes: ACTION_TYPES, observationVersion: 1 });
+      return reply({
+        protocolVersion: 2,
+        items: ITEMS, actionTypes: ACTION_TYPES, observationVersion: 1,
+        tools: TOOLS,
+        vocabulary: {
+          seasons: SEASONS, seasonDays: DAYS_PER_SEASON,
+          npcs: NPC_IDS, crops: CROPS, species: SPECIES,
+          saleable: SALEABLE, fishSpots: FISH_SPOTS,
+        },
+        narrative: true,
+      });
     case 'reset': {
       if (env) env.close();
-      env = new FarmEnv({ horizonDays: command.horizonDays || 28 });
+      env = new FarmEnv({ horizonDays: command.horizonDays || 28, narrative: !!command.narrative });
       const obs = env.reset({ seed: command.seed ?? 1 });
-      return reply({ obs, info: { seed: command.seed ?? 1 } });
+      return reply({ obs, info: { seed: command.seed ?? 1, narrative: env.narrative } });
     }
+    case 'briefing':
+      if (!env) throw new Error('reset must be called before briefing');
+      return reply({ briefing: env.briefing(), day: env.room.state.day });
+    case 'state':
+      if (!env) throw new Error('reset must be called before state');
+      return reply({ state: env.stateText() });
+    case 'inspect':
+      if (!env) throw new Error('reset must be called before inspect');
+      return reply({ text: env.inspectText(command.target) });
+    case 'log':
+      if (!env) throw new Error('reset must be called before log');
+      return reply({ log: env.colonyLogText() });
+    case 'journal':
+      if (!env) throw new Error('reset must be called before journal');
+      if (command.entry != null) return reply({ reply: env.writeJournal(command.entry) });
+      return reply({ journal: env.journalText() });
     case 'step':
       if (!env) throw new Error('reset must be called before step');
       return reply(env.step(command.action));
