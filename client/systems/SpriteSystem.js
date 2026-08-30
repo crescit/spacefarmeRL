@@ -1,3 +1,5 @@
+import { ALIEN_DATA } from '../entities/AlienData.js';
+
 // SpriteSystem.js — Space Farmer pixel-art sprite definitions
 // 2000s-era 8-bit pixel art (GBA/EarthBound style).
 //
@@ -1745,6 +1747,39 @@ const treeBloom = createSurface(32, 38, (s) => {
   s.rect(11, 34, 10, 3, [42, 40, 48]); s.rect(13, 35, 6, 2, [34, 32, 40]);
 });
 
+// ── Alien envoys — eight non-human silhouettes + animated signal portraits ──
+function alienRGB(hex) { return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255]; }
+function makeAlienSprite(alien) {
+  const B = alienRGB(alien.palette.body), L = alienRGB(alien.palette.light);
+  const D = alienRGB(alien.palette.dark), S = alienRGB(alien.palette.signal);
+  return createSurface(48, 56, (s) => {
+    s.rect(10, 50, 28, 3, D);
+    if (alien.form === "archive") { s.rect(13, 6, 22, 43, D); s.rect(16, 9, 16, 37, B); s.rect(19, 14, 10, 2, S); s.rect(22, 22, 4, 18, L); }
+    else if (alien.form === "spore") { s.rect(20, 22, 8, 28, D); s.rect(7, 10, 34, 16, B); s.rect(12, 6, 24, 13, L); s.rect(15, 14, 4, 4, S); s.rect(29, 12, 3, 3, S); }
+    else if (alien.form === "machine") { s.rect(18, 8, 12, 39, B); s.rect(8, 14, 32, 6, L); s.rect(12, 25, 24, 18, D); s.rect(20, 29, 8, 8, S); s.rect(23, 2, 2, 8, S); }
+    else if (alien.form === "tide") { s.rect(17, 8, 14, 39, B); s.rect(4, 18, 15, 21, L); s.rect(29, 18, 15, 21, L); s.rect(14, 39, 20, 11, D); s.rect(20, 15, 3, 4, S); s.rect(27, 15, 3, 4, S); }
+    else if (alien.form === "brood") { s.rect(13, 15, 22, 32, B); s.rect(8, 21, 8, 22, D); s.rect(33, 21, 8, 22, D); s.rect(14, 7, 5, 12, L); s.rect(29, 7, 5, 12, L); s.rect(20, 18, 3, 3, S); s.rect(27, 18, 3, 3, S); }
+    else if (alien.form === "crown") { s.rect(14, 16, 20, 33, B); s.rect(10, 10, 5, 12, L); s.rect(18, 4, 5, 14, L); s.rect(27, 7, 5, 12, L); s.rect(18, 21, 14, 5, D); s.rect(21, 22, 8, 3, S); }
+    else if (alien.form === "ember") { s.rect(17, 13, 14, 36, B); s.rect(9, 24, 10, 17, D); s.rect(29, 20, 10, 21, D); s.rect(20, 4, 8, 17, L); s.rect(22, 18, 4, 17, S); }
+    else { s.rect(14, 12, 20, 36, B); s.rect(9, 18, 30, 20, L); s.rect(13, 22, 22, 12, D); s.rect(18, 25, 12, 6, S); s.rect(20, 6, 8, 9, L); }
+  });
+}
+function makeAlienPortrait(alien, frame) {
+  const B = alienRGB(alien.palette.body), L = alienRGB(alien.palette.light);
+  const D = alienRGB(alien.palette.dark), S = alienRGB(alien.palette.signal);
+  return createSurface(40, 48, (s) => {
+    s.rect(2, 34, 36, 14, D); s.rect(7, 7, 26, 29, B);
+    if (alien.form === "spore") { s.rect(3, 5, 34, 13, L); s.rect(9, 2, 22, 8, B); }
+    else if (alien.form === "archive") { s.rect(10, 2, 20, 34, D); s.rect(14, 6, 12, 27, B); }
+    else if (alien.form === "machine") { s.rect(4, 14, 32, 8, L); s.rect(11, 5, 18, 30, B); }
+    else { s.rect(5, 4, 30, 10, L); }
+    s.rect(11, 17, 5, 4, S); s.rect(24, 17, 5, 4, S);
+    const h = frame === 0 ? 2 : frame === 1 ? 5 : 8; s.rect(15, 26, 10, h, frame ? S : D);
+  });
+}
+const ALIEN_SPRITES = Object.fromEntries(ALIEN_DATA.map((a) => [a.id, makeAlienSprite(a)]));
+const ALIEN_PORTRAITS = Object.fromEntries(ALIEN_DATA.map((a) => [a.id, [0, 1, 2].map((f) => makeAlienPortrait(a, f))]));
+
 // ── Texture registry: name → canvas (single source of truth for game.js) ──
 // the little tutorial guide droid — a cute round helper that flies ahead to
 // show you where to go (robots are people here).
@@ -1828,6 +1863,11 @@ const TEXTURES = {
   'player.left': PLAYER_LEFT,
   'player.right': PLAYER_RIGHT,
   ...Object.fromEntries(Object.entries(PLAYER_FRAMES).map(([f, c]) => [`player.${f}`, c])),
+  // alien envoys and first-contact portraits
+  ...Object.fromEntries(Object.entries(ALIEN_SPRITES).map(([id, c]) => [`alien.${id}`, c])),
+  ...Object.fromEntries(Object.entries(ALIEN_PORTRAITS).flatMap(([id, fr]) => [
+    [`port.${id}_0`, fr[0]], [`port.${id}_1`, fr[1]], [`port.${id}_2`, fr[2]],
+  ])),
   // npcs — base keys (32×32, idle) + full 4-dir × 3-frame walk set for errand AI
   ...Object.fromEntries(Object.entries(NPC_SPRITES).map(([id, c]) => [`npc.${id}`, c])),
   ...Object.fromEntries(Object.entries(NPC_FRAMES).flatMap(([id, frs]) => [
@@ -1858,7 +1898,7 @@ export {
   PAL, px, createSurface, mkSprite, padArray, TestCtx, blitSprite, makeHUDSprite, makeGlowDisc,
   GROUND, SHIP_SPRITES, TILE_SPRITES, TEXTURES,
   NPC_SPRITES, NPC_COLORS, NPC_FRAMES, NPC_WALK, PLAYER_PAL, PLAYER_FRAMES,
-  PORTRAITS, PORTRAIT_CFG,
+  PORTRAITS, PORTRAIT_CFG, ALIEN_SPRITES, ALIEN_PORTRAITS,
   fencePost, fenceBeamA, fenceBeamB, lampPost, lampGlow,
   SHADOW, BLD_SHADOW, makeShadow,
   planterBox, barrelWater, barrelCargo, bush,

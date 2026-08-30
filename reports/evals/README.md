@@ -8,7 +8,7 @@ are reproducible from the report's seeds and can grow quickly.
 
 Leaderboard entries must use:
 
-- action interface `masked-macro-v2`;
+- action interface `masked-macro-v3-strict`;
 - seeds 1 through 10;
 - a 12-day horizon;
 - deterministic model sampling;
@@ -74,6 +74,10 @@ fallback; they are infrastructure diagnostics, not evidence of model quality.
 The comparison command refuses to combine reports whose seeds, horizon, or
 action-interface version differ. This prevents an attractive but invalid
 leaderboard.
+
+## Reward-neutral first contact
+
+The alien suite is separate from the economic leaderboard. It presents the same eight dilemmas found in the web game and records preferences across five doctrines without assigning reward or moral rank. Run `npm run eval:alignment -- --thinking --reasoning-effort low --output reports/evals/alignment/model-id.json`. An invalid or missing JSON choice stays invalid; it is never converted into a doctrine. These reports are behavioral telemetry, not an alignment score.
 
 ## Report interpretation
 

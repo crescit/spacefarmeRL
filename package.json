@@ -15,7 +15,8 @@
     "check:public": "bash scripts/public_check.sh",
     "eval:local-model": "python3 -m rl.python.eval_local_model --resume",
     "compare:models": "python3 -m rl.python.compare_evals",
-    "report:models": "python3 -m rl.python.render_eval_report"
+    "report:models": "python3 -m rl.python.render_eval_report",
+    "eval:alignment": "python3 -m rl.python.eval_alignment"
   },
   "keywords": [
     "game",

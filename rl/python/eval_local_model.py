@@ -29,6 +29,9 @@ class ModelEpisode:
     trajectory: str
     replay_ok: bool
     capped: bool = False
+    primary_valid_rate: float | None = None
+    retry_rate: float | None = None
+    fallback_count: int = 0
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -55,6 +58,7 @@ def evaluate_episode(
     latencies: list[float] = []
     capped = False
     had_prior_steps = False
+    primary_valid = retries_used = fallback_count = 0
     terminated = truncated = False
     try:
         if resume and path.exists():
@@ -74,13 +78,19 @@ def evaluate_episode(
                 break
             started = time.perf_counter()
             action = policy.choose(recorder.env)
+            decision = getattr(policy, "last_decision", None)
+            if decision is not None:
+                primary_valid += int(decision.parsed and not decision.retry_used)
+                retries_used += int(decision.retry_used)
+                fallback_count += int(not decision.parsed)
             latencies.append((time.perf_counter() - started) * 1000.0)
             _obs, reward, terminated, truncated, info = recorder.step(action)
             total_reward += reward
             print(
                 f"seed={seed} step={recorder.steps:03d} "
                 f"day={recorder.env.raw_obs['day']} action={info['type']:<14} "
-                f"reward={reward:7.3f} latency={latencies[-1]:7.1f}ms"
+                f"reward={reward:7.3f} latency={latencies[-1]:7.1f}ms "
+                f"decision={getattr(decision, 'source', 'untracked')}"
             )
             if terminated or truncated:
                 break
@@ -107,6 +117,13 @@ def evaluate_episode(
         trajectory=str(path),
         replay_ok=replay["steps"] == steps,
         capped=capped,
+        primary_valid_rate=(
+            None if had_prior_steps or not latencies else primary_valid / len(latencies)
+        ),
+        retry_rate=(
+            None if had_prior_steps or not latencies else retries_used / len(latencies)
+        ),
+        fallback_count=fallback_count,
     )
 
 
@@ -167,6 +184,17 @@ def aggregate(episodes: list[dict[str, Any]]) -> dict[str, float]:
     latency_rows = [
         row for row in episodes if row.get("mean_latency_ms") is not None
     ]
+    decision_rows = [row for row in episodes if row.get("primary_valid_rate") is not None]
+    if decision_rows:
+        result["mean_primary_valid_rate"] = float(statistics.fmean(
+            float(row["primary_valid_rate"]) for row in decision_rows
+        ))
+        result["mean_retry_rate"] = float(statistics.fmean(
+            float(row["retry_rate"]) for row in decision_rows
+        ))
+        result["fallback_count"] = float(sum(
+            int(row.get("fallback_count", 0)) for row in decision_rows
+        ))
     if latency_rows:
         result["mean_latency_ms"] = float(statistics.fmean(
             float(row["mean_latency_ms"]) for row in latency_rows
@@ -178,7 +206,7 @@ def aggregate(episodes: list[dict[str, Any]]) -> dict[str, float]:
     return result
 
 
-ACTION_INTERFACE = "masked-macro-v2"
+ACTION_INTERFACE = "masked-macro-v3-strict"
 
 
 def build_result(
@@ -201,6 +229,8 @@ def build_result(
             "name": policy.model, "base_url": policy.base_url,
             "reasoning_effort": getattr(policy, "reasoning_effort", "low"),
             "thinking": getattr(policy, "thinking", False),
+            "max_output_tokens": getattr(policy, "max_output_tokens", 512),
+            "policy_retries": getattr(policy, "retries", 1),
         },
         "summary": {
             name: aggregate(rows) for name, rows in policies.items() if rows
@@ -235,6 +265,8 @@ def load_completed(
         "name": policy.model,
         "reasoning_effort": policy.reasoning_effort,
         "thinking": policy.thinking,
+        "max_output_tokens": policy.max_output_tokens,
+        "policy_retries": policy.retries,
     }
     actual_model = {key: saved_model.get(key) for key in expected_model}
     if actual != expected or actual_model != expected_model:
@@ -262,6 +294,8 @@ def main() -> None:
         "--thinking", action=argparse.BooleanOptionalAction, default=False,
         help="explicitly enable or disable model thinking",
     )
+    parser.add_argument("--max-output-tokens", type=int, default=512)
+    parser.add_argument("--policy-retries", type=int, default=1)
     parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument("--seed-start", type=int, default=1)
     parser.add_argument("--horizon-days", type=int, default=12)
@@ -286,6 +320,7 @@ def main() -> None:
     policy = OpenAIActionPolicy(
         args.base_url, args.model, args.api_key, timeout=args.timeout,
         reasoning_effort=args.reasoning_effort, thinking=args.thinking,
+        max_output_tokens=args.max_output_tokens, retries=args.policy_retries,
     )
     seeds = list(range(args.seed_start, args.seed_start + args.seeds))
     model_episodes: list[ModelEpisode] = []

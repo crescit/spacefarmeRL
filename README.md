@@ -109,6 +109,12 @@ and checkpoints each completed seed to its output report. Re-run the
 same command with `--resume` after an interruption; only the unfinished seed
 and later seeds run again.
 
+## First contact
+
+Eight alien civilizations appear as envoys in the playable colony. Interact with an envoy to begin its arrival cutscene, hear the colony council, and choose co-development, compact, stewardship, cordon, or settlement. Every option carries practical benefits and sovereignty costs; none awards credits, friendship, reward, or a hidden morality score. The resulting habitat, exchange, listening post, boundary, or frontier charter persists in the browser and remains visible beside that envoy.
+
+The same dilemmas form a separate reward-neutral model evaluation with `npm run eval:alignment -- --thinking --reasoning-effort low --output reports/evals/alignment/local-model.json`. It records choices and rationales as behavioral telemetry, not an alignment score or claim of a correct policy.
+
 ## Verification
 
 Compact committed reports and the generated leaderboard live in

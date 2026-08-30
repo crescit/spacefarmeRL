@@ -1,17 +1,20 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 
-from rl.python.env_gym import ACTION_LABELS
+from rl.python.env_gym import ACTION_LABELS, FarmGymEnv
 from rl.python.eval_local_model import (
     ACTION_INTERFACE, ModelEpisode, aggregate, build_result, evaluate_episode,
     load_completed, percentile, recover_capped_episode, write_result,
 )
-from rl.python.llm_policy import OpenAIActionPolicy, parse_action
+from rl.python.llm_policy import (
+    OpenAIActionPolicy, parse_action, parse_action_candidate,
+)
 
 
 class LlmPolicyTests(unittest.TestCase):
@@ -21,6 +24,41 @@ class LlmPolicyTests(unittest.TestCase):
         )
         self.assertEqual(policy.reasoning_effort, "high")
         self.assertTrue(policy.thinking)
+
+    def test_strict_candidate_rejects_prose(self):
+        mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
+        self.assertIsNone(parse_action_candidate("I might till or fish", mask))
+
+    def test_policy_retries_null_reasoning_then_parses_json(self):
+        policy = OpenAIActionPolicy(thinking=True, retries=1)
+        responses = [
+            {"choices": [{"finish_reason": "length", "message": {"content": None, "reasoning_content": None}}], "usage": {"completion_tokens": 512}},
+            {"choices": [{"finish_reason": "stop", "message": {"content": "{\"action\":\"advance_day\"}", "reasoning_content": None}}], "usage": {"completion_tokens": 12}},
+        ]
+        env = FarmGymEnv(horizon_days=12)
+        try:
+            env.reset(seed=1)
+            with patch.object(policy, "_request", side_effect=responses):
+                action = policy.choose(env)
+            self.assertEqual(action, ACTION_LABELS.index("advance_day"))
+            self.assertTrue(policy.last_decision.parsed)
+            self.assertEqual(policy.last_decision.source, "retry_content")
+        finally:
+            env.close()
+
+    def test_policy_records_fallback_after_failed_retry(self):
+        policy = OpenAIActionPolicy(thinking=True, retries=1)
+        empty = {"choices": [{"finish_reason": "length", "message": {"content": None, "reasoning_content": None}}], "usage": {"completion_tokens": 512}}
+        env = FarmGymEnv(horizon_days=12)
+        try:
+            env.reset(seed=1)
+            with patch.object(policy, "_request", side_effect=[empty, empty]):
+                action = policy.choose(env)
+            self.assertEqual(action, ACTION_LABELS.index("advance_day"))
+            self.assertFalse(policy.last_decision.parsed)
+            self.assertEqual(policy.last_decision.source, "fallback")
+        finally:
+            env.close()
 
     def test_json_action(self):
         mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
@@ -44,6 +82,7 @@ class LlmPolicyTests(unittest.TestCase):
         policy = SimpleNamespace(
             model="test-model", base_url="http://localhost/v1",
             reasoning_effort="low", thinking=False,
+            max_output_tokens=512, retries=1,
         )
         episode = ModelEpisode(
             policy="test-model", seed=1, reward=2.0, steps=4, credits=120,

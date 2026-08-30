@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const offlineOnly = process.argv.includes('--offline');
 const offline = [
   'tests/verify_cooking.mjs',
+  'tests/verify_aliens.mjs',
   'tests/verify_determinism.mjs',
   'tests/verify_festival_day.mjs',
   'tests/verify_friendship.mjs',

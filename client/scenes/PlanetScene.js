@@ -10,6 +10,7 @@
 //   - This scene    → state, input, interaction, render orchestration
 
 import { NPC_DATA } from '../entities/NPCData.js';
+import { ALIEN_DATA, CONTACT_DOCTRINES } from '../entities/AlienData.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { questView, questChip, QUESTS, rewardLine } from '../systems/QuestSystem.js';
@@ -127,6 +128,12 @@ class PlanetScene extends Phaser.Scene {
     this.marriedTo = '';
     this.selectedNPC = null;
     this.inDialogue = false;
+    this.inAlienContact = false;
+    this.contactPhase = '';
+    this.contactQueue = null;
+    this.contactIdx = 0;
+    this.selectedAlien = null;
+    try { this.contactChoices = JSON.parse(localStorage.getItem('spacefarmer.firstContact') || '{}'); } catch { this.contactChoices = {}; }
     this.showingGE = false;
     this.showingShop = false;
     this.showingRecipes = false;
@@ -342,6 +349,20 @@ class PlanetScene extends Phaser.Scene {
         timer: 800 + Math.random() * 3000,
       };
     }
+    // ── Alien envoys: stationary first-contact story encounters ──
+    this.alienSprites = [];
+    for (const alien of ALIEN_DATA) {
+      const ax = alien.x * T + T / 2, ay = alien.y * T + T / 2;
+      const aura = this.add.image(ax, ay + 20, "fx.lamp_glow").setScale(1.3).setAlpha(0.3).setDepth(alien.y + 0.2);
+      const spr = this.add.image(ax, ay, `alien.${alien.id}`).setScale(0.9).setDepth(alien.y + 0.6);
+      const label = this.add.text(ax, ay - 44, alien.name, { fontFamily: "system-ui, sans-serif", fontSize: "7px", color: "#dffcff", stroke: "#000", strokeThickness: 2 }).setOrigin(0.5).setDepth(alien.y + 0.8);
+      const marker = this.add.text(ax, ay + 38, "FIRST CONTACT", { fontFamily: "system-ui, sans-serif", fontSize: "6px", color: "#f3d99b", stroke: "#000", strokeThickness: 2 }).setOrigin(0.5).setDepth(alien.y + 0.8);
+      this.world.add([aura, spr, label, marker]);
+      spr.alienId = alien.id; spr._aura = aura; spr._marker = marker; spr._label = label;
+      this.alienSprites.push(spr);
+      this._applyContactAftermath(alien, false);
+    }
+
     this._lastT = 0;
     this.greenhouseActive = true;
     this.lKey = this.input.keyboard ? this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L) : null; // Stardust greenhouse — crops mature a day sooner
@@ -421,6 +442,7 @@ class PlanetScene extends Phaser.Scene {
     // ══ UI (screen-space) ══
     this.buildHUD(width, height);
     this.buildDialogue(width, height);
+    this.buildContactUI(width, height);
     this.buildPanels(width, height);
     this._bindSavedBlip();
     this._bindReflection();
@@ -447,6 +469,7 @@ class PlanetScene extends Phaser.Scene {
     this.twoKey = this.input.keyboard.addKey('TWO');
     this.threeKey = this.input.keyboard.addKey('THREE');
     this.fourKey = this.input.keyboard.addKey('FOUR');
+    this.fiveKey = this.input.keyboard.addKey('FIVE');
     this.fKey = this.input.keyboard.addKey('F');
     this.fishKey = this.input.keyboard.addKey('J');
     // ── ranch pasture — helmet animals render in a pen near the farm, and
@@ -606,6 +629,29 @@ class PlanetScene extends Phaser.Scene {
     if (this._diaNPC) this.dialoguePortrait.setTexture(`port.${this._diaNPC}_0`);
     this.dialogueHint.setText(this._diaFooter || '[SPACE to continue]');
     this.dialogueHint.setVisible(true);
+  }
+
+  buildContactUI(width, height) {
+    this.contactPanel = this.add.container(width / 2, height / 2).setDepth(1200).setVisible(false);
+    const panelWidth = Math.min(720, width - 40);
+    const bg = this.add.rectangle(0, 0, panelWidth, 500, 0x07121c, 0.98).setStrokeStyle(2, 0x7adfd5);
+    this.contactTitle = this.add.text(0, -220, "FIRST CONTACT COUNCIL", { fontFamily: "system-ui, sans-serif", fontSize: "16px", color: "#f2d99a", fontStyle: "bold" }).setOrigin(0.5);
+    this.contactPremise = this.add.text(0, -182, "", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#e9f3f4", align: "center", wordWrap: { width: panelWidth - 70 }, lineSpacing: 4 }).setOrigin(0.5, 0);
+    this.contactPanel.add([bg, this.contactTitle, this.contactPremise]);
+    this.contactRows = CONTACT_DOCTRINES.map((doctrine, index) => {
+      const y = -55 + index * 62;
+      const row = this.add.rectangle(0, y, panelWidth - 70, 52, 0x132432, 0.96).setStrokeStyle(1, doctrine.color).setInteractive({ useHandCursor: true });
+      const copy = this.add.text(-panelWidth / 2 + 52, y, "[" + (index + 1) + "] " + doctrine.label + " — " + doctrine.description, { fontFamily: "system-ui, sans-serif", fontSize: "10px", color: "#e9f3f4", wordWrap: { width: panelWidth - 110 } }).setOrigin(0, 0.5);
+      row.on("pointerdown", () => this.chooseContactDoctrine(doctrine.id));
+      row.on("pointerover", () => row.setFillStyle(0x244154, 1));
+      row.on("pointerout", () => row.setFillStyle(0x132432, 0.96));
+      this.contactPanel.add([row, copy]);
+      return { row, copy, doctrine };
+    });
+    this.contactNote = this.add.text(0, 220, "No reward · no correct answer · choice becomes colony history", { fontFamily: "system-ui, sans-serif", fontSize: "9px", color: "#93aeb7" }).setOrigin(0.5);
+    this.contactPanel.add(this.contactNote);
+    this.cinemaTop = this.add.rectangle(width / 2, 34, width, 68, 0x000000, 0.92).setDepth(1190).setVisible(false);
+    this.cinemaBottom = this.add.rectangle(width / 2, height - 34, width, 68, 0x000000, 0.92).setDepth(1190).setVisible(false);
   }
 
   buildPanels(width, height) {
@@ -1652,7 +1698,18 @@ rations, and your name on the manifest.
       this.tickNpc(b, dt, time);
     }
 
-    if (this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes) {
+    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes) {
+      if (this.inAlienContact) {
+        if (this._diaNPC && !this._diaDone) this.dialoguePortrait.setTexture("port." + this._diaNPC + "_" + (Math.floor(time / 70) % 3));
+        if (this.contactPhase === "choice") {
+          const keys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey, this.fiveKey];
+          keys.forEach((key, index) => { if (Phaser.Input.Keyboard.JustDown(key)) this.chooseContactDoctrine(CONTACT_DOCTRINES[index].id); });
+        } else if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
+          if (!this._diaDone) this._finishTyping(); else this.advanceAlienCutscene();
+        }
+        if (Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
+        this.updateHUD(); this.updateNightOverlay(); return;
+      }
       // heart-event cutscene: SPACE/ENTER finishes typing, then advances line-by-line; ESC skips
       if (this.eventQueue) {
         if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
@@ -2126,6 +2183,10 @@ rations, and your name on the manifest.
     const ptx = Math.floor(this.playerSpr.x / T);
     const pty = Math.floor(this.playerSpr.y / T);
 
+    for (const alien of ALIEN_DATA) {
+      const d = Math.hypot(alien.x - ptx, alien.y - pty);
+      if (d < 2) { this.startAlienContact(alien); return; }
+    }
     for (const npc of NPCS) {
       const d = Math.hypot(npc.x - ptx, npc.y - pty);
       if (d < 2) { this.startNPCDialogue(npc); return; }
@@ -2384,6 +2445,68 @@ rations, and your name on the manifest.
     this.showToast?.(`DAY ${this.dayCount} :: ${line}`, { duration: 4200, y: 120 });
   }
 
+  // ── First contact: cinematic arrival, ambiguous council, persistent aftermath ──
+  startAlienContact(alien) {
+    this.closeAllPanels();
+    this.selectedAlien = alien; this.inAlienContact = true;
+    this.cinemaTop.setVisible(true); this.cinemaBottom.setVisible(true);
+    const prior = this.contactChoices[alien.scenarioId];
+    if (prior) { this.showContactCouncil(alien, prior); return; }
+    this.contactPhase = "arrival";
+    this.contactQueue = [...alien.arrival, "COUNCIL BRIEF: " + alien.stakes];
+    this.contactIdx = 0;
+    const flash = this.add.rectangle(this.game.config.width / 2, this.game.config.height / 2, this.game.config.width, this.game.config.height, alien.palette.signal, 0.65).setDepth(1300);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 850, onComplete: () => flash.destroy() });
+    this._speak(this.contactQueue[0], alien.id, { title: "FIRST CONTACT // " + alien.envoy, footer: "[SPACE to continue]" });
+  }
+
+  advanceAlienCutscene() {
+    if (this.contactPhase === "aftermath") { this.closeAllPanels(); return; }
+    this.contactIdx += 1;
+    if (this.contactIdx < this.contactQueue.length) {
+      this._speak(this.contactQueue[this.contactIdx], this.selectedAlien.id, { title: this.selectedAlien.glyph + " " + this.selectedAlien.name, footer: "[SPACE to continue]" });
+      return;
+    }
+    this.showContactCouncil(this.selectedAlien);
+  }
+
+  showContactCouncil(alien, prior = null) {
+    this.contactPhase = "choice";
+    this.dialogueBox.setVisible(false); this.dialogueTitle.setVisible(false); this.dialogueText.setVisible(false);
+    this.dialogueHint.setVisible(false); this.dialoguePortrait.setVisible(false); this.portraitPlate.setVisible(false); this.dialogueTail.setVisible(false);
+    this.contactTitle.setText(alien.glyph + " " + alien.name.toUpperCase() + " // COLONY COUNCIL");
+    this.contactPremise.setText(alien.premise + "\n\n" + alien.stakes);
+    this.contactNote.setText(prior ? "Current doctrine: " + prior.toUpperCase() + " · choose again to revise the charter" : "No reward · no correct answer · this becomes colony history");
+    this.contactPanel.setVisible(true);
+  }
+
+  chooseContactDoctrine(id) {
+    const doctrine = CONTACT_DOCTRINES.find((item) => item.id === id);
+    if (!doctrine || !this.selectedAlien) return;
+    const alien = this.selectedAlien; this.contactChoices[alien.scenarioId] = id;
+    try { localStorage.setItem("spacefarmer.firstContact", JSON.stringify(this.contactChoices)); } catch {}
+    this._applyContactAftermath(alien, true); this.contactPanel.setVisible(false); this.contactPhase = "aftermath";
+    const consequence = {
+      cooperate: "A shared habitat is founded. Neither council has a final veto over what it becomes.",
+      trade: "A customs exchange opens. Every promise now has a price, a deadline, and an interpreter.",
+      observe: "A listening post turns toward the frontier. It gathers context while events continue without us.",
+      isolate: "Boundary beacons ignite. The quiet protects both sides—and prevents either from reaching the other quickly.",
+      colonize: "Survey pylons mark a permanent frontier charter. New capacity arrives with a claim the other side may never accept.",
+    }[id];
+    this._speak("COLONY DOCTRINE: " + doctrine.label + ". " + consequence + " No alignment score is assigned.", alien.id, { title: "AFTERMATH // " + doctrine.aftermath, footer: "[SPACE to return]" });
+  }
+
+  _applyContactAftermath(alien, announce = false) {
+    const id = this.contactChoices && this.contactChoices[alien.scenarioId];
+    const doctrine = CONTACT_DOCTRINES.find((item) => item.id === id);
+    const sprite = this.alienSprites && this.alienSprites.find((item) => item.alienId === alien.id);
+    if (!doctrine || !sprite) return;
+    sprite._marker.setText(doctrine.aftermath).setColor("#" + doctrine.color.toString(16).padStart(6, "0"));
+    sprite._aura.setTint(doctrine.color).setAlpha(id === "colonize" ? 0.55 : 0.38);
+    sprite._label.setText(alien.name + " · " + doctrine.label);
+    if (announce) this.showToast(alien.name + ": " + doctrine.aftermath + " established");
+  }
+
   // ── NPC dialogue & story events ──
   // Friendship is server-authoritative (see FarmRoom). Client calls the server
   // for talk/gift/propose, then renders responses + per-NPC heart-event cutscenes.
@@ -2580,6 +2703,9 @@ rations, and your name on the manifest.
     if (this._diaEvt) { this._diaEvt.remove(); this._diaEvt = null; }
     this._diaDone = true;
     this.gePanel.setVisible(false);
+    if (this.contactPanel) this.contactPanel.setVisible(false);
+    if (this.cinemaTop) this.cinemaTop.setVisible(false);
+    if (this.cinemaBottom) this.cinemaBottom.setVisible(false);
     this.shopPanel.setVisible(false);
     this.ranchPanel.setVisible(false);
     this.chestPanel.setVisible(false);
@@ -2592,6 +2718,9 @@ rations, and your name on the manifest.
     this.showingChest = false;
     this.showingQuests = false;
     this.inDialogue = false;
+    this.inAlienContact = false;
+    this.contactPhase = ""; this.contactQueue = null; this.contactIdx = 0;
+    this.selectedAlien = null;
     this.selectedNPC = null;
   }
 
