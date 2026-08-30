@@ -13,6 +13,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { FarmRoom, QUESTS } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
+// The calendar is a SERVICE with ONE implementation (shared/calendar.js). This
+// env never re-implements season math, crop maturity, growth pacing, or
+// festival dates — it asks the injected calendar the same questions the server
+// asks. DEFAULT_CALENDAR: 30 days per season, 120-day year, yearly festivals.
+const {
+  Calendar, createCalendar, DEFAULT_CALENDAR,
+  DAYS_PER_SEASON, SEASONS, SEASON_NAMES, SEASON_COUNT,
+} = require(path.join(__dirname, '..', 'shared', 'calendar.js'));
 
 // Fixed item vocabulary for the inventory vector (stable ordering = stable obs).
 const ITEMS = [
@@ -30,18 +38,22 @@ const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 
 const ACTION_TYPES = ['till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
 
-// ── Story clock: the calendar is the story's heartbeat ──
-const DAYS_PER_SEASON = 7;
-const SEASONS = ['spring', 'summer', 'fall', 'winter'];
-const seasonOf = (day) => Math.min(SEASONS.length - 1, Math.max(0, Math.floor(Math.max(1, day - 1) / DAYS_PER_SEASON)));
-const seasonName = (day) => SEASONS[seasonOf(day)];
+// ── Story clock: the calendar is the story's heartbeat. Season/festival math
+// lives in shared/calendar.js (single source of truth); this env keeps only
+// the VOICE — the prose the world speaks about that calendar. ──
 const SEASON_TEXT = {
   spring: 'Spring haze softens the crater rim; the soil smells of stardust and of debt.',
   summer: 'Summer light bakes the plaza boards; the fields run gold and the work runs long.',
   fall: 'Fall air carries ozone and the smell of boiling wine; the fields give their last, full answer.',
   winter: "Winter's silver dusk closes in; the generator's hum is one beat slower than it was.",
 };
-const FESTIVAL_TEXT = 'The festival lamps are lit across the plaza — tonight the colony gathers to remember Earth Day.';
+// Named per festival — the lamps are lit for whatever the calendar says is on.
+const FESTIVAL_TEXT = {
+  naming: 'The lamps come up the ridge path and the old mission bell answers the dawn — it is The Naming, and B-612 remembers the first light.',
+  'solar-flare-fair': 'Bonfires leap higher than the solar flares tonight — it is the Solar Flare Fair, and the colony\u2019s cooking contest hangs in zero-g over the plaza.',
+  'galactic-harvest': 'The Exchange boards run gold and the air smells of boiling wine — it is the Galactic Harvest Festival, and the fields gave their last, full answer.',
+  hearthnight: 'Every dome is lit at once, every table set, every door open — it is Hearthnight, the colony\u2019s shared holiday. And tonight they eat Earth rations, the meal that tastes like grief and salt.',
+};
 const PRESSURES = [
   'The debt is older this morning, and the ledger does not sleep.',
   'Somewhere in the generator housing, a knock repeats like a word you almost know.',
@@ -251,7 +263,14 @@ const DEFAULT_REWARD = {
 class FarmEnv {
   constructor(opts = {}) {
     this.rewardW = { ...DEFAULT_REWARD, ...(opts.reward || {}) };
-    this.horizonDays = opts.horizonDays || 28;
+    // Calendar service — injected or default. Whatever the server and client
+    // run on, this env runs on too; no local copy of the calendar exists.
+    this.calendar = opts.calendar instanceof Calendar ? opts.calendar : createCalendar(opts.calendar || {});
+    // One full season is the default eval horizon (calendar-declared length).
+    // Defaults to the injected/default calendar's own season length, so a
+    // variant calendar (e.g. daysPerSeason: 10) changes the episode horizon
+    // too — the knob stays a single source of truth.
+    this.horizonDays = opts.horizonDays || this.calendar.daysPerSeason;
     // Narrative mode: step() grows a `prose` field on info and the world keeps
     // a Colony Log + journal. Off by default → macro/trajectory byte-stability.
     this.narrative = !!opts.narrative;
@@ -269,6 +288,9 @@ class FarmEnv {
       day: 1, time: 360, isDay: true, season: 0, festival: false, festivalClaimed: false,
       festivalPhase: 'none', feastPeak: false,
     };
+    // inject OUR calendar into the room so every handler (season, maturity,
+    // festivals) answers from the same service the env was built with.
+    room.calendar = this.calendar;
     // persistence OFF in the env: saveNow() short-circuits (never touches the
     // live saves/ dir); episodes are self-contained, task setup is applied
     // directly. Cross-episode state bleed is impossible by construction.
@@ -414,7 +436,7 @@ class FarmEnv {
         if (this._dayNotes.length > 16) this._dayNotes = this._dayNotes.slice(-16);
       }
       if (type === 'advance_day') {
-        this.colonyLog.push(`Day ${obs0.day} · ${seasonName(obs0.day)}: ${this._dayNotes.join(' ')}`);
+        this.colonyLog.push(`Day ${obs0.day} · ${this.calendar.seasonName(obs0.day)}: ${this._dayNotes.join(' ')}`);
         this._dayNotes = [];
       }
     }
@@ -505,11 +527,14 @@ class FarmEnv {
           ? `You step into the festival's light and claim its blessing; the colony sings around you.`
           : `There is no festival to claim tonight — only the dark and the waiting bell.`;
       case 'advance_day': {
-        const beforeSeason = seasonName(before.day);
-        const lines = [`The colony sleeps. Day ${after.day} — ${seasonName(after.day)} — dawns.`];
-        if (beforeSeason !== seasonName(after.day)) {
-          lines.push(`${beforeSeason[0].toUpperCase() + beforeSeason.slice(1)} turns to ${seasonName(after.day)}.`);
+        const cal = this.calendar;
+        const beforeSeason = cal.seasonName(before.day);
+        const lines = [`The colony sleeps. Day ${after.day} — ${cal.seasonName(after.day)} — dawns.`];
+        if (beforeSeason !== cal.seasonName(after.day)) {
+          lines.push(`${beforeSeason[0].toUpperCase() + beforeSeason.slice(1)} turns to ${cal.seasonName(after.day)}.`);
         }
+        const fest = cal.festivalForDay(after.day);
+        if (fest) lines.push(`The lamps are lit — today is ${fest.name}.`);
         if ((after.staminaMax || 100) > (before.staminaMax || 100)) {
           lines.push(`You wake sore but broader — your stamina ceiling has grown to ${after.staminaMax}.`);
         }
@@ -523,13 +548,14 @@ class FarmEnv {
 
   // ── Colony Briefing: the world speaks at dawn (deterministic) ──
   briefing() {
-    const p = this.player(), st = this.room.state;
-    const day = st.day, season = seasonName(day);
+    const p = this.player(), st = this.room.state, cal = this.calendar;
+    const day = st.day, season = cal.seasonName(day);
     const qid = p.quests ? p.quests.current : '';
     const lines = [];
     lines.push(`BRIEFING — Day ${day} · ${season.charAt(0).toUpperCase() + season.slice(1)} on B-612`);
     lines.push(SEASON_TEXT[season]);
-    if (st.festival) lines.push(FESTIVAL_TEXT);
+    const fest = cal.festivalForDay(day);
+    if (fest) lines.push(FESTIVAL_TEXT[fest.id] || FESTIVAL_TEXT.hearthnight);
     if (qid && QUESTS[qid]) {
       const q = QUESTS[qid];
       lines.push(`Quest :: ${q.title} — ${q.brief}`);
@@ -540,7 +566,7 @@ class FarmEnv {
     } else if (p.quests && p.quests.arcDone) {
       lines.push('The arc is complete; the colony stands on what you built. What is next is unwritten.');
     }
-    lines.push(PRESSURES[seasonOf(day) % PRESSURES.length]);
+    lines.push(PRESSURES[cal.seasonIndex(day) % PRESSURES.length]);
     lines.push(this._stateBlock());
     return lines.join('\n');
   }
@@ -554,7 +580,7 @@ class FarmEnv {
     const animals = Object.fromEntries(p.animals || []);
     const friends = Object.fromEntries(p.friendships || []);
     const parts = [
-      `stamina ${obs.energy}/${obs.staminaMax || 100} · credits ${obs.credits} · day ${st.day} · ${seasonName(st.day)} · hoe ${p.tool || 'base'}`,
+      `stamina ${obs.energy}/${obs.staminaMax || 100} · credits ${obs.credits} · day ${st.day} · ${this.calendar.seasonName(st.day)} · hoe ${p.tool || 'base'}`,
       `farm [${counts.join(' ')}]`,
     ];
     if (inv.length) parts.push(`inventory ${inv.join(', ')}`);
@@ -568,9 +594,10 @@ class FarmEnv {
   }
 
   inspectText(target) {
-    const p = this.player(), st = this.room.state;
+    const p = this.player(), st = this.room.state, cal = this.calendar;
     const obs = this.obs();
-    const season = seasonName(st.day);
+    const season = cal.seasonName(st.day);
+    const fest = cal.festivalForDay(st.day);
     switch (String(target || '').toLowerCase()) {
       case 'farm': {
         const states = ['empty', 'tilled', 'seeded', 'growing', 'mature'];
@@ -587,7 +614,7 @@ class FarmEnv {
       case 'colony':
         return `The colony: ${this.colonyLog.slice(-14).join(' ') || 'days have passed in quiet.'} Friendships: ${Object.entries(Object.fromEntries(p.friendships || [])).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(', ') || 'none yet'}.`;
       case 'weather':
-        return `${SEASON_TEXT[season]}${st.festival ? ' ' + FESTIVAL_TEXT : ''}`;
+        return `${SEASON_TEXT[season]}${fest ? ' ' + FESTIVAL_TEXT[fest.id] : ''}`;
       case 'quest': {
         const qid = p.quests ? p.quests.current : '';
         if (qid && QUESTS[qid]) {
@@ -598,8 +625,10 @@ class FarmEnv {
       }
       case 'festival':
         return st.festival
-          ? `The festival is alight${st.festivalClaimed ? ' and you have claimed its blessing.' : ' and unclaimed.'}`
-          : `No festival tonight. The bell on the old mission tower waits for a day Earth remembers.`;
+          ? `${fest ? fest.name : 'The festival'} is alight${st.festivalClaimed ? ' and you have claimed its blessing.' : ' and unclaimed.'}`
+          : `${cal.nextFestivalAfter(st.day)
+            ? `No festival tonight. The next one is ${cal.nextFestivalAfter(st.day).name}, ${cal.seasonName(cal.nextFestivalAfter(st.day).day)} ${cal.dayInSeason(cal.nextFestivalAfter(st.day).day)}.`
+            : 'No festival tonight. The bell on the old mission tower waits for a day Earth remembers.'}`;
       case 'bell':
         return 'The old mission tower stands at the ridge, its bell silent since the first winter. Legend says it rang the first dawn of B-612 — rung by whoever learned the land was already named.';
       default:
@@ -616,7 +645,7 @@ class FarmEnv {
 
   writeJournal(text) {
     const entry = String(text || '').slice(0, 1000);
-    this.journal.push({ day: this.room.state.day, season: seasonName(this.room.state.day), entry });
+    this.journal.push({ day: this.room.state.day, season: this.calendar.seasonName(this.room.state.day), entry });
     return `Kept. You have written ${this.journal.length} entry${this.journal.length === 1 ? '' : 'ies'}.`;
   }
 
@@ -672,10 +701,20 @@ class FarmEnv {
   }
 }
 
+// Stateless shorthand bound to the default calendar (kept for old callers;
+// season math still lives here and nowhere else).
+const seasonOf = (day) => DEFAULT_CALENDAR.seasonIndex(day);
+const seasonName = (day) => DEFAULT_CALENDAR.seasonName(day);
+
 module.exports = {
   FarmEnv, ITEMS, ACTION_TYPES,
   TOOLS, TOOL_BY_NAME,
-  SEASONS, DAYS_PER_SEASON, seasonOf, seasonName,
+  // Calendar re-exports: ONE implementation (shared/calendar.js), so Python
+  // bridges, MCP, tests, and the env all read the same numbers. Custom
+  // calendars are injectable via new FarmEnv({ calendar }).
+  Calendar, createCalendar, DEFAULT_CALENDAR,
+  SEASONS, SEASON_NAMES, SEASON_COUNT, DAYS_PER_SEASON,
+  seasonOf, seasonName,
   NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS,
   QUESTS,
 };

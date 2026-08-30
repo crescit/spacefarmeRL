@@ -14,6 +14,7 @@ import { ALIEN_DATA, CONTACT_DOCTRINES } from '../entities/AlienData.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { questView, questChip, QUESTS, rewardLine } from '../systems/QuestSystem.js';
+import { calendar, SEASON_NAMES, DAYS_PER_SEASON } from '../systems/CalendarService.js';
 import {
   MAP_W, MAP_H, ground, blocks, BUILDINGS, DECOR, NPC_POS,
   PLAYER_START, fenceSpans, FENCE_Y_EXPORT,
@@ -35,7 +36,8 @@ const CROP_SEASONS = {
   'nebula-pepper': { seasons: [2],    regrow: true },
   'glow-kelp':     { seasons: [3],    regrow: true },
 };
-const SEASON_NAMES = ['SPRING', 'SUMMER', 'FALL', 'WINTER'];
+// SEASON_NAMES comes from the shared calendar service (imported above) — the
+// browser, server, and RL env ALL read the same season labels and dates.
 
 // ── Kitchen recipes (M4) — mirrors server/rooms/FarmRoom.js RECIPES ──
 const RECIPES_CLIENT = {
@@ -73,7 +75,7 @@ const FEST_BUNTING = [                               // garlands between the lam
   { x1: 24, x2: 27, y: 11 }, { x1: 32, x2: 29, y: 11 },
 ];
 const FEST_STALLS = [{ x: 20, y: 14 }, { x: 28, y: 14 }];
-const FEST_GUESTS = [                                // 7 visiting guests (festival crowd)
+const FEST_GUESTS = [                                // festival crowd (one sprite per guest)
   { tex: 'nova', x: 22, y: 13 }, { tex: 'luna', x: 24, y: 13 },
   { tex: 'vega', x: 26, y: 13 }, { tex: 'astra', x: 23, y: 14 },
   { tex: 'comet', x: 25, y: 14 }, { tex: 'rhea', x: 22, y: 15 },
@@ -818,7 +820,7 @@ class PlanetScene extends Phaser.Scene {
       }
     }
 
-    // the visiting crowd — 7 guest sprites (reused villager art), hidden unless festival
+    // the visiting crowd — festival guests (reused villager art), hidden unless festival
     this.festivalGuests = FEST_GUESTS.map((g, i) => {
       const tx = px(g.x), ty = py(g.y);
       const shadow = this.add.image(tx, ty + 30, 'fx.shadow').setScale(1.3).setAlpha(0.8);
@@ -1020,7 +1022,8 @@ rations, and your name on the manifest.
     if (led.fished) bits.push(`🎣 ${led.fished} caught`);
     if (led.mined) bits.push(`⛏ ${led.mined} mined`);
     if (led.gifts) bits.push(`🎁 ${led.gifts} gifts`);
-    const head = `DAY ${d.day}${d.ngPlus ? ` · NG+${d.ngPlus}` : ''}${d.festival ? ' — FESTIVAL' : (d.festivalPhase === 'afterglow' ? ' — AFTERGLOW' : '')}`;
+    const fest = d.festival ? calendar.festivalForDay(d.day) : null;
+    const head = `DAY ${d.day}${d.ngPlus ? ` · NG+${d.ngPlus}` : ''}${fest ? ` — ${fest.short}` : (d.festivalPhase === 'afterglow' ? ' — AFTERGLOW' : '')}`;
     const body = bits.length ? bits.join('   ') : 'A quiet day. The dome hums. Rest is also farming.';
     const { width } = this.game.config;
     const card = this.add.text(width / 2, 108, head + '\n' + body, {
@@ -1120,7 +1123,12 @@ rations, and your name on the manifest.
         this.updateHUD();
       });
     } else {
-      this.showToast('No festival today. They arrive the first day of each season.');
+      const next = calendar.nextFestivalAfter(this.roomState?.day || 0);
+      this.showToast(
+        next
+          ? `No festival today. ${next.name} arrives ${calendar.seasonName(next.day)} ${calendar.dayInSeason(next.day)}.`
+          : 'No festival today.'
+      );
     }
   }
 
@@ -2150,9 +2158,13 @@ rations, and your name on the manifest.
         }
       }
     }
-    const SEASONS = ['SPRING', 'SUMMER', 'FALL', 'WINTER'];
-    const sName = SEASONS[this.season ?? 0] || 'SPRING';
-    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${this.roomState && this.roomState.festival ? '   ·   FESTIVAL' : ''}`);
+    const sName = SEASON_NAMES[this.season ?? 0] || 'SPRING';
+    let hudFest = '';
+    if (this.roomState && this.roomState.festival) {
+      const fest = calendar.festivalForDay(this.roomState.day || 0);
+      hudFest = fest ? `   ·   ${fest.short}` : '   ·   FESTIVAL';
+    }
+    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${hudFest}`);
     if (this.energyFill) {
       const energyRatio = Math.max(0, Math.min(1, this.energy / (this.staminaMax || 100)));
       this.energyFill.width = 170 * energyRatio;

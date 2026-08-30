@@ -74,7 +74,11 @@ class SimBridge:
         result.pop("ok", None)
         return result
 
-    def reset(self, seed: int = 1, horizon_days: int = 28, narrative: bool = False):
+    def reset(self, seed: int = 1, horizon_days: int | None = None, narrative: bool = False):
+        if horizon_days is None:
+            # Default "one season" comes from Node's calendar (single source of
+            # truth, handshaked in the spec): spec.vocabulary.seasonDays.
+            horizon_days = int((self.spec.get("vocabulary") or {}).get("seasonDays", 30))
         result = self.request({"cmd": "reset", "seed": int(seed), "horizonDays": int(horizon_days), "narrative": bool(narrative)})
         return result["obs"], result.get("info", {})
 
@@ -234,12 +238,21 @@ class FarmGymEnv(gym.Env):
 
     metadata = {"render_modes": ["ansi"], "render_fps": 4}
 
-    def __init__(self, horizon_days: int = 28, render_mode: str | None = None):
+    def __init__(self, horizon_days: int | None = None, render_mode: str | None = None):
         super().__init__()
-        self.horizon_days = int(horizon_days)
         self.render_mode = render_mode
         self.bridge = SimBridge()
         self.bridge._start()
+        if horizon_days is None:
+            # Default "one season" comes from Node's calendar (single source of
+            # truth, handshaked in the spec): spec.vocabulary.seasonDays.
+            horizon_days = (self.bridge.spec.get("vocabulary") or {}).get("seasonDays")
+        if horizon_days is None:
+            raise RuntimeError(
+                "bridge spec missing calendar vocabulary.seasonDays; refusing to "
+                "guess the season length — the calendar is Node's source of truth"
+            )
+        self.horizon_days = int(horizon_days)
         self.codec = MacroActionCodec(self.bridge.spec["items"])
         self.action_space = spaces.Discrete(len(ACTION_LABELS))
         size = len(SCALARS) + 1 + len(self.bridge.spec["items"]) + 64 + 64 + 64 + 3 + 3 + len(FRIENDS)

@@ -13,7 +13,7 @@ python -m pip install -r rl/python/requirements.txt
 ~~~python
 from rl.python.env_gym import ACTION_LABELS, FarmGymEnv
 
-env = FarmGymEnv(horizon_days=12)
+env = FarmGymEnv(horizon_days=30)
 obs, info = env.reset(seed=42)
 obs, reward, terminated, truncated, info = env.step(
     ACTION_LABELS.index("mine")
@@ -32,7 +32,7 @@ discrete algorithms.
 ~~~python
 from rl.python.vector_env import ParallelFarmEnv
 
-with ParallelFarmEnv(4, horizon_days=12) as envs:
+with ParallelFarmEnv(4, horizon_days=30) as envs:
     observations, infos = envs.reset([1, 2, 3, 4])
     observations, rewards, terms, truncs, infos = envs.step([6, 6, 6, 6])
 ~~~
@@ -48,7 +48,7 @@ complete raw observation, reward, and termination flags.
 ## Baselines and PPO
 
 ~~~bash
-python -m rl.python.benchmark --seeds 10 --horizon-days 12
+python -m rl.python.benchmark --seeds 10 --horizon-days 30
 python -m pip install -r rl/python/requirements-train.txt
 python -m rl.python.train_ppo --timesteps 10000 --seed 7
 ~~~
@@ -61,7 +61,7 @@ PPO uses `sb3-contrib` MaskablePPO and the environment's live action mask.
 export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
 export OPENAI_API_KEY=sk-local
 export OPENAI_MODEL=local-coder
-python -m rl.python.eval_local_model --seeds 10 --horizon-days 12 --resume
+python -m rl.python.eval_local_model --seeds 10 --horizon-days 30 --resume
 ~~~
 
 The model receives a compact state summary and only currently valid macro

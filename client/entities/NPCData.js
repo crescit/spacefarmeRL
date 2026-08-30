@@ -46,7 +46,7 @@ const NPC_DATA = {
     questLines: {
       q2_meet_nova: "That 'old supernova light' in the cantina? That's not a supernova. That's the generator, running on fumes and Grandpa's stubbornness. It's dying, and I can fix it — if you can dig up the parts.",
       q2_mine_crystal: "The old veins near the colony are tired, but they're not done. Three good hauls of ore and I can rebuild the intake. Don't tell the archivist I said 'haul' — she'll write a paper about it.",
-      q3_heart_of_stardust: "The old heart runs one more festival night. Then the stardust core goes in, and the light stops being old. It stops being anyone's grief. Bring me the last of the ore.",
+      q3_heart_of_stardust: "The old heart runs one more Hearthnight. Then the stardust core goes in, and the light stops being old. It stops being anyone's grief. Bring me the last of the ore.",
     },
   },
 
@@ -406,7 +406,7 @@ const NPC_DATA = {
     giftResponse: "Thanks. I'll move it. Might get you a discount next time.",
     hatedGiftResponse: "I can't sell this. It's common. You need to think bigger.",
     questLines: {
-      q3_festival_stock: "The Sol Earth Festival is coming and the whole colony eats in one night. Build the buffer — credits in the till, fish in the hold. I'll be on the other end of the line when you're short. And you WILL be short.",
+      q3_festival_stock: "Hearthnight — the Sol Earth Festival — comes the 25th of every winter, and the whole colony eats in one night. Build the buffer — credits in the till, fish in the hold. I'll be on the other end of the line when you're short. And you WILL be short.",
     },
   },
 

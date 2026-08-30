@@ -14,9 +14,9 @@ from rl.python.tests.test_tool_dialog import StubServer, call, response
 
 class RolloutToolsTests(unittest.TestCase):
     def test_parse_horizon(self):
-        self.assertEqual(parse_horizon("1 season"), 7)
-        self.assertEqual(parse_horizon("spring"), 7)
-        self.assertEqual(parse_horizon("1 year"), 28)
+        self.assertEqual(parse_horizon("1 season"), 30)
+        self.assertEqual(parse_horizon("spring"), 30)
+        self.assertEqual(parse_horizon("1 year"), 120)
         self.assertEqual(parse_horizon("12"), 12)
 
     def test_run_seed_writes_trajectory_diary_and_debug(self):

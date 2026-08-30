@@ -135,13 +135,15 @@ console.log('== env_core ==');
   const st = env.room.state;
   // Growth rule (FarmRoom.onAdvanceDay): a tile grows ONLY if watered during
   // that day, then watered resets. So the correct script waters after plant
-  // AND after every advance_day: plant → water → (advance → water) ×3 → harvest.
-  // 3 advances = 3 growth ticks (≥3 → mature).
+  // AND after every advance_day: plant → water → (advance → water) ×MD → harvest.
+  // MD advances = MD growth ticks (≥ MD → mature). MD comes from the same
+  // calendar service the server uses — the env has NO copy of that number.
+  const MD = env.calendar.maturityDays();
   let R = 0;
   R += env.step({ type: 'till', tileX: 0, tileY: 0 }).reward;             // 0 (no Δcr)
   R += env.step({ type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' }).reward;
   R += env.step({ type: 'water', tileX: 0, tileY: 0 }).reward;            // day-1 water
-  for (let d = 0; d < 3; d++) {
+  for (let d = 0; d < MD; d++) {
     R += env.step({ type: 'advance_day' }).reward;                        // dayCost
     // Re-water for the next day's growth, but NOT once the tile is mature —
     // watering a mature tile is refused (illegal penalty), which would skew
@@ -153,8 +155,8 @@ console.log('== env_core ==');
   const h = env.step({ type: 'harvest', tileX: 0, tileY: 0 });
   R += h.reward;
   const dayCost = env.w.dayCost;
-  const expected = 3 * dayCost + 20 / 100;   // space-wheat cr=20, no quest completion guaranteed in 3 days
-  check('harvest matured after 3 watered days', h.info.ok === true, JSON.stringify(h.obs.farmState.slice(0, 1)));
+  const expected = MD * dayCost + 20 / 100;   // space-wheat cr=20, no quest completion guaranteed in MD days
+  check(`harvest matured after ${MD} watered days`, h.info.ok === true, JSON.stringify(h.obs.farmState.slice(0, 1)));
   check('reward = Δcredits + dayCosts (±0.001)', Math.abs(R - expected) < 0.001 + 1e-9, `R=${R} expected≈${expected}`);
 
   // illegal action: till a tilled tile → refused, illegal penalty, credits unchanged
@@ -177,16 +179,18 @@ console.log('== env_core ==');
   const run = (seed) => {
     const e = new FarmEnv({ horizonDays: 10 });
     e.reset({ seed });
+    const MD = e.calendar.maturityDays();
     const rs = [];
-    for (const a of [
+    const grow = [
       { type: 'till', tileX: 0, tileY: 0 },
       { type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' },
       { type: 'water', tileX: 0, tileY: 0 },
-      { type: 'advance_day' }, { type: 'advance_day' }, { type: 'advance_day' },
+      ...Array.from({ length: MD }, () => ({ type: 'advance_day' })),
       { type: 'harvest', tileX: 0, tileY: 0 },
       { type: 'mine' }, { type: 'mine' }, { type: 'mine' },
       { type: 'fish', spot: 'stardust' },
-    ]) rs.push(e.step(a).reward.toFixed(6));
+    ];
+    for (const a of grow) rs.push(e.step(a).reward.toFixed(6));
     // Compare FULL final obs, not just reward strings: mining/fishing yields
     // vary inventory/vein hardness more often than credits, so reward-only
     // comparisons can coincide across seeds (false "no divergence").

@@ -10,12 +10,13 @@ const check = (name, cond, detail = '') => {
   if (!cond) failures++;
 };
 
-// ── Season clock ──
-check('7 days per season', DAYS_PER_SEASON === 7, SEASONS.join(' → '));
+// ── Season clock (single source of truth: shared/calendar.js via env_core) ──
+check('30 days per season', DAYS_PER_SEASON === 30, SEASONS.join(' → '));
 check('day 1 is spring', seasonName(1) === 'spring');
-check('day 7 is spring', seasonName(7) === 'spring');
-check('day 8 turns to summer', seasonName(8) === 'summer');
-check('day 15 is fall, day 22 is winter', seasonName(15) === 'fall' && seasonName(22) === 'winter');
+check('day 30 is spring', seasonName(30) === 'spring');
+check('day 31 turns to summer', seasonName(31) === 'summer');
+check('day 91 turns to winter', seasonName(91) === 'winter');
+check('day 121 is spring again (new 120-day year)', seasonName(121) === 'spring');
 
 // ── Tool schema (single source: Python + MCP will consume exactly this) ──
 check('18 tools defined', TOOLS.length === 18, `${TOOLS.length}`);

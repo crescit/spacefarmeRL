@@ -106,6 +106,11 @@
   <!-- Colyseus client (vendored locally) -->
   <script src="vendor/colyseus.js"></script>
 
+  <!-- The B-612 calendar service: single source of truth for days-per-season,
+       season math, crop maturity, and yearly festival dates. Loaded before the
+       game so every client module can import it via CalendarService.js. -->
+  <script src="shared/calendar.js"></script>
+
   <!-- Game client (module) -->
   <script type="module" src="client/game.js"></script>
 

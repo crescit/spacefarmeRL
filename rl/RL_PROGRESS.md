@@ -23,9 +23,10 @@ Updated 2026-08-28.
 
 - Node smoke: 1,500 random steps, all 14 action types, deterministic replay,
   checkpoint resume
-- Baseline sample (three seeds, eight-day horizon):
-  - random: mean reward -5.767, mean credits 61.7
-  - economic: mean reward 7.350, mean credits 1281.7
+- Baseline sample (three seeds, one-season 30-day horizon, on the 120-day-year
+  B-612 calendar):
+  - random: mean reward -15.833, mean credits 90.0
+  - economic: mean reward 24.300, mean credits 4323.3
 - MaskablePPO integration smoke: 512 training steps and two deterministic
   evaluation episodes completed successfully
 

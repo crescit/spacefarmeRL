@@ -62,16 +62,17 @@ npm run benchmark
 ~~~
 
 The current deterministic baseline benchmark should show the economic policy
-comfortably beating masked random play:
+comfortably beating masked random play (default horizon: one full season of
+30 days on the B-612 calendar):
 
 ~~~text
 policy       mean reward    mean credits
-random            -5.767            61.7
-economic           7.350          1281.7
+random           -15.833            90.0
+economic          24.300          4323.3
 ~~~
 
-Numbers above use three seeds and an eight-day horizon; use more seeds for
-meaningful comparisons.
+Numbers above use three seeds and a 30-day (one-season) horizon; use more
+seeds for meaningful comparisons.
 
 Train a masked PPO policy:
 
@@ -95,8 +96,8 @@ export OPENAI_MODEL=local-coder
 # quick deterministic smoke episode
 python -m rl.python.rollout_llm --seed 42
 
-# portfolio-quality comparison over 10 identical seeds
-npm run eval:local-model -- --seeds 10 --horizon-days 12 --thinking --reasoning-effort low
+# portfolio-quality comparison over 10 identical seeds (one full season = 30 days)
+npm run eval:local-model -- --seeds 10 --horizon-days 30 --thinking --reasoning-effort low
 ~~~
 
 The evaluator compares the model with masked-random and economic baselines,

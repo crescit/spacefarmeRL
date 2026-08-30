@@ -31,15 +31,16 @@ const EPISODES = Number(process.argv[2] || 4);
 const HORIZON = 12;
 const fail = (msg) => { console.error(`FAIL: ${msg}`); process.exit(1); };
 
-// ── 1. scripted oracle: plant → water ×3 → harvest actually pays ──
+// ── 1. scripted oracle: plant → water ×maturity → harvest actually pays ──
 {
   const env = new FarmEnv({ horizonDays: HORIZON });
   env.reset({ seed: 1 });
   const cash0 = env.player().credits;
+  const MATURITY = env.calendar.maturityDays();   // one source of truth (shared/calendar.js)
   env.step({ type: 'till', tileX: 0, tileY: 0 });
   env.step({ type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' });
   env.step({ type: 'water', tileX: 0, tileY: 0 });
-  for (let d = 0; d < 3; d++) {
+  for (let d = 0; d < MATURITY; d++) {
     env.step({ type: 'advance_day' });
     if (env.farm().tiles[0].type !== 'mature') env.step({ type: 'water', tileX: 0, tileY: 0 });
   }

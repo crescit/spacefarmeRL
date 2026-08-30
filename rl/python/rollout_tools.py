@@ -23,27 +23,49 @@ from rl.python.llm_policy import ToolDialogPolicy
 from rl.python.trajectory import TrajectoryRecorder
 from rl.python.transcript import render_html, render_markdown
 
-DAYS_PER_SEASON = 7
-DAYS_PER_YEAR = 28
+# No mirrored calendar constants live here. The B-612 calendar is single-sourced
+# in shared/calendar.js and surfaced to Python through the bridge `spec`
+# handshake (spec.seasonDays + spec.seasons), so '1 season' / '1 year' always
+# mean what Node says they mean — flip the knob in Node and this CLI follows.
 ACTION_INTERFACE = "native-tools-v1"
+
+_CALENDAR_DIMS: tuple[int, int] | None = None
+
+
+def calendar_dims() -> tuple[int, int]:
+    """Return (season_days, season_count) from the bridge spec — fetched once."""
+    global _CALENDAR_DIMS
+    if _CALENDAR_DIMS is None:
+        with SimBridge() as bridge:
+            vocab = (bridge.spec or {}).get("vocabulary") or {}
+            season_days = vocab.get("seasonDays")
+            seasons = vocab.get("seasons") or []
+            if not season_days or not seasons:
+                raise RuntimeError(
+                    "bridge spec missing calendar (vocabulary.seasonDays/seasons); "
+                    "cannot resolve '1 season'/'1 year' — the calendar is Node's source of truth"
+                )
+            _CALENDAR_DIMS = (int(season_days), len(seasons))
+    return _CALENDAR_DIMS
+
+
+def parse_horizon(value: str) -> int:
+    text = str(value).strip().lower()
+    if text.startswith("1 season") or text in ("season", "spring", "1s"):
+        return calendar_dims()[0]
+    if text.startswith("1 year") or text in ("year", "year-on-b-612", "1y"):
+        season_days, season_count = calendar_dims()
+        return season_days * season_count
+    try:
+        return int(text)
+    except ValueError:
+        raise SystemExit(f"bad --horizon: {value!r} (try '1 season', '1 year', or a day count)")
 
 
 def fetch_tools():
     """The tool schema lives once, in Node — read it from the bridge spec."""
     with SimBridge() as bridge:
         return bridge.spec.get("tools") or []
-
-
-def parse_horizon(value: str) -> int:
-    text = str(value).strip().lower()
-    if text.startswith("1 season") or text in ("season", "spring", "1s"):
-        return DAYS_PER_SEASON
-    if text.startswith("1 year") or text in ("year", "year-on-b-612", "1y"):
-        return DAYS_PER_YEAR
-    try:
-        return int(text)
-    except ValueError:
-        raise SystemExit(f"bad --horizon: {value!r} (try '1 season', '1 year', or a day count)")
 
 
 def make_policy(args) -> ToolDialogPolicy:

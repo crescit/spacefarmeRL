@@ -43,8 +43,10 @@ is orderable, testable work with a definition of done per phase.
    never award credits, friendship, reward, or any hidden morality score.
    The drama lives in the record and the narration; economics stays economics.
 7. **The story clock is the calendar.** Episodes, benchmarks, and evaluations
-   align to the game's own seasons: **7 days = one season, 28 days = one
-   year.** We measure play in seasons lived, not arbitrary step budgets.
+   align to the game's own seasons: **30 days = one season, 120 days = one
+   year** (single source: `shared/calendar.js`). We measure play in seasons
+   lived, not arbitrary step budgets. Festivals recur yearly on fixed,
+   church-calendar-echoing dates — never on the first day of every season.
 
 ---
 
@@ -83,8 +85,8 @@ is orderable, testable work with a definition of done per phase.
 - **Native step path:** `env_gym.step_native(native)` and trajectory v2
   (records `action_interface`, native actions, tool names, prose) with
   replay-exact guarantees preserved.
-- **Faster loop:** season sprints (7 days) for iteration; year-long sagas
-  (28 days) for committed reports.
+- **Faster loop:** season sprints (30 days) for iteration; year-long sagas
+  (120 days) for committed reports.
 - **Acceptance:** a stub agent plays a full spring season; trajectories
   diverge from the first-valid fallback; replay ✓; validity counters on.
 
@@ -98,7 +100,7 @@ is orderable, testable work with a definition of done per phase.
   Markdown and HTML — the artifact you watch, not just the JSON you read.
 - Trajectory JSONL stays the source of truth; transcripts are derived
   artifacts, regenerable, replay-validated.
-- **Acceptance:** after any 7-day run you can read a transcript that tells
+- **Acceptance:** after any 30-day run you can read a transcript that tells
   the story, and the jsonl replays to the byte.
 
 ### W3 — Narrative layer (the world talks back)

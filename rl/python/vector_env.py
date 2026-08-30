@@ -16,7 +16,7 @@ class ParallelFarmEnv:
     threads because the work happens in those child processes, not in Python.
     """
 
-    def __init__(self, num_envs: int, horizon_days: int = 28):
+    def __init__(self, num_envs: int, horizon_days: int | None = None):
         if num_envs < 1:
             raise ValueError("num_envs must be positive")
         self.num_envs = int(num_envs)

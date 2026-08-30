@@ -1,5 +1,15 @@
 // LIVE E2E: real Colyseus client -> running server :8900, full Harvest-Moon loop.
 import { Client } from '@colyseus/sdk';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+// Crop maturity comes from the shared calendar service — the same number the
+// server uses (30-day seasons → 6 watered in-season days to mature).
+const { DEFAULT_CALENDAR } = require(path.join(__dirname, '..', 'shared', 'calendar.js'));
+const MATURITY = DEFAULT_CALENDAR.maturityDays();
 
 let pass = 0, fail = 0;
 const ok = (n, c, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (d ? ' ' + d : '')); } };
@@ -24,8 +34,8 @@ async function main() {
   room.send('plant', { tileX: 0, tileY: 0, crop: 'space-wheat' }); await sleep(150);
   ok('plant sets tile seeded', tileOf(0, 0).type === 'seeded' && tileOf(0, 0).crop === 'space-wheat', 'type=' + tileOf(0, 0).type);
   const c0 = me.credits;
-  for (let i = 0; i < 3; i++) { room.send('water', { tileX: 0, tileY: 0 }); await sleep(60); room.send('advance'); await sleep(120); }
-  ok('wheat matures after watering 3 days (spring, in-season)', tileOf(0, 0).type === 'mature', 'type=' + tileOf(0, 0).type);
+  for (let i = 0; i < MATURITY; i++) { room.send('water', { tileX: 0, tileY: 0 }); await sleep(60); room.send('advance'); await sleep(120); }
+  ok(`wheat matures after watering ${MATURITY} days (spring, in-season)`, tileOf(0, 0).type === 'mature', 'type=' + tileOf(0, 0).type);
   room.send('harvest', { tileX: 0, tileY: 0 }); await sleep(200);
   ok('harvest wheat awards credits', me.credits === c0 + 20, `credits ${c0}->${me.credits}`);
   ok('wheat REGROW -> tile stays growing (not empty)', tileOf(0, 0).type === 'growing' && tileOf(0, 0).crop === 'space-wheat', 'type=' + tileOf(0, 0).type + ' crop=' + tileOf(0, 0).crop);
