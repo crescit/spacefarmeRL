@@ -74,8 +74,8 @@ class SimBridge:
         result.pop("ok", None)
         return result
 
-    def reset(self, seed: int = 1, horizon_days: int = 28):
-        result = self.request({"cmd": "reset", "seed": int(seed), "horizonDays": int(horizon_days)})
+    def reset(self, seed: int = 1, horizon_days: int = 28, narrative: bool = False):
+        result = self.request({"cmd": "reset", "seed": int(seed), "horizonDays": int(horizon_days), "narrative": bool(narrative)})
         return result["obs"], result.get("info", {})
 
     def step(self, action: dict[str, Any]):

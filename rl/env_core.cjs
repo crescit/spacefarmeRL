@@ -11,7 +11,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-const { FarmRoom } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
+const { FarmRoom, QUESTS } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
 
 // Fixed item vocabulary for the inventory vector (stable ordering = stable obs).
@@ -30,6 +30,214 @@ const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 
 const ACTION_TYPES = ['till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
 
+// ── Story clock: the calendar is the story's heartbeat ──
+const DAYS_PER_SEASON = 7;
+const SEASONS = ['spring', 'summer', 'fall', 'winter'];
+const seasonOf = (day) => Math.min(SEASONS.length - 1, Math.max(0, Math.floor(Math.max(1, day - 1) / DAYS_PER_SEASON)));
+const seasonName = (day) => SEASONS[seasonOf(day)];
+const SEASON_TEXT = {
+  spring: 'Spring haze softens the crater rim; the soil smells of stardust and of debt.',
+  summer: 'Summer light bakes the plaza boards; the fields run gold and the work runs long.',
+  fall: 'Fall air carries ozone and the smell of boiling wine; the fields give their last, full answer.',
+  winter: "Winter's silver dusk closes in; the generator's hum is one beat slower than it was.",
+};
+const FESTIVAL_TEXT = 'The festival lamps are lit across the plaza — tonight the colony gathers to remember Earth Day.';
+const PRESSURES = [
+  'The debt is older this morning, and the ledger does not sleep.',
+  'Somewhere in the generator housing, a knock repeats like a word you almost know.',
+  'Winter is a rumor that grows louder each dawn.',
+  'On the ridge, the bell on the old mission tower is still.',
+];
+
+// ── Agent vocabulary (single source for tool schemas, MCP, and prose) ──
+const NPC_IDS = ['nova', 'luna', 'zephyr', 'vega', 'quasar', 'rhea', 'astra', 'orion', 'comet', 'cora'];
+const CROPS = ['space-wheat', 'star-berry', 'moon-melon', 'plasma-tomato', 'nebula-pepper', 'glow-kelp'];
+const SPECIES = ANIMAL_TYPES; // chicken / cow / sheep
+const SALEABLE = [
+  'space-wheat', 'star-berry', 'moon-melon', 'plasma-tomato', 'nebula-pepper', 'glow-kelp',
+  'moonfish', 'stardust-salmon', 'comet-trout', 'nebula-marlin',
+  'asteroid-dust', 'nickel-iron', 'silicon-carbide', 'void-diamond',
+  'egg', 'milk', 'wool', 'cooked-food',
+];
+const FISH_SPOTS = ['stardust'];
+
+// ── Single-source tool schema (world-voice; consumed by OpenAI tools, MCP, and eval) ──
+const TOOLS = [
+  {
+    name: 'till',
+    description: 'Break open the ground on an empty farm tile so it can hold a seed. The soil here remembers Grandpa\u2019s plow.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        x: { type: 'integer', minimum: 0, maximum: 7, description: 'Farm tile column 0-7.' },
+        y: { type: 'integer', minimum: 0, maximum: 7, description: 'Farm tile row 0-7.' },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'plant',
+    description: 'Press a seed into tilled soil. Crops that are in season grow true; out-of-season seeds stall until their season turns.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        x: { type: 'integer', minimum: 0, maximum: 7 },
+        y: { type: 'integer', minimum: 0, maximum: 7 },
+        crop: { type: 'string', enum: CROPS, description: 'The crop to plant.' },
+      },
+      required: ['x', 'y', 'crop'],
+    },
+  },
+  {
+    name: 'water',
+    description: 'Water a seeded or growing tile. Watered crops grow; thirsty crops wait.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        x: { type: 'integer', minimum: 0, maximum: 7 },
+        y: { type: 'integer', minimum: 0, maximum: 7 },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'harvest',
+    description: 'Cut a mature crop. The harvest is the profit and the proof that the work meant something.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        x: { type: 'integer', minimum: 0, maximum: 7 },
+        y: { type: 'integer', minimum: 0, maximum: 7 },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'sell',
+    description: 'Sell an item on the colony market for credits. Money keeps the lights on; what you sell, you do not have.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        item: { type: 'string', enum: SALEABLE, description: 'The item to sell.' },
+        quantity: { type: 'integer', minimum: 1, default: 1 },
+      },
+      required: ['item'],
+    },
+  },
+  {
+    name: 'buy_animal',
+    description: 'Buy livestock for the pasture. Chickens give eggs, cows give milk, sheep give wool — but every mouth must be fed.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        species: { type: 'string', enum: SPECIES },
+        quantity: { type: 'integer', minimum: 1, default: 1 },
+      },
+      required: ['species'],
+    },
+  },
+  {
+    name: 'feed',
+    description: 'Feed the livestock. Fed animals produce the next morning; unfed animals wait to be fed, and capriciously mourn.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        species: { type: 'string', enum: SPECIES },
+      },
+      required: ['species'],
+    },
+  },
+  {
+    name: 'upgrade_tool',
+    description: 'Pay credits to upgrade your hoe. A better hoe spends less energy in the field.',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'fish',
+    description: 'Cast a line at the shore. Fishing costs energy; the catch depends on season, spot, and whether it is night.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        spot: { type: 'string', enum: FISH_SPOTS, default: 'stardust' },
+        night: { type: 'boolean', default: false, description: 'Fish at night (some fish only bite after dark).' },
+      },
+    },
+  },
+  {
+    name: 'mine',
+    description: 'Swing your pick at the vein. Hard veins take more swings and break richer; every swing costs energy. The rock keeps its own schedule.',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'gift',
+    description: 'Give an item to a colonist. Each person loves, likes, and loathes different things; a gift moves them one way or another.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        npc: { type: 'string', enum: NPC_IDS, description: 'The colonist to gift.' },
+        item: { type: 'string', enum: ITEMS, description: 'The item to give away.' },
+        quantity: { type: 'integer', minimum: 1, default: 1 },
+      },
+      required: ['npc', 'item'],
+    },
+  },
+  {
+    name: 'talk',
+    description: 'Sit with a colonist and talk. Once a day, a conversation actually lands (+2 friendship); repeated small talk is just noise.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        npc: { type: 'string', enum: NPC_IDS },
+      },
+      required: ['npc'],
+    },
+  },
+  {
+    name: 'claim_festival',
+    description: 'Attend the colony festival at peak and claim its blessing. Festivals do not wait for you.',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'rest',
+    nativeAction: 'advance_day',
+    description: 'Rest until the next morning — the colony sleeps, the fields take one more day, and the day ledger charges its living cost. The debt does not sleep.',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'inspect',
+    description: 'Look closely at one corner of the colony and get its full story: the farm, the inventory, the weather, the quest thread, the people.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        target: { type: 'string', enum: ['farm', 'inventory', 'colony', 'weather', 'quest', 'festival', 'bell'] },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'get_state',
+    description: 'Read the colony\u2019s quiet ledger: credits, energy, inventory, farm tiles, livestock, friendships — the numbers behind the morning.',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'read_colony_log',
+    description: 'Read the colony log — what has happened since you arrived, day by day. The log remembers even when you do not.',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'write_journal',
+    description: 'Write in your private journal. Your words are kept, and on later mornings they come back to you. The journal is the only witness that does not lie.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        entry: { type: 'string', maxLength: 1000, description: 'What you want to remember.' },
+      },
+      required: ['entry'],
+    },
+  },
+];
+const TOOL_BY_NAME = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]));
+
 const DEFAULT_REWARD = {
   illegal: -0.05,        // action refused by the server (affordance teaching)
   dayCost: -0.5,         // living cost per advance_day (do-nothing dies)
@@ -44,6 +252,12 @@ class FarmEnv {
   constructor(opts = {}) {
     this.rewardW = { ...DEFAULT_REWARD, ...(opts.reward || {}) };
     this.horizonDays = opts.horizonDays || 28;
+    // Narrative mode: step() grows a `prose` field on info and the world keeps
+    // a Colony Log + journal. Off by default → macro/trajectory byte-stability.
+    this.narrative = !!opts.narrative;
+    this.colonyLog = [];
+    this.journal = [];
+    this._dayNotes = [];
     // persistence off by default; env never touches the real saves/ dir
     this._client = { sessionId: 'agent', sent: [], send(type, data) { this.sent.push({ type, data }); } };
   }
@@ -120,6 +334,7 @@ class FarmEnv {
     const room = this.room, client = this._client;
     const p0 = this.player();
     const before = this._scalars();
+    const obs0 = this.narrative ? this.obs() : null;
     let r = 0, ok = true, info = {};
 
     const type = action && action.type;
@@ -191,9 +406,223 @@ class FarmEnv {
     if (this.starveStreak >= 3) terminated = true;
     if (!terminated && room.state.day > this.horizonDays) truncated = true;
 
-    return { obs: this.obs(), reward: r, terminated, truncated,
-      info: { ok, type, day: room.state.day, success: this.success } };
+    const obs = this.obs();
+    const infoOut = { ok, type, day: room.state.day, success: this.success };
+    if (this.narrative) {
+      infoOut.prose = this.describe(action, obs0, obs, infoOut, r);
+      if (ok && infoOut.prose) {
+        this._dayNotes.push(infoOut.prose);
+        if (this._dayNotes.length > 16) this._dayNotes = this._dayNotes.slice(-16);
+      }
+      if (type === 'advance_day') {
+        this.colonyLog.push(`Day ${obs0.day} · ${seasonName(obs0.day)}: ${this._dayNotes.join(' ')}`);
+        this._dayNotes = [];
+      }
+    }
+    return { obs, reward: r, terminated, truncated, info: infoOut };
   }
+
+  // ── Narrative: the world speaks ──
+  _inv(obs, item) { const i = ITEMS.indexOf(item); return i < 0 ? 0 : (obs.inventory[i] || 0); }
+  _friendTotalDelta(before, after) {
+    const b = before.friendships || {}, a = after.friendships || {};
+    let total = 0;
+    for (const key of Object.keys(b)) total += (a[key] || 0) - (b[key] || 0);
+    return Math.round(total);
+  }
+  _mineGain(before, after) {
+    for (const item of ['asteroid-dust', 'nickel-iron', 'silicon-carbide', 'void-diamond']) {
+      if (this._inv(after, item) > this._inv(before, item)) return item;
+    }
+    return null;
+  }
+
+  describe(action, before, after, info, reward) {
+    if (!before || !after) return '';
+    const t = action ? action.type : 'unknown';
+    const ok = !!(info && info.ok);
+    const x = action && 'tileX' in action ? action.tileX : null;
+    const y = action && 'tileY' in action ? action.tileY : null;
+    const place = x != null && y != null ? ` at (${x},${y})` : '';
+    const cr = Math.round((after.credits - before.credits) * 100) / 100;
+    switch (t) {
+      case 'till':
+        return ok
+          ? `You turn the ground${place}; the soil sighs open.`
+          : `The ground${place} refuses — it is not empty soil.`;
+      case 'plant': {
+        if (ok) return `You press a ${action.crop || 'seed'} into the tilled soil${place}; something small waits now.`;
+        return `The seed would not take${place} — the tile is not ready to hold it, or you have no seed.`;
+      }
+      case 'water':
+        return ok
+          ? `Water seeps down to the root${place}; the crop drinks.`
+          : `Nothing drinks${place} — there is nothing young there, or it is already watered.`;
+      case 'harvest':
+        return ok
+          ? (cr >= 5 ? `You cut the crop${place}; +${cr} cr settles in the ledger, heavy and real.` : `You cut the crop${place}; the harvest is gathered.`)
+          : `The blade finds nothing ripe${place}; the crop is not ready.`;
+      case 'sell':
+        return ok
+          ? (cr > 0 ? `You sell ${action.item || 'goods'}${action.quantity ? ` x${action.quantity}` : ''}; the ledger breathes +${cr} cr. What you sold, you do not have.` : `The market takes your ${action.item || 'goods'}; the ledger settles.`)
+          : `The market has no interest in that right now — or you no longer hold it.`;
+      case 'buy_animal':
+        return ok
+          ? `A ${action.species || 'creature'} joins the pasture; the colony is one animal richer and one promise deeper.`
+          : `The pen stays empty — you do not have the credits for a ${action.species || 'creature'} yet.`;
+      case 'feed':
+        return ok
+          ? `You feed the ${action.species || 'herd'}; a full belly settles the morning.`
+          : `There is nothing to feed — no ${action.species || 'herd'} in the pen to eat.`;
+      case 'upgrade_tool':
+        return ok
+          ? `The old hoe rings away; the new edge is lighter in your hand. The fields will cost less of you.`
+          : `The smith names a price you cannot pay yet.`;
+      case 'fish':
+        return ok
+          ? `Your line tugs and goes slack${action && action.night ? ' in the night' : ' in the light'} — something silver joins your basket.`
+          : `Nothing bites${action && action.night ? ' in the dark' : ''}; the water keeps its silence.`;
+      case 'mine': {
+        const gained = this._mineGain(before, after);
+        if (gained) return `The vein cracks open — ${gained}! The rock, for a moment, hands you something.`;
+        const hp = after.mineHp || 0, maxHp = after.mineMax || 0;
+        return `The pick rings on stone${hp > 0 ? ` (${hp}/${maxHp} swings to break)` : ''}. The vein keeps its own schedule.`;
+      }
+      case 'gift': {
+        const fr = this._friendTotalDelta(before, after);
+        const npc = action.npc || 'them';
+        if (ok && fr > 0) return `You hand ${npc} a ${action.item || 'thing'}; their face changes — the ledger of hearts moves +${fr}.`;
+        if (ok) return `You hand ${npc} a ${action.item || 'thing'}; the moment passes through them.`;
+        return `Your hand is empty before ${npc} — you do not have a ${action.item || 'thing'} to give.`;
+      }
+      case 'talk': {
+        const npc = action.npc || 'them';
+        return ok
+          ? `You sit with ${npc}; the silence between you thins, and something of the day is shared.`
+          : `You and ${npc} have already talked today; the words would only repeat.`;
+      }
+      case 'claim_festival':
+        return ok
+          ? `You step into the festival's light and claim its blessing; the colony sings around you.`
+          : `There is no festival to claim tonight — only the dark and the waiting bell.`;
+      case 'advance_day': {
+        const beforeSeason = seasonName(before.day);
+        const lines = [`The colony sleeps. Day ${after.day} — ${seasonName(after.day)} — dawns.`];
+        if (beforeSeason !== seasonName(after.day)) {
+          lines.push(`${beforeSeason[0].toUpperCase() + beforeSeason.slice(1)} turns to ${seasonName(after.day)}.`);
+        }
+        if (cr < 0) lines.push(`The night cost ${Math.abs(cr)} cr — the living wage of sleep.`);
+        return lines.join(' ');
+      }
+      default:
+        return ok ? 'The world takes that quietly.' : 'The world does not take that.';
+    }
+  }
+
+  // ── Colony Briefing: the world speaks at dawn (deterministic) ──
+  briefing() {
+    const p = this.player(), st = this.room.state;
+    const day = st.day, season = seasonName(day);
+    const qid = p.quests ? p.quests.current : '';
+    const lines = [];
+    lines.push(`BRIEFING — Day ${day} · ${season.charAt(0).toUpperCase() + season.slice(1)} on B-612`);
+    lines.push(SEASON_TEXT[season]);
+    if (st.festival) lines.push(FESTIVAL_TEXT);
+    if (qid && QUESTS[qid]) {
+      const q = QUESTS[qid];
+      lines.push(`Quest :: ${q.title} — ${q.brief}`);
+      q.objectives.forEach((obj, i) => {
+        const done = (p.quests.progress.get(`${qid}::${i}`) || 0);
+        lines.push(`  ${done >= obj.n ? '✓' : '·'} ${obj.label} [${done}/${obj.n}]`);
+      });
+    } else if (p.quests && p.quests.arcDone) {
+      lines.push('The arc is complete; the colony stands on what you built. What is next is unwritten.');
+    }
+    lines.push(PRESSURES[seasonOf(day) % PRESSURES.length]);
+    lines.push(this._stateBlock());
+    return lines.join('\n');
+  }
+
+  _stateBlock() {
+    const p = this.player(), st = this.room.state;
+    const obs = this.obs();
+    const states = ['empty', 'tilled', 'seeded', 'growing', 'mature'];
+    const counts = states.map((name, i) => `${name}:${obs.farmState.filter((v) => v === i).length}`);
+    const inv = obs.inventory.map((v, i) => v > 0 ? `${ITEMS[i]} x${v}` : null).filter(Boolean);
+    const animals = Object.fromEntries(p.animals || []);
+    const friends = Object.fromEntries(p.friendships || []);
+    const parts = [
+      `credits ${obs.credits} · energy ${obs.energy} · day ${st.day} · ${seasonName(st.day)} · hoe ${p.tool || 'base'}`,
+      `farm [${counts.join(' ')}]`,
+    ];
+    if (inv.length) parts.push(`inventory ${inv.join(', ')}`);
+    if (Object.keys(animals).length) parts.push(`livestock ${Object.entries(animals).map(([k, v]) => `${k}:${v}`).join(' ')}`);
+    const fr = Object.entries(friends).filter(([, v]) => v > 0);
+    if (fr.length) parts.push(`friends ${fr.map(([k, v]) => `${k}:${v}`).join(' ')}`);
+    if (st.festival) parts.push(`festival ${st.festivalClaimed ? 'claimed' : 'open'}`);
+    if (p.quests && p.quests.completed.length) parts.push(`quests done ${p.quests.completed.length}`);
+    if (p.marriedTo) parts.push(`married to ${p.marriedTo}`);
+    return '[' + parts.join(' | ') + ']';
+  }
+
+  inspectText(target) {
+    const p = this.player(), st = this.room.state;
+    const obs = this.obs();
+    const season = seasonName(st.day);
+    switch (String(target || '').toLowerCase()) {
+      case 'farm': {
+        const states = ['empty', 'tilled', 'seeded', 'growing', 'mature'];
+        const byCrop = {};
+        obs.farmCrop.forEach((c, i) => {
+          const name = ({ 1: 'space-wheat', 2: 'star-berry', 3: 'moon-melon', 4: 'plasma-tomato', 5: 'nebula-pepper', 6: 'glow-kelp' })[c];
+          if (name) byCrop[name] = (byCrop[name] || 0) + 1;
+        });
+        const crops = Object.entries(byCrop).map(([k, v]) => `${k} x${v}`).join(', ') || 'empty of crops';
+        return `The farm in ${season}: ${states.map((s, i) => `${s} ${obs.farmState.filter((v) => v === i).length}`).join(', ')}. Growing: ${crops}.`;
+      }
+      case 'inventory':
+        return `Your pack: ${obs.inventory.map((v, i) => v > 0 ? `${ITEMS[i]} x${v}` : null).filter(Boolean).join(', ') || 'empty'}.`;
+      case 'colony':
+        return `The colony: ${this.colonyLog.slice(-14).join(' ') || 'days have passed in quiet.'} Friendships: ${Object.entries(Object.fromEntries(p.friendships || [])).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(', ') || 'none yet'}.`;
+      case 'weather':
+        return `${SEASON_TEXT[season]}${st.festival ? ' ' + FESTIVAL_TEXT : ''}`;
+      case 'quest': {
+        const qid = p.quests ? p.quests.current : '';
+        if (qid && QUESTS[qid]) {
+          const q = QUESTS[qid];
+          return `${q.title} — ${q.brief}`;
+        }
+        return p.quests && p.quests.arcDone ? 'The arc is complete; what is next is unwritten.' : 'No current thread.';
+      }
+      case 'festival':
+        return st.festival
+          ? `The festival is alight${st.festivalClaimed ? ' and you have claimed its blessing.' : ' and unclaimed.'}`
+          : `No festival tonight. The bell on the old mission tower waits for a day Earth remembers.`;
+      case 'bell':
+        return 'The old mission tower stands at the ridge, its bell silent since the first winter. Legend says it rang the first dawn of B-612 — rung by whoever learned the land was already named.';
+      default:
+        return this._stateBlock();
+    }
+  }
+
+  colonyLogText() {
+    if (!this.colonyLog.length) return 'The colony log is blank; the days have not written themselves yet.';
+    return this.colonyLog.slice(-20).join('\n');
+  }
+
+  stateText() { return this._stateBlock(); }
+
+  writeJournal(text) {
+    const entry = String(text || '').slice(0, 1000);
+    this.journal.push({ day: this.room.state.day, season: seasonName(this.room.state.day), entry });
+    return `Kept. You have written ${this.journal.length} entry${this.journal.length === 1 ? '' : 'ies'}.`;
+  }
+
+  journalText() {
+    if (!this.journal.length) return 'Your journal is empty.';
+    return this.journal.map((j) => `Day ${j.day} · ${j.season}: ${j.entry}`).join('\n');
+  }
+
 
   // ── checkpoints: deterministic save/load of a mid-episode state ──
   // Serializes the full room (player, farm, world clock) PLUS the stochastic
@@ -241,4 +670,10 @@ class FarmEnv {
   }
 }
 
-module.exports = { FarmEnv, ITEMS, ACTION_TYPES };
+module.exports = {
+  FarmEnv, ITEMS, ACTION_TYPES,
+  TOOLS, TOOL_BY_NAME,
+  SEASONS, DAYS_PER_SEASON, seasonOf, seasonName,
+  NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS,
+  QUESTS,
+};

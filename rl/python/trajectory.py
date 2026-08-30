@@ -9,9 +9,10 @@ from rl.python.env_gym import FarmGymEnv, SimBridge
 
 
 class TrajectoryRecorder:
-    def __init__(self, env: FarmGymEnv, path: str | Path):
+    def __init__(self, env: FarmGymEnv, path: str | Path, action_interface: str = "masked-macro-v3-strict"):
         self.env = env
         self.path = Path(path)
+        self.action_interface = action_interface
         self.handle = None
         self.steps = 0
 
@@ -22,7 +23,9 @@ class TrajectoryRecorder:
             self.handle.close()
         self.handle = self.path.open("w", encoding="utf-8")
         header = {
-            "kind": "space-farmer-trajectory", "version": 1, "seed": int(seed),
+            "kind": "space-farmer-trajectory", "version": 2,
+            "action_interface": self.action_interface,
+            "seed": int(seed),
             "horizon_days": int((options or {}).get("horizon_days", self.env.horizon_days)),
             "initial_observation": self.env.raw_obs,
         }
@@ -51,9 +54,13 @@ class TrajectoryRecorder:
         total_reward = 0.0
         terminated = truncated = False
         for transition in transitions:
-            obs, reward, terminated, truncated, info = self.env.step(
-                int(transition["action"])
-            )
+            if isinstance(transition.get("action"), int):
+                obs, reward, terminated, truncated, info = self.env.step(
+                    int(transition["action"])
+                )
+            else:
+                native = transition["native_action"]
+                obs, reward, terminated, truncated, info = self.env.native_step(native)
             expected = (
                 transition["native_action"], transition["observation"],
                 float(transition["reward"]), bool(transition["terminated"]),
@@ -88,6 +95,29 @@ class TrajectoryRecorder:
             "info": {key: value for key, value in info.items() if key != "action_mask"},
             "observation": self.env.raw_obs,
         }
+        self.handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+        self.handle.flush()
+        self.steps += 1
+        return result
+
+    def step_native(self, native: dict[str, Any], *, tool: str | None = None):
+        """Record one native (tool-driven) transition into the trajectory."""
+        if self.handle is None:
+            raise RuntimeError("reset() must be called before step()")
+        result = self.env.native_step(native)
+        _obs, reward, terminated, truncated, info = result
+        record = {
+            "step": self.steps,
+            "action": tool or native.get("type"),
+            "native_action": native,
+            "reward": float(reward),
+            "terminated": bool(terminated),
+            "truncated": bool(truncated),
+            "info": {key: value for key, value in info.items() if key != "action_mask"},
+            "observation": self.env.raw_obs,
+        }
+        if info.get("prose"):
+            record["prose"] = info["prose"]
         self.handle.write(json.dumps(record, separators=(",", ":")) + "\n")
         self.handle.flush()
         self.steps += 1
