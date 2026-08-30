@@ -1,0 +1,63 @@
+{
+  "complete": false,
+  "environment": {
+    "action_interface": "masked-macro-v2",
+    "horizon_days": 12,
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "episodes": {
+    "model": [
+      {
+        "capped": false,
+        "credits": 330.0,
+        "mean_latency_ms": 1737.700979178217,
+        "p95_latency_ms": 2978.20090490859,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -3.7,
+        "seed": 1,
+        "steps": 42,
+        "trajectory": "trajectories/qwen38-flash-longctx-v2/seed-1.jsonl"
+      },
+      {
+        "capped": false,
+        "credits": 330.0,
+        "mean_latency_ms": 1683.5983766276124,
+        "p95_latency_ms": 2412.1411450905725,
+        "policy": "qwen38-flash-longctx",
+        "replay_ok": true,
+        "reward": -3.7,
+        "seed": 2,
+        "steps": 42,
+        "trajectory": "trajectories/qwen38-flash-longctx-v2/seed-2.jsonl"
+      }
+    ]
+  },
+  "model": {
+    "base_url": "http://127.0.0.1:8000/v1",
+    "name": "qwen38-flash-longctx"
+  },
+  "schema_version": 1,
+  "summary": {
+    "model": {
+      "episodes": 2.0,
+      "latency_episodes": 2.0,
+      "mean_credits": 330.0,
+      "mean_latency_ms": 1710.6496779029148,
+      "mean_reward": -3.7,
+      "mean_steps": 42.0,
+      "p95_episode_latency_ms": 2978.20090490859
+    }
+  }
+}

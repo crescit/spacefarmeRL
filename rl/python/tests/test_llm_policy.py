@@ -11,10 +11,17 @@ from rl.python.eval_local_model import (
     ACTION_INTERFACE, ModelEpisode, aggregate, build_result, evaluate_episode,
     load_completed, percentile, recover_capped_episode, write_result,
 )
-from rl.python.llm_policy import parse_action
+from rl.python.llm_policy import OpenAIActionPolicy, parse_action
 
 
 class LlmPolicyTests(unittest.TestCase):
+    def test_policy_reasoning_controls(self):
+        policy = OpenAIActionPolicy(
+            reasoning_effort="high", thinking=True
+        )
+        self.assertEqual(policy.reasoning_effort, "high")
+        self.assertTrue(policy.thinking)
+
     def test_json_action(self):
         mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
         self.assertEqual(parse_action('{"action":"mine"}', mask), ACTION_LABELS.index("mine"))
@@ -34,7 +41,10 @@ class LlmPolicyTests(unittest.TestCase):
         self.assertEqual(parse_action('{"action_index":5}', mask), 5)
 
     def test_resume_loads_compatible_completed_seeds(self):
-        policy = SimpleNamespace(model="test-model", base_url="http://localhost/v1")
+        policy = SimpleNamespace(
+            model="test-model", base_url="http://localhost/v1",
+            reasoning_effort="low", thinking=False,
+        )
         episode = ModelEpisode(
             policy="test-model", seed=1, reward=2.0, steps=4, credits=120,
             mean_latency_ms=10, p95_latency_ms=15,

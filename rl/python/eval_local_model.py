@@ -197,7 +197,11 @@ def build_result(
             "seeds": seeds,
             "action_interface": ACTION_INTERFACE,
         },
-        "model": {"name": policy.model, "base_url": policy.base_url},
+        "model": {
+            "name": policy.model, "base_url": policy.base_url,
+            "reasoning_effort": getattr(policy, "reasoning_effort", "low"),
+            "thinking": getattr(policy, "thinking", False),
+        },
         "summary": {
             name: aggregate(rows) for name, rows in policies.items() if rows
         },
@@ -226,9 +230,16 @@ def load_completed(
         "action_interface": ACTION_INTERFACE,
     }
     actual = {key: environment.get(key) for key in expected}
-    if actual != expected or (saved.get("model") or {}).get("name") != policy.model:
+    saved_model = saved.get("model") or {}
+    expected_model = {
+        "name": policy.model,
+        "reasoning_effort": policy.reasoning_effort,
+        "thinking": policy.thinking,
+    }
+    actual_model = {key: saved_model.get(key) for key in expected_model}
+    if actual != expected or actual_model != expected_model:
         raise ValueError(
-            "resume report does not match model, seeds, horizon, or action interface"
+            "resume report does not match model, reasoning settings, seeds, horizon, or action interface"
         )
     return [
         ModelEpisode(**row) for row in (saved.get("episodes") or {}).get("model", [])
@@ -243,6 +254,14 @@ def main() -> None:
     parser.add_argument("--model")
     parser.add_argument("--api-key")
     parser.add_argument("--timeout", type=float, default=30.0, help="request timeout in seconds")
+    parser.add_argument(
+        "--reasoning-effort", choices=("low", "medium", "high", "max", "xhigh"),
+        default="low", help="reasoning effort sent to the chat template",
+    )
+    parser.add_argument(
+        "--thinking", action=argparse.BooleanOptionalAction, default=False,
+        help="explicitly enable or disable model thinking",
+    )
     parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument("--seed-start", type=int, default=1)
     parser.add_argument("--horizon-days", type=int, default=12)
@@ -264,7 +283,10 @@ def main() -> None:
     if args.seeds < 1:
         parser.error("--seeds must be positive")
 
-    policy = OpenAIActionPolicy(args.base_url, args.model, args.api_key, timeout=args.timeout)
+    policy = OpenAIActionPolicy(
+        args.base_url, args.model, args.api_key, timeout=args.timeout,
+        reasoning_effort=args.reasoning_effort, thinking=args.thinking,
+    )
     seeds = list(range(args.seed_start, args.seed_start + args.seeds))
     model_episodes: list[ModelEpisode] = []
     if args.resume and args.output.exists():

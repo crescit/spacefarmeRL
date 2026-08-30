@@ -42,11 +42,21 @@ class OpenAIActionPolicy:
     """Choose macro actions through an OpenAI-compatible chat endpoint."""
 
     def __init__(self, base_url: str | None = None, model: str | None = None,
-                 api_key: str | None = None, timeout: float = 30.0):
+                 api_key: str | None = None, timeout: float = 30.0,
+                 reasoning_effort: str | None = None,
+                 thinking: bool | None = None):
         self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or "http://127.0.0.1:4000/v1").rstrip("/")
         self.model = model or os.getenv("OPENAI_MODEL") or "local-coder"
         self.api_key = api_key or os.getenv("OPENAI_API_KEY") or "sk-local"
         self.timeout = timeout
+        self.reasoning_effort = (
+            reasoning_effort or os.getenv("OPENAI_REASONING_EFFORT") or "low"
+        )
+        if thinking is None:
+            thinking = os.getenv("OPENAI_THINKING", "false").lower() in {
+                "1", "true", "yes", "on"
+            }
+        self.thinking = bool(thinking)
 
     @staticmethod
     def _state(env: FarmGymEnv) -> dict[str, Any]:
@@ -94,7 +104,9 @@ class OpenAIActionPolicy:
             "temperature": 0,
             "max_tokens": 80,
             "chat_template_kwargs": {
-                "enable_thinking": False, "reasoning_effort": "low",
+                "enable_thinking": self.thinking,
+                "thinking": self.thinking,
+                "reasoning_effort": self.reasoning_effort,
             },
         }).encode("utf-8")
         request = urllib.request.Request(

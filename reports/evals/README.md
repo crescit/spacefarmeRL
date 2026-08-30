@@ -27,6 +27,8 @@ npm run eval:local-model -- \
   --horizon-days 12 \
   --max-steps 500 \
   --timeout 120 \
+  --thinking \
+  --reasoning-effort low \
   --resume \
   --output reports/evals/model-id.json \
   --trajectory-dir trajectories/model-id
@@ -54,6 +56,20 @@ npm run compare:models -- \
   reports/evals/*.json \
   --markdown reports/evals/LEADERBOARD.md
 ~~~
+
+Build the standalone HTML dashboard after an evaluation checkpoint or completed run:
+
+~~~bash
+npm run report:models
+~~~
+
+Open the generated [HTML dashboard](report.html) in a browser. Metrics and per-seed trajectory
+rows come from report JSON; backend, checkpoint, context, quantization,
+speculative decoding, hardware, thinking, and reasoning provenance live in
+`models.json`. In-progress reports render their last completed checkpoint. The current Qwen and
+DeepSeek reports are retained but marked invalid because their native-action
+fingerprints are identical to each other and to the deterministic first-valid
+fallback; they are infrastructure diagnostics, not evidence of model quality.
 
 The comparison command refuses to combine reports whose seeds, horizon, or
 action-interface version differ. This prevents an attractive but invalid

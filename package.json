@@ -14,7 +14,8 @@
     "train:ppo": "python3 -m rl.python.train_ppo",
     "check:public": "bash scripts/public_check.sh",
     "eval:local-model": "python3 -m rl.python.eval_local_model --resume",
-    "compare:models": "python3 -m rl.python.compare_evals"
+    "compare:models": "python3 -m rl.python.compare_evals",
+    "report:models": "python3 -m rl.python.render_eval_report"
   },
   "keywords": [
     "game",

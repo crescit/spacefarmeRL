@@ -1,0 +1,54 @@
+{
+  "models": {
+    "deepseek-mia": {
+      "backend": "SparkInfer with the MiaAI DeepSeek V4 image patch",
+      "checkpoint": "0xSero/deepseek-v4-flash-0731-spark",
+      "context_window": 384000,
+      "display_name": "DeepSeek V4 Flash - Mia",
+      "family": "DeepSeek V4 Flash",
+      "hardware": "NVIDIA DGX Spark, single-system serving",
+      "quantization": "EXL3 3.0 bpw",
+      "speculative_decoding": "DSpark K5 with a K64 draft",
+      "source": "ml-infra spark-vllm/deepseek-mia recipe"
+    },
+    "qwen38-flash-longctx": {
+      "backend": "vLLM with PLE mmap and MTP=3",
+      "checkpoint": "RadixArk/Qwen3.8-Flash-Next-NVFP4",
+      "context_window": 262144,
+      "display_name": "Qwen3.8 Flash-Next - Long Context",
+      "family": "Qwen3.8 Flash-Next",
+      "hardware": "NVIDIA DGX Spark, single-system serving",
+      "quantization": "NVFP4",
+      "speculative_decoding": "Native MTP, 3 speculative tokens",
+      "source": "ml-infra qwen38-flash-longctx vLLM recipe"
+    }
+  },
+  "runs": {
+    "deepseek-mia.json": {
+      "note": "Invalid as a model comparison: its native-action fingerprints exactly match Qwen and the deterministic first-valid fallback across all checked seeds.",
+      "validity": "invalid",
+      "reasoning_effort": "low (request override; inferred effective setting)",
+      "reasoning_provenance": "The evaluator sent reasoning_effort=low. DeepSeek Mia uses the thinking template key and its server default kept thinking enabled.",
+      "thinking": true
+    },
+    "qwen38-flash-longctx.json": {
+      "note": "Invalid as a model comparison: all ten native-action trajectories exactly match DeepSeek and the deterministic first-valid fallback.",
+      "validity": "invalid",
+      "reasoning_effort": "low",
+      "reasoning_provenance": "The evaluator explicitly sent thinking=true, enable_thinking=true, and reasoning_effort=low; a live preflight request verified this payload.",
+      "thinking": true
+    },
+    "qwen38-flash-longctx-macro-v1.json": {
+      "note": "Historical masked-macro-v1 result; do not compare with v2.",
+      "reasoning_effort": "low",
+      "reasoning_provenance": "Historical run before reasoning fields were recorded.",
+      "thinking": false
+    },
+    "qwen38-flash-longctx-thinking-disabled-v2-partial.json": {
+      "note": "Failed/non-comparable partial run: thinking was disabled and only two seeds checkpointed.",
+      "reasoning_effort": "low",
+      "reasoning_provenance": "The older evaluator explicitly sent enable_thinking=false with reasoning_effort=low.",
+      "thinking": false
+    }
+  }
+}

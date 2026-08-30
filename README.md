@@ -96,7 +96,7 @@ export OPENAI_MODEL=local-coder
 python -m rl.python.rollout_llm --seed 42
 
 # portfolio-quality comparison over 10 identical seeds
-npm run eval:local-model -- --seeds 10 --horizon-days 12 --resume
+npm run eval:local-model -- --seeds 10 --horizon-days 12 --thinking --reasoning-effort low
 ~~~
 
 The evaluator compares the model with masked-random and economic baselines,
@@ -113,7 +113,8 @@ and later seeds run again.
 
 Compact committed reports and the generated leaderboard live in
 [`reports/evals/`](reports/evals/README.md). Run `npm run compare:models`
-to validate and compare additional model reports.
+to validate and compare additional model reports. Run `npm run report:models`
+to rebuild the standalone [HTML dashboard](reports/evals/report.html).
 ~~~bash
 npm test                 # complete offline + live-network suite
 npm run test:offline     # no listening socket
