@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -262,6 +264,7 @@ class ToolDialogPolicy(OpenAIActionPolicy):
         max_output_tokens: int = 512,
         retries: int = 1,
         tools: list[dict[str, Any]] | None = None,
+        debug_dir: str | None = None,
     ):
         super().__init__(
             base_url=base_url, model=model, api_key=api_key, timeout=timeout,
@@ -269,6 +272,9 @@ class ToolDialogPolicy(OpenAIActionPolicy):
             max_output_tokens=max_output_tokens, retries=retries,
         )
         self.tools = list(tools or [])
+        self.debug_dir = Path(debug_dir) if debug_dir else None
+        if self.debug_dir:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.conversation: list[dict[str, Any]] = []
         self._pending_calls: list[Any] = []
         # validity + telemetry counters for the eval pipeline
@@ -382,8 +388,18 @@ class ToolDialogPolicy(OpenAIActionPolicy):
             },
             method="POST",
         )
+        started = time.perf_counter()
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.load(response)
+            payload = json.load(response)
+        if self.debug_dir:
+            line = json.dumps({
+                "t": "chat", "model": self.model,
+                "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                "request": body, "response": payload,
+            }, separators=(",", ":"))
+            with (self.debug_dir / "requests.jsonl").open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        return payload
 
     def _answer_introspection(self, env: FarmGymEnv, name: str, args: dict[str, Any], call_id: str) -> None:
         if name == "get_state":

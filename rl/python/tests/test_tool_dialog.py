@@ -73,6 +73,14 @@ class StubServer:
         self.httpd.shutdown()
         self.httpd.server_close()
 
+    @staticmethod
+    def set_queue(entries):
+        _StubHandler.queue = list(entries)
+
+    @staticmethod
+    def set_cycle(entries):
+        _StubHandler.cycle = list(entries)
+
 
 class ToolDialogTests(unittest.TestCase):
     def test_native_from_tool_mapping(self):
