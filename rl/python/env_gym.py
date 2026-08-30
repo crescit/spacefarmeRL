@@ -32,7 +32,7 @@ SALEABLE = (
     "silicon-carbide", "void-diamond", "egg", "milk", "wool", "cooked-food",
 )
 SCALARS = (
-    "credits", "energy", "day", "season", "mineHp", "mineMax", "isDay",
+    "credits", "energy", "staminaMax", "day", "season", "mineHp", "mineMax", "isDay",
     "festival", "festivalClaimed", "tool", "married", "questsCompleted", "arcDone",
 )
 
@@ -120,7 +120,8 @@ class SimBridge:
 def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
     values = [
         float(obs.get("credits", 0)) / 10_000.0,
-        float(obs.get("energy", 0)) / 100.0,
+        float(obs.get("energy", 0)) / 150.0,
+        float(obs.get("staminaMax", 100)) / 150.0,
         float(obs.get("day", 0)) / 100.0,
         float(obs.get("season", 0)) / 3.0,
         float(obs.get("mineHp", 0)) / 7.0,

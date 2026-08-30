@@ -119,6 +119,7 @@ class PlanetScene extends Phaser.Scene {
   init(data) {
     this.credits = data.credits || 100;
     this.energy = 100;
+    this.staminaMax = 100;   // stamina ceiling — grows as you condition yourself
     this.tool = 'base';
     this.dayCount = 0;
     this.isNight = false;
@@ -2120,6 +2121,13 @@ rations, and your name on the manifest.
       const ps = net.getPlayerState && net.getPlayerState();
       if (ps) {
         this._questPS = ps;
+        // Energy, credits, and inventory are server-authoritative (one gate,
+        // one ledger) — read them back so the browser is a viewer, not a cheater.
+        if (typeof ps.energy === 'number') this.energy = ps.energy;
+        if (typeof ps.staminaMax === 'number') this.staminaMax = ps.staminaMax;
+        if (typeof ps.credits === 'number') this.credits = ps.credits;
+        this.inventory = this.inventory || {};
+        for (const k of Object.keys(ps.inventory || {})) this.inventory[k] = ps.inventory[k];
         this.animals = this.animals || {};
         for (const k of Object.keys(ps.animals || {})) this.animals[k] = ps.animals[k];
         this._refreshRanch();
@@ -2144,9 +2152,9 @@ rations, and your name on the manifest.
     }
     const SEASONS = ['SPRING', 'SUMMER', 'FALL', 'WINTER'];
     const sName = SEASONS[this.season ?? 0] || 'SPRING';
-    this.hudText.setText(`${this.credits} CR   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${this.roomState && this.roomState.festival ? '   ·   FESTIVAL' : ''}`);
+    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${this.roomState && this.roomState.festival ? '   ·   FESTIVAL' : ''}`);
     if (this.energyFill) {
-      const energyRatio = Math.max(0, Math.min(1, this.energy / 100));
+      const energyRatio = Math.max(0, Math.min(1, this.energy / (this.staminaMax || 100)));
       this.energyFill.width = 170 * energyRatio;
       this.energyFill.setFillStyle(energyRatio < 0.25 ? 0xf06f68 : energyRatio < 0.55 ? 0xf3bd67 : 0x6be7d0);
     }
@@ -2259,13 +2267,29 @@ rations, and your name on the manifest.
     return Math.max(1, Math.round(base * m));
   }
 
+  // Energy is server-authoritative: online we read it back from the room
+  // state after the server applies its own gate (the exact same ENERGY_COSTS
+  // table the RL env uses — one economy for humans and agents). Offline
+  // (sandbox/preview) we keep a local ledger so the game still plays.
+  _burnEnergy(cost) {
+    const net = window.SpaceFarmer.net;
+    if (net && net.connected) {
+      const p = net.getPlayerState();
+      if (p) this.energy = p.energy;
+      return;
+    }
+    this.energy = Math.max(0, this.energy - cost);
+  }
+
   handleTileAction(ft) {
     const s = ft.state;
     switch (s.type) {
       case 'empty':
         s.type = 'tilled';
-        this.energy = Math.max(0, this.energy - this._energyCost(5));
+        this._burnEnergy(this._energyCost(5));
         ft.img.setTexture('tile.tilled');
+        const netTill = window.SpaceFarmer.net;
+        if (netTill && netTill.connected) netTill.send('till', { tileX: s.x, tileY: s.y });
         if (this.audio) this.audio.sfx('bounce');
         this.showToast('Tilled the cosmic soil');
         break;
@@ -2280,7 +2304,7 @@ rations, and your name on the manifest.
       case 'growing':
         if (!s.watered) {
           s.watered = true;
-          this.energy = Math.max(0, this.energy - 5);
+          this._burnEnergy(this._energyCost(5));
           const net2 = window.SpaceFarmer.net;
           if (net2 && net2.connected) net2.send('water', { tileX: s.x, tileY: s.y });
           if (this.audio) this.audio.sfx('glow');
@@ -2321,7 +2345,7 @@ rations, and your name on the manifest.
     const c = CROPS[key] || { label: key };
     s.crop = key; s.type = 'seeded';
     this.inventory.seeds--;
-    this.energy = Math.max(0, this.energy - this._energyCost(10));
+    this._burnEnergy(this._energyCost(5));
     ft.img.setTexture('tile.seeded');
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('plant', { tileX: s.x, tileY: s.y, crop: key });

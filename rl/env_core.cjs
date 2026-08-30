@@ -315,7 +315,8 @@ class FarmEnv {
       (species) => p.animalsFedDay.get(species) === st.day ? 1 : 0);
     const goal = this.task && this.task.goal ? this.task.goal.progress(p, st) : null;
     return {
-      credits: p.credits, energy: p.energy, day: st.day, season: st.season,
+      credits: p.credits, energy: p.energy, staminaMax: p.staminaMax || 100,
+      day: st.day, season: st.season,
       mineHp: p.mineHp || 0, mineMax: p.mineMax || 0,
       animals, animalsFedToday,
       talkedRheaToday: p.lastTalkDay.get('rhea') === st.day ? 1 : 0,
@@ -342,7 +343,7 @@ class FarmEnv {
       case 'till': {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
-        ok = !!(t && t.type === 'empty');
+        ok = !!(t && t.type === 'empty') && p0.energy >= room._energyCost('till', p0.tool);
         if (ok) room.onTill(client, action);
         break;
       }
@@ -350,26 +351,24 @@ class FarmEnv {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
         const seeds = p0.inventory.get('seeds') || 0;
-        ok = !!(t && t.type === 'tilled' && seeds > 0);
-        if (ok) { room.onPlant(client, action); p0.inventory.set('seeds', seeds - 1); }
+        ok = !!(t && t.type === 'tilled' && seeds > 0) && p0.energy >= room._energyCost('plant', p0.tool);
+        if (ok) room.onPlant(client, action);   // onPlant itself deducts the seed + energy
         break;
       }
       case 'water': {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
         const wasWaterable = t && !t.watered && (t.type === 'seeded' || t.type === 'growing');
-        room.onWater(client, action);
-        if (wasWaterable) r += this.w.watered;
-        ok = !!wasWaterable;
+        ok = !!wasWaterable && p0.energy >= room._energyCost('water', p0.tool);
+        if (ok) { room.onWater(client, action); r += this.w.watered; }
         break;
       }
       case 'harvest': {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
         const wasMature = t && t.type === 'mature';
-        room.onHarvest(client, action);
-        ok = !!wasMature;
-        if (ok) r += this.w.harvest;
+        ok = !!wasMature && p0.energy >= room._energyCost('harvest', p0.tool);
+        if (ok) { room.onHarvest(client, action); r += this.w.harvest; }
         break;
       }
       case 'sell':         { const res = room.onSell(client, action); ok = !!(res && res.ok); break; }
@@ -511,6 +510,9 @@ class FarmEnv {
         if (beforeSeason !== seasonName(after.day)) {
           lines.push(`${beforeSeason[0].toUpperCase() + beforeSeason.slice(1)} turns to ${seasonName(after.day)}.`);
         }
+        if ((after.staminaMax || 100) > (before.staminaMax || 100)) {
+          lines.push(`You wake sore but broader — your stamina ceiling has grown to ${after.staminaMax}.`);
+        }
         if (cr < 0) lines.push(`The night cost ${Math.abs(cr)} cr — the living wage of sleep.`);
         return lines.join(' ');
       }
@@ -552,7 +554,7 @@ class FarmEnv {
     const animals = Object.fromEntries(p.animals || []);
     const friends = Object.fromEntries(p.friendships || []);
     const parts = [
-      `credits ${obs.credits} · energy ${obs.energy} · day ${st.day} · ${seasonName(st.day)} · hoe ${p.tool || 'base'}`,
+      `stamina ${obs.energy}/${obs.staminaMax || 100} · credits ${obs.credits} · day ${st.day} · ${seasonName(st.day)} · hoe ${p.tool || 'base'}`,
       `farm [${counts.join(' ')}]`,
     ];
     if (inv.length) parts.push(`inventory ${inv.join(', ')}`);

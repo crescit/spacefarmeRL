@@ -7,6 +7,7 @@ const offline = [
   'tests/verify_cooking.mjs',
   'tests/verify_aliens.mjs',
   'tests/verify_determinism.mjs',
+  'tests/verify_energy.mjs',
   'tests/verify_festival_day.mjs',
   'tests/verify_friendship.mjs',
   'tests/verify_mechanics.mjs',
