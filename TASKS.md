@@ -138,5 +138,6 @@ parallel under P0.3) — everything RL sits on this.
   - ✅ P0.8 gate: `verify_narrative.mjs` + `verify_energy.mjs` wired into `npm test`
   - ✅ P0.9 **Stamina authority**: one gate (`ENERGY_COSTS`/`_spendEnergy`); work tires you, rest recovers, conditioning trains `staminaMax` (a skill you build); seeds/plant owned by the handler; browser `till` intent now actually sent; client reads authoritative stamina; obs exposes `staminaMax` (`f6d86a9`)
   - ✅ P1.1 native step path: `env_gym.native_step()` + narrative accessors (`briefing/state_text/inspect_text/colony_log/write_journal/journal_text`) through the bridge
+  - ✅ P1.2 **OpenAI tool-calling dialog** (`ToolDialogPolicy` in `llm_policy.py`): `tools` + `tool_choice:"auto"` + `role:tool` results, introspection tools answered in-loop (P1.3), `rest()` ends the day, dict/object tolerant; stub-server round-trip + a **stub season rollout** that replays exactly and provably does not collapse to the first-valid fallback (`50c2661`, 29 python tests green)
 
-**Open next:** P1.2 OpenAI tool-calling loop (tools/`tool_choice`/`role:tool`, rest = end of turn) with a stub-server round-trip test.
+**Open next:** P1.4 `--debug-dir` raw-response capture · P1.5 `rollout_tools.py` season runner · P2.5 day-in-the-life transcript renderer · P2.1/P2.2 briefing turns + flavor results wired into the runner · P4 validity gates.
