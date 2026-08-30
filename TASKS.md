@@ -47,6 +47,7 @@ parallel under P0.3) — everything RL sits on this.
 | P0.6 | **Tool-result prose** — `describe()` engine: colorful, consequence-symmetric one-liners per action type (+/- faces) | P0.3 | Every tool has ≥1 line per outcome; determinism test |
 | P0.7 | **Trajectory v2** — header gains `action_interface`, records native actions + tool names + prose; exact replay; v1 files still replay | P0.4 | Replay fixture (v1 + v2) round-trips byte-exact |
 | P0.8 | **P0 test gate** — schema, calendar, briefing/prose determinism, trajectory compat | P0.5, P0.6, P0.7 | `npm run test:rl` + focused node tests green |
+| P0.9 | **Stamina/energy authority (1:1)** — one server-side gate (`ENERGY_COSTS` + `_spendEnergy`) shared by browser and RL; stamina as a trainable skill (`staminaMax` conditioning + rest recovery); seeds owned by handlers; `till` intent actually sent; client reads authoritative stamina; `verify_energy.mjs` | P0.3, P0.4 | `verify_energy` + full suite green (done) |
 
 ---
 
@@ -123,3 +124,19 @@ parallel under P0.3) — everything RL sits on this.
 - **Never** start P2/P3/P4 before the P0 gate is green — the schema/narrative core is load-bearing.
 - P5.4 must land before P5.5 (spectator depends on shared history).
 - The endpoint is *only* required at P1.7 and P4.5; everything else is stub-proof.
+
+---
+
+## Progress log (append-only)
+
+- **2026-08-29 (overnight sprint)** — `6fe8dba`:
+  - ✅ P0.1 charter (`docs/COLONY_SAGA.md`) · ✅ P0.2 story clock (7d/28d, `seasonOf`)
+  - ✅ P0.3 single-source `TOOLS` (18 world-voice tools) in `rl/env_core.cjs`
+  - ✅ P0.4 bridge spec v2 (`tools` + vocabulary + narrative commands)
+  - ✅ P0.5 Colony Briefing · ✅ P0.6 consequence-symmetric tool prose
+  - ✅ P0.7 trajectory v2 (`action_interface`, native/tool/prose records, v1-compatible)
+  - ✅ P0.8 gate: `verify_narrative.mjs` + `verify_energy.mjs` wired into `npm test`
+  - ✅ P0.9 **Stamina authority**: one gate (`ENERGY_COSTS`/`_spendEnergy`); work tires you, rest recovers, conditioning trains `staminaMax` (a skill you build); seeds/plant owned by the handler; browser `till` intent now actually sent; client reads authoritative stamina; obs exposes `staminaMax` (`f6d86a9`)
+  - ✅ P1.1 native step path: `env_gym.native_step()` + narrative accessors (`briefing/state_text/inspect_text/colony_log/write_journal/journal_text`) through the bridge
+
+**Open next:** P1.2 OpenAI tool-calling loop (tools/`tool_choice`/`role:tool`, rest = end of turn) with a stub-server round-trip test.

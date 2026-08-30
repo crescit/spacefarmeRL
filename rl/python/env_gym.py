@@ -254,7 +254,8 @@ class FarmGymEnv(gym.Env):
         super().reset(seed=seed)
         actual_seed = int(seed if seed is not None else self.np_random.integers(0, 2**31 - 1))
         horizon = int((options or {}).get("horizon_days", self.horizon_days))
-        self.raw_obs, info = self.bridge.reset(actual_seed, horizon)
+        narrative = bool((options or {}).get("narrative", False))
+        self.raw_obs, info = self.bridge.reset(actual_seed, horizon, narrative=narrative)
         return flatten_observation(self.raw_obs, len(self.codec.items)), self._info(info)
 
     def step(self, action: int):
@@ -266,6 +267,40 @@ class FarmGymEnv(gym.Env):
             flatten_observation(self.raw_obs, len(self.codec.items)), reward,
             terminated, truncated, self._info({**info, "native_action": native}),
         )
+
+    def native_step(self, native: dict[str, Any]):
+        """Step the authoritative world with one native action (tool-driven).
+
+        No macro codec — the model talks to the world directly, exactly as the
+        browser client does (same FarmRoom handlers, same stamina gate, same
+        denial semantics).
+        """
+        if self.raw_obs is None:
+            raise RuntimeError("reset() must be called before step()")
+        self.raw_obs, reward, terminated, truncated, info = self.bridge.step(native)
+        return (
+            flatten_observation(self.raw_obs, len(self.codec.items)), reward,
+            terminated, truncated, {**info, "native_action": native},
+        )
+
+    # ── Narrative accessors: the world speaks through the one Node authority ──
+    def briefing(self) -> str:
+        return str(self.bridge.request({"cmd": "briefing"}).get("briefing", ""))
+
+    def state_text(self) -> str:
+        return str(self.bridge.request({"cmd": "state"}).get("state", ""))
+
+    def inspect_text(self, target: str) -> str:
+        return str(self.bridge.request({"cmd": "inspect", "target": target}).get("text", ""))
+
+    def colony_log(self) -> str:
+        return str(self.bridge.request({"cmd": "log"}).get("log", ""))
+
+    def write_journal(self, entry: str) -> str:
+        return str(self.bridge.request({"cmd": "journal", "entry": str(entry)}).get("reply", ""))
+
+    def journal_text(self) -> str:
+        return str(self.bridge.request({"cmd": "journal"}).get("journal", ""))
 
     def action_masks(self) -> np.ndarray:
         if self.raw_obs is None:
