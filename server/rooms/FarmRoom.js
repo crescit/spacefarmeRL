@@ -492,8 +492,17 @@ class FarmRoom extends Room {
     this.onMessage('water', (client, data) => this.onWater(client, data));
     this.onMessage('harvest', (client, data) => this.onHarvest(client, data));
     this.onMessage('till', (client, data) => this.onTill(client, data));
-    this.onMessage('sell', (client, data) => this.onSell(client, data));
+    this.onMessage('sell', (client, data) => {
+      const r = this.onSell(client, data);
+      if (client && client.send) client.send('sell', r);   // sell needs a reply (GE/ranch kiosks await it)
+    });
     this.onMessage('order', (client, data) => this.onOrder(client, data));
+    // ── Supply Depot — the colony shop. Every item the client advertises
+    //    must be purchasable here, or the shelf is a lie. ──
+    this.onMessage('buy', (client, data) => {
+      const r = this.onShopBuy(client, data);
+      if (client && client.send) client.send('buy', r);
+    });
     // reply-capable handlers: colyseus 0.17 no longer auto-replies return values,
     // so explicitly send the result back to the caller via client.send(type, result).
     this.onMessage('gift', (client, data) => {
@@ -961,6 +970,30 @@ class FarmRoom extends Room {
     this._checkMilestones(client);
     this.questEvent(client, { kind: 'sell', amount: price * qty });
     return { ok: true, item: data.item, qty, credits: price * qty, balance: player.credits };
+  }
+
+  // ── Supply Depot: buy items with credits. The shop's shelf is honest — the
+  //    client advertises exactly these items and prices; economy stays server-side.
+  onShopBuy(client, data) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return { ok: false, reason: 'no-player' };
+    const SHOP_PRICES = {
+      'seeds': 5,                  // the progression unlocker — the farm needs seeds
+      'stardust-crystal': 100,
+      'tech-part': 40,
+      'cooked-food': 40,
+    };
+    const item = data && data.item;
+    const price = SHOP_PRICES[item];
+    if (!price) return { ok: false, reason: 'not-for-sale', item: item || null };
+    const qty = Math.max(1, Math.floor((data && data.quantity) || 1));
+    const cost = price * qty;
+    if (player.credits < cost) return { ok: false, reason: 'not-enough-credits', need: cost, balance: player.credits };
+    player.credits -= cost;
+    player.inventory.set(item, (player.inventory.get(item) || 0) + qty);
+    this._ledgerAdd(client.sessionId, { spent: cost });
+    this.questEvent(client, { kind: 'buy', amount: cost });
+    return { ok: true, item, qty, spent: cost, balance: player.credits };
   }
 
   onOrder(client, data) {

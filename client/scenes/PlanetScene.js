@@ -17,9 +17,11 @@ import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { questView, questChip, QUESTS, rewardLine } from '../systems/QuestSystem.js';
 import { calendar, SEASON_NAMES, DAYS_PER_SEASON } from '../systems/CalendarService.js';
+import { schemaEntries } from '../systems/NetworkSystem.js';
 import {
   MAP_W, MAP_H, ground, blocks, BUILDINGS, DECOR, NPC_POS,
   PLAYER_START, fenceSpans, FENCE_Y_EXPORT,
+  MINE_SPOT, DEEP_DROP_SPOT,
 } from '../systems/MapData.js';
 
 const T = 32;
@@ -487,10 +489,12 @@ class PlanetScene extends Phaser.Scene {
     this.ranchStage.add(this.add.text(0, 56, '[1][2][3] buy · feed daily', { fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#a8d8d8' }).setOrigin(0.5));
     this._animalsSig = '';
     this.ranchStage.setVisible(false);
-    // ── asteroid mining spot — a cracked rock you mine for space ore ──
-    this.mineX = 52, this.mineY = 16;
+    // ── asteroid mining spot — a cracked rock you mine for space ore.
+    //    Tile (36,16): the farm's eastern edge, just south of the fence line —
+    //    reachable on the 40×32 map (the old x=52 sat past the right edge).
+    this.mineX = MINE_SPOT.x, this.mineY = MINE_SPOT.y;
     this.mineRock = this.add.graphics().setDepth(94);
-    this._drawMineRock(this.mineRock, 52 * T, 16 * T);
+    this._drawMineRock(this.mineRock, this.mineX * T, this.mineY * T);
     this.mineKey = this.input.keyboard.addKey('K');
     this.casting2 = false;
     this.mineHint = this.add.container(0, 0).setDepth(988);
@@ -510,7 +514,7 @@ class PlanetScene extends Phaser.Scene {
     this.fishHint.setVisible(false);
     // the deep drop — a second fishing spot (rare/night fish) at the pond's far shore
     this.deepDrop = this.add.graphics().setDepth(94);
-    const ddx = 38 * T, ddy = 21 * T;
+    const ddx = DEEP_DROP_SPOT.x * T, ddy = DEEP_DROP_SPOT.y * T;
     this.deepDrop.fillStyle(0x12686e, 0.9).fillCircle(ddx, ddy, 9);
     this.deepDrop.fillStyle(0x39c5bb, 0.8).fillCircle(ddx, ddy, 5);
     this.deepDrop.lineStyle(1.5, 0x9ddd72, 0.7).strokeCircle(ddx, ddy, 9);
@@ -1088,6 +1092,28 @@ rations, and your name on the manifest.
     this.openRanch();
   }
 
+  // ── Sell livestock products (egg/milk/wool) at market — the kiosk's [S].
+  sellProducts() {
+    const net = window.SpaceFarmer.net;
+    if (!net || !net.connected) { this.showToast('Offline — no market.'); return; }
+    if (this._ranchSellBusy) return;
+    this._ranchSellBusy = true;
+    const item = ['egg', 'milk', 'wool'].find(i => (this.inventory[i] || 0) > 0);
+    if (!item) { this._ranchSellBusy = false; this.showToast('No livestock products to sell yet.'); return; }
+    net.request('sell', { item, quantity: 1 }).then(r => {
+      this._ranchSellBusy = false;
+      if (r && r.ok) {
+        this.inventory[item] = (this.inventory[item] || 0) - (r.qty || 1);
+        if (this.audio) this.audio.sfx('star');
+        this.showToast(`Sold 1 ${item} for +${r.credits} CR.`);
+      } else {
+        this.showToast('Nothing sold — the ledger held tight.');
+      }
+      this.updateHUD();
+      if (this.showingRanch) this.openRanch();
+    });
+  }
+
   // ── Tool upgrade: spend credits to improve your hoe (U key) ──
   upgradeTool() {
     const net = window.SpaceFarmer.net;
@@ -1282,7 +1308,7 @@ rations, and your name on the manifest.
     const d1 = Math.hypot(px - 27, py - 22), d2 = Math.hypot(px - 38, py - 21);
     let near = false, label = '';
     if (d1 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · stardust shore / some fish bite'; }
-    else if (d2 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · deep drop (rare, night-only)'; }
+    else if (d2 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · deep drop (rare, deep-water)'; }
     this.fishHint.setVisible(near).setPosition(this.playerSpr.x, this.playerSpr.y - 46).setAlpha(near ? 0.9 : 0);
     if (near && this._fishHintLabel !== label) { this._fishHintLabel = label; if (this._fishHintTxt) this._fishHintTxt.setText(label); }
   }
@@ -1761,12 +1787,27 @@ rations, and your name on the manifest.
         }
         if (Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
       }
-      // ranch panel: buy 1/2/3, feed F
+      // ranch panel: buy 1/2/3, feed F, sell products S
       if (this.showingRanch) {
         if (Phaser.Input.Keyboard.JustDown(this.oneKey)) this.buyAnimal('chicken');
         if (Phaser.Input.Keyboard.JustDown(this.twoKey)) this.buyAnimal('cow');
         if (Phaser.Input.Keyboard.JustDown(this.threeKey)) this.buyAnimal('sheep');
         if (Phaser.Input.Keyboard.JustDown(this.fKey)) this.feedAnimals();
+        if (Phaser.Input.Keyboard.JustDown(this.wasd.S)) this.sellProducts();
+      }
+      // supply depot: 1-4 buy real items (the shelf is not a lie)
+      if (this.showingShop) {
+        if (Phaser.Input.Keyboard.JustDown(this.oneKey)) this.buyFromShop('seeds');
+        else if (Phaser.Input.Keyboard.JustDown(this.twoKey)) this.buyFromShop('stardust-crystal');
+        else if (Phaser.Input.Keyboard.JustDown(this.threeKey)) this.buyFromShop('tech-part');
+        else if (Phaser.Input.Keyboard.JustDown(this.fourKey)) this.buyFromShop('cooked-food');
+      }
+      // grand exchange: 1-4 sell by category (living sell board)
+      if (this.showingGE) {
+        if (Phaser.Input.Keyboard.JustDown(this.oneKey)) this.sellCategory('crop');
+        else if (Phaser.Input.Keyboard.JustDown(this.twoKey)) this.sellCategory('fish');
+        else if (Phaser.Input.Keyboard.JustDown(this.threeKey)) this.sellCategory('produce');
+        else if (Phaser.Input.Keyboard.JustDown(this.fourKey)) this.sellCategory('ore');
       }
       // chest panel: 1/2 deposit, 3/4 withdraw
       if (this.showingChest) {
@@ -2159,13 +2200,17 @@ rations, and your name on the manifest.
         if (typeof ps.staminaMax === 'number') this.staminaMax = ps.staminaMax;
         if (typeof ps.credits === 'number') this.credits = ps.credits;
         this.inventory = this.inventory || {};
-        for (const k of Object.keys(ps.inventory || {})) this.inventory[k] = ps.inventory[k];
+        for (const [k, v] of schemaEntries(ps.inventory)) this.inventory[k] = v;
         this.animals = this.animals || {};
-        for (const k of Object.keys(ps.animals || {})) this.animals[k] = ps.animals[k];
+        for (const [k, v] of schemaEntries(ps.animals)) this.animals[k] = v;
         this._refreshRanch();
         this.storage = this.storage || {};
-        for (const k of Object.keys(ps.storage || {})) this.storage[k] = ps.storage[k];
+        for (const [k, v] of schemaEntries(ps.storage)) this.storage[k] = v;
         if (ps.tool) this.tool = ps.tool;
+        // The browser is a camera: reconcile each farm tile from the server's
+        // authoritative grid so rejected moves (e.g. low-energy till) and
+        // multiplayer contention can never leave the field lying about what it is.
+        this._syncFarmState();
         if (net.room && net.room.state) {
           this.roomState = net.room.state;
           // M3 — festival phase is authoritative in room state: sync it here so
@@ -2205,6 +2250,32 @@ rations, and your name on the manifest.
     if (this.questChip) {
       const view = questView(this._questPS, this._questPS);
       this.questChip.setText(questChip(view));
+    }
+  }
+
+  // ── Authoritative tile sync: the browser is a camera. Any drift between the
+  // optimistic local farm and the server's grid (a rejected till, another
+  // farmer's action, a rejoin mid-season) is corrected here on every HUD tick.
+  _syncFarmState() {
+    const net = window.SpaceFarmer.net;
+    if (!net || !net.connected || !net.getFarmState) return;
+    const fs = net.getFarmState();
+    if (!fs || !fs.tiles) return;
+    for (const tile of fs.tiles) {
+      if (!tile) continue;
+      const local = this.farmTiles && this.farmTiles.find(t => t.x === tile.x && t.y === tile.y);
+      if (!local) continue;
+      const type = tile.type || 'empty';
+      const watered = !!tile.watered;
+      if (local.state.type !== type || local.state.watered !== watered ||
+          (local.state.crop || '') !== (tile.crop || '') ||
+          (local.state.growth || 0) !== (tile.growthDay || 0)) {
+        local.state.type = type;
+        local.state.crop = tile.crop || '';
+        local.state.watered = watered;
+        local.state.growth = tile.growthDay || 0;
+        local.img.setTexture(TILE_FOR_STATE[type] || local.baseKey || 'tile.soil');
+      }
     }
   }
 
@@ -2327,6 +2398,39 @@ rations, and your name on the manifest.
     this.energy = Math.max(0, this.energy - cost);
   }
 
+  // ── Interaction feedback: every hoe/thirst/seed/blade press leaves a visible
+  //    moment on the tile — dust when you till, a gold glint when you plant,
+  //    a dew-ring when you water, a flash when you reap. Short-lived and
+  //    self-cleaning (the same splash pattern fishing/mine already use). ──
+  _tileFX(tx, ty, kind) {
+    const px = tx * T + T / 2, py = ty * T + T / 2;
+    if (!this.world) return;
+    const col = kind === 'till' ? 0xd6b477 : kind === 'plant' ? 0xffe9a0 : kind === 'water' ? 0x39c5bb : 0xf3bd67;
+    const maxR = kind === 'harvest' ? 16 : kind === 'till' ? 11 : 9;
+    const spr = this.add.graphics().setDepth(Math.floor(py / T) + 0.3);
+    this.world.add(spr);
+    let r = 2;
+    const ev = this.time.addEvent({ delay: 30, repeat: Math.max(8, Math.floor(maxR / 2)), callback: () => {
+      r += 1.7;
+      spr.clear();
+      spr.lineStyle(1.7, col, Math.max(0, 0.75 - (r / maxR) * 0.5));
+      spr.strokeCircle(px, py, r);
+      if (r >= maxR) { ev.remove(); spr.destroy(); }
+    } });
+    this.time.delayedCall((maxR / 1.7) * 30 + 260, () => { if (spr.active) spr.destroy(); });
+    // a couple of rising motes — dust, dew, or harvest flecks
+    for (let i = 0; i < 3; i++) {
+      const m = this.add.circle(px + (Math.random() - 0.5) * 5, py + (Math.random() - 0.5) * 3, 1.4, col, 0.9)
+        .setDepth(Math.floor(py / T) + 0.35);
+      this.world.add(m);
+      this.tweens.add({
+        targets: m, y: py - 8 - Math.random() * 6, alpha: 0,
+        duration: 420 + Math.random() * 160, ease: 'Sine.easeOut',
+        onComplete: () => m.destroy(),
+      });
+    }
+  }
+
   handleTileAction(ft) {
     const s = ft.state;
     switch (s.type) {
@@ -2336,6 +2440,7 @@ rations, and your name on the manifest.
         ft.img.setTexture('tile.tilled');
         const netTill = window.SpaceFarmer.net;
         if (netTill && netTill.connected) netTill.send('till', { tileX: s.x, tileY: s.y });
+        this._tileFX(s.x, s.y, 'till');               // dust rings off the hoe
         if (this.audio) this.audio.sfx('bounce');
         this.showToast('Tilled the cosmic soil');
         break;
@@ -2353,6 +2458,7 @@ rations, and your name on the manifest.
           this._burnEnergy(this._energyCost(5));
           const net2 = window.SpaceFarmer.net;
           if (net2 && net2.connected) net2.send('water', { tileX: s.x, tileY: s.y });
+          this._tileFX(s.x, s.y, 'water');            // a dew-ring on the shoot
           if (this.audio) this.audio.sfx('glow');
           this.showToast('Watered with stardust dew');
         } else {
@@ -2363,6 +2469,7 @@ rations, and your name on the manifest.
         const info = CROPS[s.crop] || { sellPrice: 20, label: 'crop' };
         const cs = CROP_SEASONS[s.crop] || { regrow: false };
         this.credits += info.sellPrice;
+        this._tileFX(s.x, s.y, 'harvest');             // a reaping flash
         if (cs.regrow) {
           // continuous crop stays planted & regrows (needs watering again)
           s.type = 'growing'; s.growth = 0; s.watered = false; s.crop = s.crop;
@@ -2393,6 +2500,7 @@ rations, and your name on the manifest.
     this.inventory.seeds--;
     this._burnEnergy(this._energyCost(5));
     ft.img.setTexture('tile.seeded');
+    this._tileFX(s.x, s.y, 'plant');                   // a gold glint in the soil
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('plant', { tileX: s.x, tileY: s.y, crop: key });
     if (this.audio) this.audio.sfx('confirm');
@@ -2780,28 +2888,95 @@ rations, and your name on the manifest.
   openGrandExchange() {
     this.showingGE = true;
     this.gePanel.setVisible(true);
+    const counts = {
+      crop: ['space-wheat', 'star-berry', 'moon-melon', 'plasma-tomato', 'nebula-pepper', 'glow-kelp']
+        .filter(i => (this.inventory[i] || 0) > 0).length,
+      fish: ['moonfish', 'stardust-salmon', 'comet-trout', 'nebula-marlin']
+        .filter(i => (this.inventory[i] || 0) > 0).length,
+      produce: ['egg', 'milk', 'wool'].filter(i => (this.inventory[i] || 0) > 0).length,
+      ore: ['asteroid-dust', 'nickel-iron', 'silicon-carbide', 'void-diamond']
+        .filter(i => (this.inventory[i] || 0) > 0).length,
+    };
     this.geContent.setText(
-      `BUY / SELL BOARD\n\n` +
-      `SPACE WHEAT ....... 20 CR\n` +
-      `STAR BERRY ........ 35 CR\n` +
-      `MOON MELON ........ 50 CR\n` +
-      `PLASMA TOMATO ..... 40 CR\n\n` +
-      `HARVESTED CROPS AUTO-LIST\n` +
-      `CREDITS: ${this.credits}`
+      `GRAND EXCHANGE — SELL BOARD\n\n` +
+      `[1] CROP ................. ${counts.crop} kinds\n` +
+      `[2] FISH ................. ${counts.fish} kinds\n` +
+      `[3] PRODUCE (egg/milk/wool) ${counts.produce} kinds\n` +
+      `[4] ORE / MINERAL ......... ${counts.ore} kinds\n\n` +
+      `Each press sells 1 unit at market price.\n` +
+      `[SPACE] Close\n\n` +
+      `${this.credits} CR on hand`
     );
+  }
+
+  // ── Grand Exchange sell — turn holdings into credits (server ledger).
+  //    Picks the next owned item of a category and sells one unit of it. ──
+  sellCategory(kind) {
+    const net = window.SpaceFarmer.net;
+    if (!net || !net.connected) { this.showToast('Offline — the Exchange is closed.'); return; }
+    if (this.geBusy) return;
+    this.geBusy = true;
+    const pools = {
+      crop: ['space-wheat', 'star-berry', 'moon-melon', 'plasma-tomato', 'nebula-pepper', 'glow-kelp'],
+      fish: ['moonfish', 'stardust-salmon', 'comet-trout', 'nebula-marlin'],
+      produce: ['egg', 'milk', 'wool'],
+      ore: ['asteroid-dust', 'nickel-iron', 'silicon-carbide', 'void-diamond'],
+    };
+    const item = (pools[kind] || []).find(i => (this.inventory[i] || 0) > 0);
+    if (!item) { this.geBusy = false; this.showToast(`No ${kind} to sell.`); return; }
+    net.request('sell', { item, quantity: 1 }).then(r => {
+      this.geBusy = false;
+      if (r && r.ok) {
+        this.inventory[item] = (this.inventory[item] || 0) - (r.qty || 1);
+        if (this.audio) this.audio.sfx('star');
+        this.showToast(`Sold 1 ${item.replace(/-/g, ' ')} for +${r.credits} CR.`);
+      } else if (r && r.reason === 'need-item') {
+        this.showToast(`You no longer hold ${item}.`);
+      } else {
+        this.showToast('The Exchange would not take that.');
+      }
+      this.updateHUD();
+      if (this.showingGE) this.openGrandExchange();
+    });
   }
 
   openShop() {
     this.showingShop = true;
     this.shopPanel.setVisible(true);
+    const inv = this.inventory || {};
     this.shopContent.setText(
       `QUASAR'S SUPPLY DEPOT\n\n` +
-      `[1] SPACE SEEDS ....... 5 CR\n` +
-      `[2] STARDUST CANNON . 10 CR\n` +
-      `[3] CORE PICKAXE ...... 15 CR\n` +
-      `[4] NEBULA SNACK ...... 3 CR\n\n` +
-      `CREDITS: ${this.credits}`
+      `[1] SPACE SEEDS ......... 5 CR   (have ${inv.seeds || 0})\n` +
+      `[2] STARDUST CRYSTAL ... 100 CR  (have ${inv['stardust-crystal'] || 0})\n` +
+      `[3] TECH PART .......... 40 CR   (have ${inv['tech-part'] || 0})\n` +
+      `[4] COOKED FOOD ........ 40 CR   (have ${inv['cooked-food'] || 0})\n\n` +
+      `[1-4] Buy   [SPACE] Close\n\n` +
+      `${this.credits} CR on hand`
     );
+  }
+
+  // ── Supply Depot purchase — the farm needs seeds, and the depot can't be a
+  //    shelf that never sells anything (server-authoritative price + ledger). ──
+  buyFromShop(item) {
+    const net = window.SpaceFarmer.net;
+    if (!net || !net.connected) { this.showToast('Offline — the depot is closed.'); return; }
+    if (this._shopBusy) return;
+    this._shopBusy = true;
+    const label = { 'seeds': 'SPACE SEEDS', 'stardust-crystal': 'STARDUST CRYSTAL', 'tech-part': 'TECH PART', 'cooked-food': 'COOKED FOOD' }[item] || item;
+    net.request('buy', { item, quantity: 1 }).then(r => {
+      this._shopBusy = false;
+      if (r && r.ok) {
+        this.inventory[item] = (this.inventory[item] || 0) + (r.qty || 1);
+        if (this.audio) this.audio.sfx('confirm');
+        this.showToast(`Bought 1 ${label} for ${r.spent} CR.`);
+      } else if (r && r.reason === 'not-enough-credits') {
+        this.showToast(`Need ${r.need} CR for ${label}.`);
+      } else {
+        this.showToast('The depot has no such item.');
+      }
+      this.updateHUD();
+      if (this.showingShop) this.openShop();
+    });
   }
 
   showToast(msg) {

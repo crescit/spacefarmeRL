@@ -17,6 +17,20 @@ function getStablePlayerId() {
   }
 }
 
+// Iterate a Colyseus MapSchema (or a plain object) as [key, value] pairs.
+// MapSchema hides its entries from Object.keys (they're behind $items/$indexes),
+// so sync code that wants REAL keys must go through the schema's iterator or
+// forEach — otherwise every sync copies internal machinery instead of data.
+export function schemaEntries(m) {
+  if (!m) return [];
+  if (typeof m.forEach === 'function') {
+    const out = [];
+    m.forEach((value, key) => out.push([key, value]));
+    return out;
+  }
+  return Object.entries(m);
+}
+
 class NetworkSystem {
   constructor() {
     this.client = null;
@@ -94,20 +108,19 @@ class NetworkSystem {
     return this.room.state.players[this.playerId];
   }
 
-  // Pull authorative friendship/marriage/inventory into `into` (a plain object).
+  // Pull authoritative friendship/marriage/inventory into `into` (a plain object).
   syncPlayer(into) {
     const p = this.getPlayerState();
     if (!p) return;
     into.credits = p.credits;
     into.energy = p.energy;
     into.marriedTo = p.marriedTo || '';
-    // friendships map
     into.friendships = into.friendships || {};
-    for (const k of Object.keys(p.friendships || {})) into.friendships[k] = p.friendships[k];
+    for (const [k, v] of schemaEntries(p.friendships)) into.friendships[k] = v;
     into.heartEvents = into.heartEvents || {};
-    for (const k of Object.keys(p.heartEvents || {})) into.heartEvents[k] = p.heartEvents[k];
+    for (const [k, v] of schemaEntries(p.heartEvents)) into.heartEvents[k] = v;
     into.inventory = into.inventory || {};
-    for (const k of Object.keys(p.inventory || {})) into.inventory[k] = p.inventory[k];
+    for (const [k, v] of schemaEntries(p.inventory)) into.inventory[k] = v;
   }
 
   getFarmState() {

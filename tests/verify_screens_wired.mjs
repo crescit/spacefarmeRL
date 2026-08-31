@@ -30,7 +30,7 @@ const PS = await import('../client/scenes/PlanetScene.js');
 const IS = await import('../client/scenes/IntroScene.js');
 const SPS = await import('../client/scenes/SpaceshipScene.js');
 const { TEXTURES } = SS;
-const { BUILDINGS, blocks, verifyWalkability } = MD;
+const { BUILDINGS, blocks, verifyWalkability, MINE_SPOT, DEEP_DROP_SPOT, MAP_W, MAP_H } = MD;
 
 // ── 1. Single-source texture wiring: buildings, interiors, player frames ──
 const BUILDING_TEX = [
@@ -67,6 +67,16 @@ for (const b of BUILDINGS) {
 const walk = verifyWalkability();
 check('map walkability: all buildings/soil/NPCs reachable', walk.ok,
   JSON.stringify(walk.unreachable && walk.unreachable.slice(0, 5)));
+
+// world activity spots must live ON the map and on walkable tiles (the mining
+// rock was once x=52 on a 40-wide map — unreachable in the browser)
+for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]]) {
+  check(`activity spot ${name} within map bounds`,
+    spot.x >= 0 && spot.x < MAP_W && spot.y >= 0 && spot.y < MAP_H,
+    JSON.stringify(spot));
+  check(`activity spot ${name} on walkable tile`, !blocks[spot.y]?.[spot.x],
+    JSON.stringify(spot));
+}
 
 // ── 3. PlanetScene building-action wiring: every BUILDINGS.action key is
 //     dispatched to a real handler method ──
