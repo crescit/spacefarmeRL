@@ -40,7 +40,10 @@ export class DialoguePanel {
     // collapsing works on mobile too — not just the tiny ▾ in the corner.
     scene.input.on('pointerdown', (pointer, over) => {
       if (!this.visible || !this.box.visible) return;
-      if ((over || []).some(o => o === this.collapseBtn || o === this.scrollUp || o === this.scrollDown)) return;
+      // Scroll arrows keep scrolling; everything else in the box (incl. the
+      // ▾/▴ corner glyph) toggles collapse. Scene-level input fires on plain
+      // canvas taps even where small in-canvas hit-areas slip on touch devices.
+      if ((over || []).some(o => o === this.scrollUp || o === this.scrollDown)) return;
       const inside = pointer.x >= this.boxL && pointer.x <= this.boxR &&
                      pointer.y >= this.boxT && pointer.y <= this.boxB;
       if (inside) { if (this.collapsed) this.expand(); else this.collapse(); }
@@ -103,7 +106,6 @@ export class DialoguePanel {
     this.collapseBtn = scene.add.text(boxR - 12, boxT + 13, COLLAPSE_GLYPH, {
       fontFamily: "system-ui, sans-serif", fontSize: '12px', color: '#9fffe0',
     }).setOrigin(1, 0.5).setDepth(1003).setInteractive({ useHandCursor: true }).setVisible(false);
-    this.collapseBtn.on('pointerdown', () => this.toggleCollapse());
 
     // ── footer hint (prompt / gift keys) ──
     this.hint = scene.add.text(boxR - 4, boxB - 14, '', {
