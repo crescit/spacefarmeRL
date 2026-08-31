@@ -119,6 +119,12 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   check('IntroScene registers key', /super\(\{\s*key:\s*'IntroScene'\s*\}\)/.test(introSrc));
   check('SpaceshipScene registers key', /super\(\{\s*key:\s*'SpaceshipScene'\s*\}\)/.test(shipSrc));
   check('PlanetScene registers key', /super\(\{\s*key:\s*'PlanetScene'\s*\}\)/.test(planetSrc));
+  // scene update loops that read the frame clock must declare it — the ship
+  // once crashed the whole game loop with `renderSprites(time)` in an
+  // unparameterized update() (ReferenceError: time), freezing the title screen
+  check('ship update declares the frame clock', /update\(time, delta\)/.test(shipSrc));
+  check('planet update declares the frame clock', /update\(time\)/.test(planetSrc));
+  check('intro update needs no frame clock (uses this.time)', /update\(\)/.test(introSrc));
   check('game.js scene registry: Intro→Ship→Planet',
     /scene:\s*\[IntroScene,\s*SpaceshipScene,\s*PlanetScene\]/.test(gameSrc));
   check('intro starts the ship', /scene\.start\('SpaceshipScene'\)/.test(introSrc));

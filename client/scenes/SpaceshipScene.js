@@ -311,7 +311,7 @@ class SpaceshipScene extends Phaser.Scene {
     this.touchDir = null;
   }
 
-  update() {
+  update(time, delta) {
     // ── Movement ──
     let dx = 0, dy = 0;
 

@@ -140,11 +140,19 @@ function init() {
 
   // Default to the page's origin so HTTPS deployments automatically use WSS
   // and platform-assigned ports. Embedders may override the endpoint before
-  // this module boots with window.SPACE_FARMER_SERVER.
-  const sameOrigin = window.location.protocol === 'file:'
-    ? 'ws://localhost:8900'
-    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
-  const endpoint = window.SPACE_FARMER_SERVER || sameOrigin;
+  // this module boots with window.SPACE_FARMER_SERVER (a string). Any bad or
+  // missing host degrades to the local game server; connect() failures are
+  // already caught and fall back to clean offline play.
+  let endpoint = window.SPACE_FARMER_SERVER;
+  if (typeof endpoint !== 'string' || !endpoint) {
+    try {
+      const proto = window.location.protocol;
+      if (proto === 'file:' || !window.location.host) endpoint = 'ws://127.0.0.1:8900';
+      else endpoint = `${proto === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+    } catch {
+      endpoint = 'ws://127.0.0.1:8900';
+    }
+  }
   const net = new NetworkSystem();
   window.SpaceFarmer.net = net;
   net.connect(endpoint).then(() => {
