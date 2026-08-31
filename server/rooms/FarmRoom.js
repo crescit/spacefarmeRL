@@ -165,20 +165,20 @@ defineTypes(FarmState, {
   feastPeak: 'boolean'        // M3: the feast has peaked this festival day
 });
 
-// ── Friendship gift-affinity tables (mirrors NPCData.js) ──
+// ── Friendship gift-affinity tables (single source: the StoryBank) ──
+// The per-NPC loved/liked/hated gift lists are story facts — they live ONCE
+// in shared/story/npcs.js, next to the dialogue that says them aloud. This
+// room derives its table from the bank instead of mirroring it, so the gift
+// you offer, the line the NPC speaks, and the agent's tool schema can never
+// disagree about what Nova loves.
 // loved → +15, liked → +5, hated → -8, neutral → +2
-const NPC_GIFTS = {
-  nova:   { loved: 'tech-part',        liked: ['data-crystal', 'cooked-food'],  hated: ['weeds', 'junk'] },
-  luna:   { loved: 'starlight-crystal', liked: ['exotic-seed', 'rare-mineral'], hated: ['processed-food', 'plastic'] },
-  zephyr: { loved: 'exotic-seed',      liked: ['starlight-crystal', 'rare-trade-good'], hated: ['processed-food', 'official-documents'] },
-  vega:   { loved: 'space-feather',    liked: ['cooked-food', 'starlight-crystal'], hated: ['plastic', 'metal-parts'] },
-  quasar: { loved: 'rare-part',        liked: ['cooked-food', 'rare-mineral'], hated: ['flowers', 'decorative-items'] },
-  rhea:   { loved: 'cooked-food',      liked: ['crop', 'exotic-seed'],      hated: ['uncooked-food', 'alcohol'] },
-  astra:  { loved: 'data-crystal',     liked: ['rare-mineral', 'exotic-seed'], hated: ['junk', 'processed-food'] },
-  orion:  { loved: 'rare-mineral',     liked: ['crop', 'tech-part'],        hated: ['flowers', 'decorative-items'] },
-  comet:  { loved: 'rare-trade-good',  liked: ['rare-mineral', 'exotic-seed'], hated: ['crop', 'common-items'] },
-  cora:   { loved: 'data-crystal',     liked: ['tech-part', 'rare-mineral'], hated: ['flowers', 'uncooked-food'] },
-};
+const NPC_DATA = require('../../shared/story/npcs.js');
+const NPC_GIFTS = Object.fromEntries(
+  Object.entries(NPC_DATA).map(([id, npc]) => [
+    id,
+    { loved: npc.lovedGift, liked: npc.likedGifts, hated: npc.hatedGifts },
+  ]),
+);
 const HEART_THRESHOLDS = [20, 40, 60, 80, 100];
 
 // ── Tool upgrades (hoe tiers) ──
@@ -991,7 +991,8 @@ class FarmRoom extends Room {
   }
 
   // ── Friendship engine (Harvest Moon-style) ──
-  // Gift affinity tables — mirrors NPCData.js. Returns a tier + friendship delta.
+  // Gift affinity tables come from the StoryBank-derived NPC_GIFTS above (the
+  // same loved/liked/hated lists the dialogue and agent schemas read).
   //   loved item  → +15   (their favorite)
   //   liked item  → +5
   //   hated item  → -8    (they actively dislike it)

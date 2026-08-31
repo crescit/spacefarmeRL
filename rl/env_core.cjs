@@ -21,6 +21,14 @@ const {
   Calendar, createCalendar, DEFAULT_CALENDAR,
   DAYS_PER_SEASON, SEASONS, SEASON_NAMES, SEASON_COUNT,
 } = require(path.join(__dirname, '..', 'shared', 'calendar.js'));
+// The StoryBank is the ONE source of world VOICE — season/festival/pressure
+// prose (shared/story/season.js) and the first-contact alien scenarios +
+// contact doctrines (shared/story/aliens.js). This env never re-implements
+// that prose: it reads the same objects the browser renders. Writing a
+// story line once in the bank updates briefings, transcripts, and the plaza
+// together — drift by construction is impossible.
+const storySeason = require(path.join(__dirname, '..', 'shared', 'story', 'season.js'));
+const storyAliens = require(path.join(__dirname, '..', 'shared', 'story', 'aliens.js'));
 
 // Fixed item vocabulary for the inventory vector (stable ordering = stable obs).
 const ITEMS = [
@@ -39,32 +47,20 @@ const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 const ACTION_TYPES = ['till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
 
 // ── Story clock: the calendar is the story's heartbeat. Season/festival math
-// lives in shared/calendar.js (single source of truth); this env keeps only
-// the VOICE — the prose the world speaks about that calendar. ──
-const SEASON_TEXT = {
-  spring: 'Spring haze softens the crater rim; the soil smells of stardust and of debt.',
-  summer: 'Summer light bakes the plaza boards; the fields run gold and the work runs long.',
-  fall: 'Fall air carries ozone and the smell of boiling wine; the fields give their last, full answer.',
-  winter: "Winter's silver dusk closes in; the generator's hum is one beat slower than it was.",
-};
-// Named per festival — the lamps are lit for whatever the calendar says is on.
-const FESTIVAL_TEXT = {
-  naming: 'The lamps come up the ridge path and the old mission bell answers the dawn — it is The Naming, and B-612 remembers the first light.',
-  'solar-flare-fair': 'Bonfires leap higher than the solar flares tonight — it is the Solar Flare Fair, and the colony\u2019s cooking contest hangs in zero-g over the plaza.',
-  'galactic-harvest': 'The Exchange boards run gold and the air smells of boiling wine — it is the Galactic Harvest Festival, and the fields gave their last, full answer.',
-  hearthnight: 'Every dome is lit at once, every table set, every door open — it is Hearthnight, the colony\u2019s shared holiday. And tonight they eat Earth rations, the meal that tastes like grief and salt.',
-};
-// Fallback for any festival the calendar has no named flavor for yet — an
-// injected/test festival id must never borrow a *named* festival's prose.
-const GENERIC_FESTIVAL_TEXT = 'The lamps come up across the plaza and the colony turns out — some festival is on, and B-612 gathers to keep it together.';
+// lives in shared/calendar.js and the world's VOICE — the prose this env
+// speaks — lives in shared/story/season.js (single source of truth). We only
+// alias it here and keep the festivalFlair helper that resolves a calendar
+// festival object to its prose. ──
+const SEASON_TEXT = storySeason.seasonText;
+const FESTIVAL_TEXT = storySeason.festivalText;
+const GENERIC_FESTIVAL_TEXT = storySeason.genericFestivalText;
 const festivalFlair = (fest, fallback = GENERIC_FESTIVAL_TEXT) =>
   (fest && FESTIVAL_TEXT[fest.id]) || fallback;
-const PRESSURES = [
-  'The debt is older this morning, and the ledger does not sleep.',
-  'Somewhere in the generator housing, a knock repeats like a word you almost know.',
-  'Winter is a rumor that grows louder each dawn.',
-  'On the ridge, the bell on the old mission tower is still.',
-];
+const PRESSURES = storySeason.pressures;
+
+// ── StoryBank re-exports for Python/bridge consumers ──
+const ALIENS = storyAliens.aliens;
+const CONTACT_DOCTRINES = storyAliens.doctrines;
 
 // ── Agent vocabulary (single source for tool schemas, MCP, and prose) ──
 const NPC_IDS = ['nova', 'luna', 'zephyr', 'vega', 'quasar', 'rhea', 'astra', 'orion', 'comet', 'cora'];
@@ -721,5 +717,9 @@ module.exports = {
   SEASONS, SEASON_NAMES, SEASON_COUNT, DAYS_PER_SEASON,
   seasonOf, seasonName,
   NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS,
+  // StoryBank re-exports (single source of story content): the season prose
+  // and the first-contact aliens/doctrines come straight from shared/story/*.
+  SEASON_TEXT, FESTIVAL_TEXT, GENERIC_FESTIVAL_TEXT, PRESSURES, festivalFlair,
+  ALIENS, CONTACT_DOCTRINES,
   QUESTS,
 };

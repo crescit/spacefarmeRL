@@ -4,47 +4,12 @@
 
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { TouchControls } from '../systems/TouchControls.js';
+import { story } from '../systems/StoryService.js';
 
-const INTRO_TEXT = [
-  'YEAR 2987.',
-  'EARTH IS A DUSTBALL.',
-  '',
-  'The Galactic Farm Initiative —',
-  "humanity's last great project —",
-  'seeded the cosmos with',
-  'terraforming stations.',
-  '',
-  'Mars was tamed.',
-  'Venus was harvested.',
-  'A comet-based agri-platform',
-  'orbited Jupiter.',
-  '',
-  'But the crown jewel was',
-  'ASTEROID B-612 — a small',
-  'rocky world with impossibly',
-  'rich cosmic soil.',
-  '',
-  'Your grandfather built it.',
-  'Tamed the solar winds.',
-  'Made friends with the',
-  'nebula-dwellers.',
-  '',
-  'He also left a note:',
-  '"If you\'re reading this, I\'m dead,',
-  '"and the compost is yours.',
-  '',
-  "Now he's gone.",
-  'The farm — and the very large',
-  'unpaid debt to Quasar —',
-  'is yours.',
-  '',
-  "Welcome, farmer. There's food",
-  'to grow, a colony to feed, and',
-  'two AIs who may or may not',
-  'love you.',
-  '',
-  '— SPACE FARMER —',
-];
+// The opening crawl and title-card copy live in the StoryBank
+// (shared/story/intro.js) — the ONLY source for these words. We render
+// story.intro.* here so the browser, docs, and tooling can never drift.
+const INTRO_TEXT = story.intro.crawl;
 
 class IntroScene extends Phaser.Scene {
   constructor() {
@@ -96,19 +61,19 @@ class IntroScene extends Phaser.Scene {
       .setStrokeStyle(1, 0x67e1cd, 0.5);
     this.houseImg = this.add.image(0, -150, 'bld.house').setScale(2.2);
     this.houseGlow = this.add.image(0, -120, 'bld.house_glow').setBlendMode(Phaser.BlendModes.ADD).setScale(2.2).setAlpha(0.8);
-    const eyebrow = this.add.text(0, -28, 'A  B-612  FRONTIER  STORY', {
+    const eyebrow = this.add.text(0, -28, story.intro.eyebrow, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold', color: '#83c6ba',
     }).setOrigin(0.5);
-    this.titleText = this.add.text(0, 22, 'SPACE FARMER', {
+    this.titleText = this.add.text(0, 22, story.intro.title, {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '48px', fontStyle: 'bold', color: '#f7d698',
       stroke: '#3b2915', strokeThickness: 5, shadow: { color: '#f2bd68', blur: 20, offset: 0, fill: true },
     }).setOrigin(0.5);
     const rule = this.add.rectangle(0, 66, 190, 2, 0x67e1cd, 0.7);
-    this.subtitle = this.add.text(0, 89, 'Grow a future at the edge of the known sky', {
+    this.subtitle = this.add.text(0, 89, story.intro.subtitle, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '13px', color: '#c6e8df',
       stroke: '#061116', strokeThickness: 3,
     }).setOrigin(0.5);
-    this.pressStart = this.add.text(0, 142, 'SPACE  /  TAP  TO  ARRIVE', {
+    this.pressStart = this.add.text(0, 142, story.intro.pressStart, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', fontStyle: 'bold', color: '#f7d698',
       stroke: '#061116', strokeThickness: 3,
     }).setOrigin(0.5);

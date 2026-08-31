@@ -11,6 +11,7 @@
 
 import { NPC_DATA } from '../entities/NPCData.js';
 import { ALIEN_DATA, CONTACT_DOCTRINES } from '../entities/AlienData.js';
+import { story } from '../systems/StoryService.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
@@ -2425,19 +2426,10 @@ rations, and your name on the manifest.
   }
   // Stardust colony log — a little story pulse each day (deep-space living).
   // ── Colony Codex — readable lore/worldbuilding (hooks story together) ──
+  // Entries live ONCE in the StoryBank (shared/story/codex.js) and are only
+  // rendered here — the camera renders the bank, it never owns the words.
   colonyLore() {
-    return [
-      ['THE ARRIVAL', 'Sol 0: the Stardust lander set down in the Sleepy Mane crater. The first domes went up before the survey dust settled. We farmed because the colony ships ran on grown air long before they ran on credits.'],
-      ['WHY WE FARM', 'The hydroponic decks are life support. Every nebula-pepper you ripen is a breath the colony breathes tonight. Farming is the quiet engine under all the blinking screens.'],
-      ['THE EXCHANGE', 'The Grand Exchange trusts one currency and one promise: fair trade. The pulsing orb above the post ticks once for every contract honored since Sol 3.'],
-      ['THE CANTINA', 'Sol 12 rumor: the cantina serves a drink that glows the color of old supernova light. Nobody confirms. Everybody orders it.'],
-      ['THE DOMES', 'Each habitat dome is pressurized twice a week — one bad seal and the colony learns a new definition of silence. So far: never. The seam lights are not decoration.'],
-      ['THE METAL SIDE', 'Nova and Cora farm the circuits, not the soil. They keep the deck warm and the reactor honest. Treat them well - they log everything.'],
-      ['GRAVITY IS A RUMOR', 'The colony runs at 0.4g and nobody bothers to say sorry when you float into a shelf. Grandpa\'s last rule, painted above the airlock: "Farms are not for throwing things." The paint is peeling. So is the rule.'],
-      ['THE RANCHED HEARTHS', 'Our cows, chickens, and sheep all wear flight helmets. Official reason: solar wind. Unofficial reason, per Rhea: "They look ridiculous and the colony needed it."'],
-      ['SOL EARTH FESTIVAL', 'Once a year the whole rock eats a meal reconstituted from Earth rations. It tastes like grief and salt. The line to the cantina still wraps the block.'],
-      ['THE STARDUST STORY', 'The colony has a story, and you are in it. The ◆ marker up top is your place in it; [Q] opens the full log. Villagers will tell you what comes next — they always know, which is the creepy part.'],
-    ];
+    return story.codex.entries;
   }
   _toggleCodex() {
     if (this._codexGroup && this._codexGroup.visible) { this._codexGroup.setVisible(false); return; }
@@ -2448,13 +2440,13 @@ rations, and your name on the manifest.
       this._codexGroup = this.add.container(width / 2, height / 2).setDepth(985);
       const bx = this.add.rectangle(0, 0, 640, H, 0x0c0f1c, 0.95).setStrokeStyle(2, 0x3ec6c0);
       this._codexGroup.add(bx);
-      this._codexGroup.add(this.add.text(0, -(H / 2) + 30, 'COLONY CODEX', { fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '24px', color: '#7ff0ff', fontStyle: 'bold' }).setOrigin(0.5));
+      this._codexGroup.add(this.add.text(0, -(H / 2) + 30, story.codex.title, { fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '24px', color: '#7ff0ff', fontStyle: 'bold' }).setOrigin(0.5));
       entries.forEach(([h, b], i) => {
         const y = -(H / 2) + 70 + i * rowH;
         this._codexGroup.add(this.add.text(-280, y, h.toUpperCase(), { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#ffd98a', fontStyle: 'bold' }));
         this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#c8d6ff', wordWrap: { width: 560 }, lineSpacing: 4 }));
       });
-      this._codexGroup.add(this.add.text(0, H / 2 - 22, '[L] close', { fontFamily: 'system-ui, sans-serif', fontSize: '10px', color: '#8a90b0' }).setOrigin(0.5));
+      this._codexGroup.add(this.add.text(0, H / 2 - 22, story.codex.closeHint, { fontFamily: 'system-ui, sans-serif', fontSize: '10px', color: '#8a90b0' }).setOrigin(0.5));
     }
     this._codexGroup.setVisible(true);
   }
