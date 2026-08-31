@@ -86,13 +86,20 @@ class AudioSystem {
   }
 
   stopBGM() { if (this.bgm) { this.bgm.stop(); this.bgm = null; } }
-  // Push the global mute onto this scene's BGM.
-  applyMute() { if (this.bgm) this.bgm.setVolume(this.muted ? 0 : 0.32); }
+  // Push the global mute onto this scene's BGM. Always reads the LIVE static
+  // `AudioSystem._muted` (never the constructor snapshot) so the 🔊 button
+  // mutes/unmutes this BGM even when the instance was built before the toggle
+  // (which is the normal desktop flow: scenes construct an AudioSystem at boot,
+  // then the user clicks mute later). The instance flag is kept in sync too.
+  applyMute() {
+    this.muted = AudioSystem._muted;
+    if (this.bgm) this.bgm.setVolume(this.muted ? 0 : 0.32);
+  }
 
 
-  // play a one-shot SFX by registered key
+  // play a one-shot SFX by registered key (silenced while global mute is on)
   sfx(key, { volume = 0.5 } = {}) {
-    if (!this.ready || !this.scene.sound) return;
+    if (!this.ready || !this.scene.sound || AudioSystem._muted) return;
     try { this.scene.sound.play(key, { volume }); } catch (e) { /* no audio */ }
   }
 }
