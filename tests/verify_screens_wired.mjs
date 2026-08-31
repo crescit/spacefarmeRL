@@ -135,6 +135,27 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   check('intro renders the shared house glow (bld.house_glow)', /'bld\.house_glow'/.test(introSrc));
   // the ship's player walks with the same frames the planet player uses
   check('ship uses shared player walk frames', /\$\{this\.playerDir\}_\$\{f\}/.test(shipSrc));
+
+  // ── tutorial rework: persistent guidance layer — every interactable is
+  //    labelled, and the player always knows which way the objective is ──
+  check('ship has a POI registry (labelled interactables)', /const POI_SPECS\s*=\s*\[/.test(shipSrc));
+  check('ship builds POI signposts', /this\.poiBadges\.push\(this\._buildPOIBadge\(p\)\)/.test(shipSrc));
+  check('ship builds the GO HERE marker', /this\.objMarker\s*=\s*this\.add\.container/.test(shipSrc));
+  check('ship draws an off-screen compass arrow', /_drawEdgeArrow\(/.test(shipSrc));
+  check('ship has a persistent tutorial tracker panel', /this\.trackerText\s*=\s*this\.add\.text/.test(shipSrc));
+  check('ship has a descent-fuel bar in the tracker', /this\.fuelFill\s*=\s*this\.add\.rectangle/.test(shipSrc));
+  check('ship objective core is wired', /setObjective\(id, label, x, y\)/.test(shipSrc));
+  check('ship refreshes the tracker checklist', /_refreshTracker\(\)/.test(shipSrc));
+  check('ship hints SPACE from the marker when nearby', /PRESS SPACE/.test(shipSrc));
+  check('ship dismisses dialogue with SPACE/E', /this\.dismissDialogue\(\)/.test(shipSrc));
+  check('ship objective steps all defined (wake/power/plant/sleep/fuel/descend)',
+    /setObjective\('wake'/.test(shipSrc) &&
+    /setObjective\('power'/.test(shipSrc) &&
+    /setObjective\('plant'/.test(shipSrc) &&
+    /setObjective\('sleep'/.test(shipSrc) &&
+    /setObjective\('fuel'/.test(shipSrc) &&
+    /setObjective\('descend'/.test(shipSrc));
+  check('ship dialogue advertises the continue key', /Press SPACE to continue/.test(shipSrc));
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);

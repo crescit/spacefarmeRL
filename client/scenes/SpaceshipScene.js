@@ -120,6 +120,16 @@ const NPC_DIALOGUES = {
   },
 };
 
+// ── Tutorial POI registry — every place the player must find, labelled so the
+//    ship reads as a map of buildings instead of anonymous dark pixels ──
+const POI_SPECS = [
+  { id: 'cryo',       x: 12,   y: 8.6, label: 'CRYO POD',       tone: '0x9fffd8', c: '#9fffd8', sub: 'Wake here' },
+  { id: 'bridge',     x: 40,   y: 4.4, label: 'BRIDGE CONSOLE', tone: '0xffe9a0', c: '#ffe9a0', sub: 'Mine → credits' },
+  { id: 'greenhouse', x: 31,   y: 20.8,label: 'GREENHOUSE',     tone: '0xb6ff9a', c: '#b6ff9a', sub: 'Grow crops' },
+  { id: 'bunk',       x: 21.5, y: 4.2, label: 'BUNK',            tone: '0xd9b8ff', c: '#d9b8ff', sub: 'Sleep → next day', noLabel: true },
+  { id: 'airlock',    x: 46,   y: 13.2,label: 'AIRLOCK',         tone: '0x9adcff', c: '#9adcff', sub: '500 cr → descend' },
+];
+
 class SpaceshipScene extends Phaser.Scene {
   constructor() {
     super({ key: 'SpaceshipScene' });
@@ -208,6 +218,25 @@ class SpaceshipScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#a8d8d8',
     }).setOrigin(0.5));
 
+    // ── POI signposts — every interactable glows and wears a labelled plate so
+    //    you can always tell what's a building / a machine / a door ──
+    this.poiBadges = [];
+    for (const p of POI_SPECS) this.poiBadges.push(this._buildPOIBadge(p));
+
+    // ── "GO HERE" objective marker + off-screen compass arrow ──
+    this.objMarker = this.add.container(0, 0);
+    this.objMarker.add(this.add.text(0, 0, '▼', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '16px', fontStyle: 'bold',
+      color: '#ffd74a', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5));
+    this.objMarker.add(this.add.text(0, 17, 'GO HERE', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '8px', fontStyle: 'bold',
+      color: '#ffe9a0', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5));
+    this.objMarker.setDepth(230).setVisible(false);
+    this._markerBaseY = 0;
+    this.edgeArrow = this.add.graphics().setScrollFactor(0).setDepth(990);
+
     // ── Our little guide droid (BEEP) — flies ahead and shows you what's next ──
     this.droid = this.add.image(this.playerSpr.x + 22, this.playerSpr.y, 'ship.droid')
         .setDepth(220);
@@ -224,6 +253,28 @@ class SpaceshipScene extends Phaser.Scene {
     this.hudText = this.add.text(10, height - 32, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe3a8',
     }).setScrollFactor(0);
+
+    // ── Persistent tutorial tracker — top-left checklist + descent-fuel bar ──
+    const TRACK_W = 246, TRACK_H = 122;
+    this.trackerBg = this.add.rectangle(12 + TRACK_W / 2, 12 + TRACK_H / 2, TRACK_W, TRACK_H, 0x0c1019, 0.85)
+      .setScrollFactor(0).setDepth(984).setStrokeStyle(2, 0x39c5bb, 0.85);
+    this.trackerTitle = this.add.text(26, 20, 'TUTORIAL', {
+      fontFamily: "system-ui, 'Segoe UI'", fontSize: '10px', fontStyle: 'bold',
+      color: '#39c5bb', stroke: '#000', strokeThickness: 3,
+    }).setScrollFactor(0).setDepth(985);
+    this.trackerText = this.add.text(26, 38, '', {
+      fontFamily: "system-ui, 'Segoe UI'", fontSize: '10px', color: '#dfe6ff', lineSpacing: 5,
+    }).setScrollFactor(0).setDepth(985);
+    const fuelX = 26, fuelY = 12 + TRACK_H - 22, fuelW = TRACK_W - 42;
+    this.fuelW = fuelW;
+    this.fuelBg = this.add.rectangle(fuelX + fuelW / 2, fuelY, fuelW, 11, 0x1b2230, 1)
+      .setScrollFactor(0).setDepth(985).setStrokeStyle(1, 0x3a4a5e, 1);
+    this.fuelFill = this.add.rectangle(fuelX, fuelY, 2, 9, 0xffcf5e, 1)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(986);
+    this.fuelLabel = this.add.text(fuelX + fuelW, fuelY - 10, '', {
+      fontFamily: "system-ui, 'Segoe UI'", fontSize: '9px', fontStyle: 'bold',
+      color: '#ffd98a', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(1, 1).setScrollFactor(0).setDepth(986);
 
     // ── Dialogue system (shared component: warm framed panel, cozy JRPG) ──
     // One DialoguePanel backs every scene's speech box — this one shows C.O.R.A.'s
@@ -249,6 +300,11 @@ class SpaceshipScene extends Phaser.Scene {
     this.advanceButton = null;
     this.miningActive = false;
 
+    // rework: persistent guidance state (checklist + active objective)
+    this.checks = { wake: false, power: false, plant: false, sleep: false, descend: false };
+    this.objective = null;      // { id, x, y, label }
+    this._fuelTarget = null;    // 'greenhouse' | 'bridge' — where the money lives
+
     // Define interactable positions
     this.defineInteractables();
 
@@ -267,13 +323,9 @@ class SpaceshipScene extends Phaser.Scene {
     this.touchCtrl = new TouchControls(this);
     this.touchCtrl.build();
 
-    // Show initial dialogue
+    // Show the opening dialogue + our first objective (droid introduces the CRYO POD)
     this.showDialogue(NPC_DIALOGUES.cora_intro.text);
-    this.tutorialStep = 0;
-    // little droid guide introduces itself and leads you to the first objective
-    this.droidCue.setText("I'm BEEP — I'll show you around. That's your cryo-pod down there!")
-      .setPosition(this.playerSpr.x + 22, this.playerSpr.y - 30).setVisible(true);
-    this.time.delayedCall(6000, () => { this.guideDroidTo(12, 8, 'Go to the cryo-pod and press SPACE to log your awakening.'); });
+    this.setObjective('wake', 'Wake from the CRYO POD below — walk down and press SPACE.', this.cryoPod.x, this.cryoPod.y);
 
     // ── Audio: boot BGM + SFX on first input (autoplay policy) ──
     this.audio = new AudioSystem(this);
@@ -354,8 +406,12 @@ class SpaceshipScene extends Phaser.Scene {
       if (this.mapData[tryYidx * MAP_W + tileX] !== 1) this.playerSpr.y = tryY;
     }
 
-    // ── Interact button ──
-    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
+    // ── Interact / dialogue advance ──
+    // SPACE/E dismisses an open dialogue first; a second press interacts.
+    const pressed = Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey);
+    if (pressed && this.dialog.visible) {
+      this.dismissDialogue();
+    } else if (pressed) {
       this.handleInteract();
     }
 
@@ -377,6 +433,7 @@ class SpaceshipScene extends Phaser.Scene {
 
     // ── Update planter visuals + render sprites ──
     this.moveIntent = !!(dx || dy);
+    this._updateObjectiveMarkers(time);
     this.renderSprites(time);
   }
 
@@ -403,6 +460,11 @@ class SpaceshipScene extends Phaser.Scene {
     }
     if (this.consoleGlow) this.consoleGlow.setScale(0.9 + 0.16 * (0.5 + 0.5 * Math.sin(time * 0.0037)));
     if (this.cryoGlow) this.cryoGlow.setAlpha(0.10 + 0.08 * Math.sin(time * 0.0029));
+    if (this.poiBadges) {
+      for (const b of this.poiBadges) {
+        if (b.glow) b.glow.setAlpha(0.10 + 0.07 * (0.5 + 0.5 * Math.sin(time * 0.0032 + b.phase)));
+      }
+    }
 
     // Update tile sprites based on value
     for (let i = 0; i < this.tileSprites.length; i++) {
@@ -436,9 +498,10 @@ class SpaceshipScene extends Phaser.Scene {
     if (this.dist(px, py, this.cryoPod.x, this.cryoPod.y) < range && !this.cryoPod.used) {
       this.cryoPod.used = true;
       this.showDialogue(NPC_DIALOGUES.cryo_tutorial.text);
+      this.checks.wake = true;
       this.tutorialStep = 1;
       this.tool = 'none';
-      this.guideDroidTo(40, 4, 'Awake! Follow me — mine the bridge console to restore power.');
+      this.setObjective('power', 'Awake! Follow me — mine the BRIDGE CONSOLE to restore power.', this.bridgeConsole.x, this.bridgeConsole.y);
       return;
     }
 
@@ -469,11 +532,16 @@ class SpaceshipScene extends Phaser.Scene {
     // Airlock
     if (this.dist(px, py, this.airlock.x, this.airlock.y) < range) {
       if (this.credits >= 500) {
+        this.checks.descend = true;
         this.showDialogue(NPC_DIALOGUES.airlock.text);
-        this.guideDroidTo(46, 14, 'You did it! Follow me to the airlock — time to descend to Asteroid B-612.');
+        this._refreshTracker();
+        this.setObjective('descend', 'You did it! Stay by the AIRLOCK — descent starting.', this.airlock.x, this.airlock.y);
         this.time.delayedCall(3000, () => this.landOnPlanet());
       } else {
-        this.showDialogue([`[Airlock]: Insufficient credits. Need 500 cr (you have ${this.credits} cr).`]);
+        this.showDialogue([`[Airlock]: Need 500 cr to descend (you have ${this.credits} cr). Mine the bridge or harvest crops.`]);
+        if (this.objective && this.objective.id !== 'fuel') {
+          this.setObjective('fuel', 'Earn 500 cr — mine the BRIDGE CONSOLE and harvest crops.', this.bridgeConsole.x, this.bridgeConsole.y);
+        }
       }
       return;
     }
@@ -498,12 +566,132 @@ class SpaceshipScene extends Phaser.Scene {
     const tx = wx * TILE_SIZE, ty = wy * TILE_SIZE;
     this.droidY0 = ty;
     this.tweens.add({ targets: this.droid, x: tx, y: ty, duration: 900, ease: 'Sine.inOut' });
-    this.droidCue.setText(msg).setPosition(tx, ty - 34).setVisible(true);
+    this.droidCue.setText(msg).setPosition(tx, ty - 42).setVisible(true);
     this.droidCue.alpha = 1;
-    this.time.delayedCall(5200, () => { if (this.droidCue) this.tweens.add({ targets: this.droidCue, alpha: 0, duration: 300, onComplete: () => this.droidCue.setVisible(false) }); });
+    this.time.delayedCall(6500, () => { if (this.droidCue) this.tweens.add({ targets: this.droidCue, alpha: 0, duration: 300, onComplete: () => this.droidCue.setVisible(false) }); });
   }
   // curt — dismiss the droid's bubble early
   clearDroidCue() { if (this.droidCue) { this.droidCue.setVisible(false); this.droidCue.alpha = 1; } }
+
+  // ── Guidance core ──
+  // setObjective drives everything: the tracker's active line, the droid's
+  // fly-ahead callout combines with the "GO HERE" marker + compass arrow.
+  setObjective(id, label, x, y) {
+    this.objective = { id, x, y, label };
+    if (this.droid) this.guideDroidTo(x, y, label);
+    this._moveMarkerTo(x, y);
+    this._refreshTracker();
+  }
+
+  _moveMarkerTo(x, y) {
+    if (!this.objMarker) return;
+    this._markerBaseY = y * TILE_SIZE;
+    this.tweens.add({ targets: this.objMarker, x: x * TILE_SIZE, duration: 500, ease: 'Sine.out' });
+    this.objMarker.setVisible(true);
+  }
+
+  // each frame: bob the GO-HERE marker over the objective, flash SPACE when the
+  // player is close, and draw an edge compass arrow when the target is off-view
+  _updateObjectiveMarkers(time) {
+    if (!this.objective || !this.objMarker) return;
+
+    // Fuel phase auto-guidance: point at where the money comes from next.
+    if (this.objective.id === 'fuel') {
+      if (this.credits >= 500) {
+        this.setObjective('descend', 'Descent fueled! The AIRLOCK doors are ready.', this.airlock.x, this.airlock.y);
+        return;
+      }
+      const hasMature = this.planters.some(p => p.state === 'mature');
+      const hasWork = this.planters.some(p => p.state === 'empty' || p.state === 'tilled' || p.state === 'seeded');
+      const nextKey = (hasMature || hasWork) ? 'greenhouse' : 'bridge';
+      if (nextKey !== this._fuelTarget) {
+        this._fuelTarget = nextKey;
+        if (nextKey === 'greenhouse') this._moveMarkerTo(31, 23);
+        else this._moveMarkerTo(this.bridgeConsole.x, this.bridgeConsole.y);
+      }
+    }
+
+    const wx = this.objective.x * TILE_SIZE;
+    const wyBase = this.objective.y * TILE_SIZE;
+    // gentle bob above the objective + SPACE hint once you're close enough
+    this.objMarker.y = wyBase - 20 + Math.sin(time * 0.005) * 5;
+    const near = this.dist(this.playerSpr.x / TILE_SIZE, this.playerSpr.y / TILE_SIZE, this.objective.x, this.objective.y) < 2.2;
+    const hint = (near && Math.floor(time / 320) % 2 === 0) ? 'PRESS SPACE' : 'GO HERE';
+    if (this.objMarker.list[1]) this.objMarker.list[1].setText(hint);
+    if (!this.objMarker.visible) this.objMarker.setVisible(true);
+
+    // edge compass arrow when the target sits outside the camera view
+    const wv = this.cam.worldView;
+    const sx = wx - wv.x, sy = wyBase - wv.y;
+    const onScreen = sx > -10 && sx < wv.width + 10 && sy > -10 && sy < wv.height + 10;
+    if (onScreen) this.edgeArrow.clear();
+    else this._drawEdgeArrow(sx, sy, wv.width, wv.height);
+  }
+
+  // a fixed-on-screen triangle at the viewport edge, pointing toward the
+  // objective — so there is never a moment you don't know which way to walk
+  _drawEdgeArrow(sx, sy, vw, vh) {
+    const g = this.edgeArrow;
+    g.clear();
+    const cx = vw / 2, cy = vh / 2;
+    const dx = sx - cx, dy = sy - cy;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) return;
+    const ang = Math.atan2(dy, dx);
+    // slide to the viewport border, inside by a margin
+    const halfW = vw / 2 - 28, halfH = vh / 2 - 32;
+    const k = Math.min(Math.abs(halfW / dx), Math.abs(halfH / dy));
+    const px = cx + dx * k, py = cy + dy * k;
+    const L = 22, a1 = ang - 0.45, a2 = ang + 0.45;
+    g.fillStyle(0xffd74a, 1);
+    g.fillTriangle(px, py, px - L * Math.cos(a1), py - L * Math.sin(a1), px - L * Math.cos(a2), py - L * Math.sin(a2));
+  }
+
+  // rebuild the top-left tutorial checklist + descent-fuel bar
+  _refreshTracker() {
+    if (!this.trackerText) return;
+    const c = this.checks;
+    const active = this.objective ? this.objective.id : 'wake';
+    const line = (id, label) => {
+      const isActive = active === id;
+      const glyph = isActive ? '▶' : (c[id] ? '✓' : '•');
+      return `${glyph} ${label}`;
+    };
+    this.trackerText.setText([
+      line('wake', 'Wake up'),
+      line('power', 'Restore power'),
+      line('plant', 'Plant & water a crop'),
+      line('sleep', 'Sleep so it grows'),
+      line('fuel', 'Reach 500 cr & descend'),
+    ].join('\n'));
+    const frac = Math.min(1, this.credits / 500);
+    this.fuelFill.setDisplaySize(Math.max(2, frac * this.fuelW), 9);
+    this.fuelLabel.setText(`${Math.min(500, Math.floor(this.credits))} / 500 cr`);
+  }
+
+  // a labelled, glowing signpost so every interactable reads as a "building"
+  _buildPOIBadge(p) {
+    const wx = p.x * TILE_SIZE, wy = p.y * TILE_SIZE;
+    const glow = this.add.image(wx, wy, 'fx.lamp_glow')
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(206).setScale(1.05).setAlpha(0.13);
+    const badge = { id: p.id, glow, phase: Math.random() * Math.PI * 2 };
+    if (p.noLabel) return badge;
+    const color = parseInt(p.tone, 16);
+    const plateW = Math.max(46, p.label.length * 6.4 + 14);
+    const plate = this.add.rectangle(wx, wy - 26, plateW, 15, 0x0d121c, 0.85)
+      .setStrokeStyle(1, color, 0.9).setDepth(158).setOrigin(0.5, 1);
+    const txt = this.add.text(wx, wy - 22, p.label, {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '9px', fontStyle: 'bold', color: p.c, stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5, 1).setDepth(160);
+    const sub = this.add.text(wx, wy - 4, p.sub, {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '6.5px', color: '#cfd6ea', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5, 1).setDepth(159).setAlpha(0.95);
+    badge.plate = plate;
+    badge.txt = txt;
+    badge.sub = sub;
+    return badge;
+  }
 
 
   handlePlanter(planter) {
@@ -524,7 +712,13 @@ class SpaceshipScene extends Phaser.Scene {
         this.tool = 'watering-can';
         planter.watered = true;
         planter.state = 'growing';
-        this.showDialogue(['[C.O.R.A.]: Watered! The crop will grow. Advance the day to see progress.']);
+        this.showDialogue(['[C.O.R.A.]: Watered! The crop will grow overnight. Sleep to advance the day.']);
+        if (!this.checks.plant) {
+          this.checks.plant = true;
+          this.setObjective('sleep', 'Sleep in the BUNK so the crop grows overnight.', 21.5, 4);
+        } else {
+          this._refreshTracker();
+        }
         break;
       case 'growing':
         if (planter.growth >= 3) {
@@ -549,6 +743,11 @@ class SpaceshipScene extends Phaser.Scene {
     planter.watered = false;
     this.cropsHarvested++;
     this.showDialogue([`[C.O.R.A.]: Harvested! +${reward} credits. Total: ${this.credits} cr.`]);
+    if (this.objective && (this.objective.id === 'sleep' || this.objective.id === 'plant')) {
+      this.setObjective('fuel', 'Earn 500 cr — mine the BRIDGE CONSOLE and harvest crops.', this.bridgeConsole.x, this.bridgeConsole.y);
+    } else {
+      this._refreshTracker();
+    }
   }
 
   mineAsteroid() {
@@ -556,18 +755,27 @@ class SpaceshipScene extends Phaser.Scene {
     this.credits += reward;
     this.bridgeConsole.mined = true;
     this.showDialogue([`[Console]: Asteroid mined! +${reward} credits. Total: ${this.credits} cr.`]);
-    this.guideDroidTo(30, 22, "Power is back. Now let's practice farming — this way to the greenhouse.");
+    if (!this.checks.power) {
+      this.checks.power = true;
+      this.tutorialStep = 2;
+      this.setObjective('plant', "Power is back! Now practice farming — go to the GREENHOUSE and press SPACE to till soil.", 31, 23);
+    } else {
+      this._refreshTracker();
+    }
     this.time.delayedCall(5000, () => { this.bridgeConsole.mined = false; });
   }
 
-  showDialogue(lines) {
+  showDialogue(lines, footer = 'Press SPACE to continue') {
     const text = Array.isArray(lines) ? lines.join('\n') : lines;
-    this.dialog.setText(text);
+    this.dialog.setText(text, { footer });
 
     if (this.dialogueTimer) this.dialogueTimer.remove();
-    this.dialogueTimer = this.time.delayedCall(8000, () => {
-      this.dialog.hide();
-    });
+    this.dialogueTimer = this.time.delayedCall(14000, () => this.dismissDialogue());
+  }
+
+  dismissDialogue() {
+    if (this.dialogueTimer) { this.dialogueTimer.remove(); this.dialogueTimer = null; }
+    if (this.dialog) this.dialog.hide();
   }
 
   // ── Go to bed (Harvest Moon-style sleep to end the day) ──
@@ -617,9 +825,16 @@ class SpaceshipScene extends Phaser.Scene {
         p.state = 'mature';
       }
     }
+    if (!this.checks.sleep) {
+      this.checks.sleep = true;
+      if (this.objective && (this.objective.id === 'sleep' || this.objective.id === 'plant')) {
+        this.setObjective('fuel', 'Earn 500 cr — mine the BRIDGE CONSOLE and harvest crops.', this.bridgeConsole.x, this.bridgeConsole.y);
+      }
+    }
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('advance');
     this.showDialogue([`[C.O.R.A.]: Day ${this.dayCount} dawns. You feel rested. Crops are growing.`]);
+    this._refreshTracker();
     this.renderSprites();
   }
 
