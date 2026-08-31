@@ -20,19 +20,30 @@ function registerTextures(game) {
 }
 
 function init() {
-  // Portrait phones: boot at the device aspect so the world fills the tall
-  // screen instead of being letterboxed into a tiny 4:3 box ("game for ants").
-  // Scenes read layout dims from this.game.config, so HUD/backdrop/camera adapt.
-  const touchDevice = navigator.maxTouchPoints > 0 || 'ontouchstart' in document.documentElement;
-  const portrait = window.innerHeight > window.innerWidth;
-  const base = portrait && touchDevice
-    ? { width: window.innerWidth, height: window.innerHeight }
-    : { width: 960, height: 720 };
+  // Sizing: the Phaser world must match the ACTUAL #game element (the area of
+  // the page above the touch bar), not the whole viewport. `window.innerHeight`
+  // includes the touch bar and mobile browser chrome, so a world sized to the
+  // viewport has a different aspect ratio than the canvas parent — Phaser FIT
+  // then letterboxes the extras into black bars (left/right on phones).
+  // Measuring #game directly gives an aspect that fills the canvas with no bars.
+  const touching = (navigator.maxTouchPoints > 0) || ('ontouchstart' in document.documentElement);
+  let w, h;
+  if (touching) {
+    const g = document.getElementById('game');
+    w = g && g.clientWidth  ? g.clientWidth  : window.innerWidth;
+    h = g && g.clientHeight ? g.clientHeight : window.innerHeight;
+    if (!w || !h) {           // layout not ready — safe fallback, no divide-by-zero
+      w = window.innerWidth; h = Math.round(w * 0.7);
+    }
+  } else {
+    // Desktop keeps the classic 4:3 viewport, letterboxed inside the window.
+    w = 960; h = 720;
+  }
 
   const config = {
     type: Phaser.AUTO,
-    width: base.width,
-    height: base.height,
+    width: w,
+    height: Math.max(1, Math.round(h)),
     parent: 'game',
     backgroundColor: '#0b0e1c',
     pixelArt: false,
@@ -53,6 +64,16 @@ function init() {
   };
 
   const game = new Phaser.Game(config);
+
+  // Keep the canvas glued to the #game box if the viewport changes (mobile
+  // URL bar collapse/expand, orientation). Re-fit to the parent's live size.
+  const refit = () => {
+    const g = document.getElementById('game');
+    if (g && g.clientWidth > 0 && g.clientHeight > 0) {
+      try { game.scale.resize(g.clientWidth, g.clientHeight); } catch (e) { /* noop */ }
+    }
+  };
+  window.addEventListener('resize', () => setTimeout(refit, 10));
 
   game.events.once('ready', () => {
     registerTextures(game);

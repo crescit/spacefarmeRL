@@ -556,15 +556,19 @@ class PlanetScene extends Phaser.Scene {
     }).setOrigin(0, 0).setDepth(1000);
   }
   buildDialogue(width, height) {
-    const bw = width - 96, bh = 148, cx = width / 2, cy = height - 92;
-    const boxL = cx - bw / 2, boxT = cy - bh / 2;
+    const bw = width - 96, bh = 158, cx = width / 2, cy = height - 92;
+    const boxL = cx - bw / 2, boxT = cy - bh / 2, boxR = cx + bw / 2, boxB = cy + bh / 2;
+    this._diaBox = { cx, boxL, boxR, boxT, boxB, bw, bh };
     this.dialogueBox = this.add.rectangle(cx, cy, bw, bh, 0x0a0a18, 0.95)
-      .setStrokeStyle(3, 0x39c5bb).setDepth(1000).setVisible(false);
+      .setStrokeStyle(3, 0x39c5bb).setDepth(1000)
+      .setInteractive({ useHandCursor: true }).setVisible(false);
+    // tap on the box expands it when collapsed (collapse = peek at the world)
+    this.dialogueBox.on('pointerdown', () => { if (this._diaCollapsed) this._expandDialogue(); });
     // EarthBound tail — triangle nudging up toward the speaker in the world
     this.dialogueTail = this.add.triangle(cx, boxT, -15, 7, 15, 7, 0, -9, 0x0a0a18)
       .setStrokeStyle(1, 0x39c5bb).setDepth(999).setVisible(false);
     // animated speaking portrait (upper-left)
-    const ppx = boxL + 21, ppy = boxT + 53;
+    const ppx = boxL + 21, ppy = boxT + 58;
     this.portraitPlate = this.add.rectangle(ppx, ppy, 46, 52, 0x141426, 1)
       .setStrokeStyle(2, 0x39c5bb).setDepth(1001).setVisible(false);
     this.dialoguePortrait = this.add.image(ppx, ppy, 'port.nova_0').setDepth(1002).setVisible(false);
@@ -573,13 +577,33 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#39c5bb',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0, 0.5).setDepth(1001).setVisible(false);
-    // body text — types out left-aligned
-    this.dialogueText = this.add.text(boxL + 58, boxT + 42, '', {
+    // body text — types out left-aligned, clipped to the box body (no overflow)
+    this.dialogueText = this.add.text(boxL + 58, boxT + 46, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#e8ecff',
       wordWrap: { width: bw - 82 }, lineSpacing: 6, align: 'left',
-    }).setOrigin(0, 0).setDepth(1002).setVisible(false);
+    }).setOrigin(0, 0).setDepth(1001).setVisible(false);
+    // clip mask: text never draws outside the box body (fixes bottom overflow)
+    const cTop = boxT + 38, cH = bh - 56;   // content strip below the title, above the foot
+    this._diaClip = this.add.rectangle(cx, cTop + cH / 2, bw - 20, cH, 0x000000).setVisible(false)
+      .setDepth(1000);
+    this.dialogueText.setMask(this._diaClip.createGeometryMask());
+    this._diaTextTop = boxT + 46; this._diaContentH = cH;
+    // scroll indicators (▲▼) — shown only when the line overflows the box
+    this.diaScrollUp = this.add.text(boxR - 13, boxT + 54, '▲', {
+      fontFamily: "system-ui, sans-serif", fontSize: '11px', color: '#9fffe0',
+    }).setOrigin(0.5).setDepth(1003).setInteractive({ useHandCursor: true }).setVisible(false);
+    this.diaScrollUp.on('pointerdown', () => this._scrollDialogue(-46));
+    this.diaScrollDown = this.add.text(boxR - 13, boxB - 32, '▼', {
+      fontFamily: "system-ui, sans-serif", fontSize: '11px', color: '#9fffe0',
+    }).setOrigin(0.5).setDepth(1003).setInteractive({ useHandCursor: true }).setVisible(false);
+    this.diaScrollDown.on('pointerdown', () => this._scrollDialogue(46));
+    // collapse toggle (▾) — collapses the box to a stub you can peek past
+    this.diaCollapseBtn = this.add.text(boxR - 12, boxT + 13, '▾', {
+      fontFamily: "system-ui, sans-serif", fontSize: '12px', color: '#9fffe0',
+    }).setOrigin(1, 0.5).setDepth(1003).setInteractive({ useHandCursor: true }).setVisible(false);
+    this.diaCollapseBtn.on('pointerdown', () => this._toggleCollapseDialogue());
     // footer hint (prompt / gift keys)
-    this.dialogueHint = this.add.text(cx + bw / 2 - 12, cy + bh / 2 - 14, '', {
+    this.dialogueHint = this.add.text(cx + bw / 2 - 12, cy + bh / 2 - 18, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
     }).setOrigin(1, 0.5).setDepth(1001).setVisible(false);
 
@@ -587,6 +611,71 @@ class PlanetScene extends Phaser.Scene {
     this._diaFull = ''; this._diaShown = 0; this._diaDone = true;
     this._diaNPC = null; this._diaFooter = ''; this._diaEvt = null;
     this._portraitBaseY = ppy;
+    // scroll + collapse state
+    this._diaScroll = 0; this._diaMaxScroll = 0; this._diaScrollable = false;
+    this._diaCollapsed = false;
+    // mouse wheel scrolls the dialogue text on desktop
+    if (!this._diaWheelBound) {
+      this._diaWheelBound = true;
+      this.input.on('wheel', (pointer, objs, dx, dy, dz) => {
+        if (this.inDialogue && this._diaScrollable && !this._diaCollapsed) this._scrollDialogue(dy * 8);
+      });
+    }
+  }
+
+  // Recompute whether the current line overflows the box, and clamp scrolling.
+  _updateDialogueScroll() {
+    const d = this.dialogueText;
+    const th = d.height || 0;
+    this._diaMaxScroll = Math.max(0, th - this._diaContentH);
+    this._diaScrollable = this._diaMaxScroll > 0;
+    this._diaScroll = Math.min(this._diaScroll, this._diaMaxScroll);
+    d.y = this._diaTextTop - this._diaScroll;
+    const show = this.diaScrollUp && this.diaScrollDown && !this._diaCollapsed && this._diaScrollable;
+    if (show) {
+      this.diaScrollUp.setVisible(this._diaScroll > 0);
+      this.diaScrollDown.setVisible(this._diaScroll < this._diaMaxScroll);
+    } else {
+      if (this.diaScrollUp) this.diaScrollUp.setVisible(false);
+      if (this.diaScrollDown) this.diaScrollDown.setVisible(false);
+    }
+  }
+
+  _scrollDialogue(delta) {
+    if (!this._diaScrollable) return;
+    this._diaScroll = Phaser.Math.Clamp(this._diaScroll + delta, 0, this._diaMaxScroll);
+    this._updateDialogueScroll();
+  }
+
+  _toggleCollapseDialogue() {
+    if (this._diaCollapsed) this._expandDialogue(); else this._collapseDialogue();
+  }
+
+  _collapseDialogue() {
+    if (this._diaCollapsed) return;
+    this._diaCollapsed = true;
+    this.dialogueText.setVisible(false);
+    this.dialogueTitle.setVisible(false);
+    this.dialoguePortrait.setVisible(false);
+    this.portraitPlate.setVisible(false);
+    this.dialogueHint.setVisible(false);
+    if (this.diaScrollUp) this.diaScrollUp.setVisible(false);
+    if (this.diaScrollDown) this.diaScrollDown.setVisible(false);
+    this.diaCollapseBtn.setText('▴');
+    // hint doubles as the "tap to expand" stub while collapsed
+    this.dialogueHint.setText('▾ expand').setColor('#6ee7d0').setVisible(true);
+  }
+
+  _expandDialogue() {
+    if (!this._diaCollapsed) return;
+    this._diaCollapsed = false;
+    this.dialogueText.setVisible(true);
+    this.dialogueTitle.setVisible(true);
+    this.dialoguePortrait.setVisible(true);
+    this.portraitPlate.setVisible(true);
+    this.dialogueHint.setText(this._diaFooter || '[SPACE to continue]').setColor('#8a90b0').setVisible(true);
+    this.diaCollapseBtn.setText('▾');
+    this._updateDialogueScroll();
   }
 
   // EarthBound-style speech: typewriter reveal + portrait mouth-blab while typing
@@ -594,11 +683,20 @@ class PlanetScene extends Phaser.Scene {
     if (this._diaEvt) { this._diaEvt.remove(); this._diaEvt = null; }
     this.dialogueText.setText('');
     this.dialogueHint.setText('').setVisible(false);
+    this.dialogueTitle.setVisible(true);
+    this.dialoguePortrait.setVisible(true);
+    this.portraitPlate.setVisible(true);
+    this.dialogueBox.setVisible(true);
+    this.dialogueTail.setVisible(true);
     this._diaFull = full;
     this._diaShown = 0;
     this._diaDone = false;
     this._diaNPC = npcId || (this.selectedNPC && this.selectedNPC.id) || 'nova';
     this._diaFooter = opts.footer || '';
+    // fresh line → start expanded at the top of the text
+    this._diaCollapsed = false;
+    this._diaScroll = 0;
+    this.diaCollapseBtn.setText('▾');
     if (opts.title !== undefined) { this.dialogueTitle.setText(opts.title).setVisible(true); }
     if (this.dialoguePortrait.texture.key !== `port.${this._diaNPC}_0`) {
       this.dialoguePortrait.setTexture(`port.${this._diaNPC}_0`);
@@ -608,11 +706,13 @@ class PlanetScene extends Phaser.Scene {
     this.dialogueBox.setVisible(true);
     this.dialogueText.setVisible(true);
     this.dialogueTail.setVisible(true);
+    this.diaCollapseBtn.setVisible(true);
     const P = this;
     this._diaEvt = this.time.addEvent({
       delay: 28, loop: true, callback: () => {
         P._diaShown = Math.min(P._diaFull.length, P._diaShown + 2);
         P.dialogueText.setText(P._diaFull.slice(0, P._diaShown));
+        P._updateDialogueScroll();          // keep the text clipped & scrollable as it types
         if (P._diaShown >= P._diaFull.length) {
           P._diaDone = true;
           P.dialoguePortrait.setTexture(`port.${P._diaNPC}_0`);
@@ -630,6 +730,7 @@ class PlanetScene extends Phaser.Scene {
     this._diaShown = this._diaFull.length;
     this.dialogueText.setText(this._diaFull);
     this._diaDone = true;
+    this._updateDialogueScroll();
     if (this._diaNPC) this.dialoguePortrait.setTexture(`port.${this._diaNPC}_0`);
     this.dialogueHint.setText(this._diaFooter || '[SPACE to continue]');
     this.dialogueHint.setVisible(true);
@@ -1617,6 +1718,7 @@ rations, and your name on the manifest.
   stopMove() { this.touchDir = null; }
 
   update(time) {
+    const { width, height } = this.game.config;   // viewport in world coords (meteor/cloud spawn)
     // Task 4: lamp/door light-pool flicker — each pool wobbles on its own
     // phase (rare deep dip = "old lamp" feel). Cheap: alpha only, no textures.
     if (this.isNight && this.lightPools) {
@@ -2511,6 +2613,9 @@ rations, and your name on the manifest.
     this.contactPhase = "choice";
     this.dialogueBox.setVisible(false); this.dialogueTitle.setVisible(false); this.dialogueText.setVisible(false);
     this.dialogueHint.setVisible(false); this.dialoguePortrait.setVisible(false); this.portraitPlate.setVisible(false); this.dialogueTail.setVisible(false);
+    if (this.diaScrollUp) this.diaScrollUp.setVisible(false);
+    if (this.diaScrollDown) this.diaScrollDown.setVisible(false);
+    if (this.diaCollapseBtn) this.diaCollapseBtn.setVisible(false);
     this.contactTitle.setText(alien.glyph + " " + alien.name.toUpperCase() + " // COLONY COUNCIL");
     this.contactPremise.setText(alien.premise + "\n\n" + alien.stakes);
     this.contactNote.setText(prior ? "Current doctrine: " + prior.toUpperCase() + " · choose again to revise the charter" : "No reward · no correct answer · this becomes colony history");
@@ -2737,8 +2842,12 @@ rations, and your name on the manifest.
     if (this.dialoguePortrait) this.dialoguePortrait.setVisible(false);
     if (this.portraitPlate) this.portraitPlate.setVisible(false);
     if (this.dialogueTail) this.dialogueTail.setVisible(false);
+    if (this.diaScrollUp) this.diaScrollUp.setVisible(false);
+    if (this.diaScrollDown) this.diaScrollDown.setVisible(false);
+    if (this.diaCollapseBtn) this.diaCollapseBtn.setVisible(false);
     if (this._diaEvt) { this._diaEvt.remove(); this._diaEvt = null; }
     this._diaDone = true;
+    this._diaScroll = 0; this._diaCollapsed = false;
     this.gePanel.setVisible(false);
     if (this.contactPanel) this.contactPanel.setVisible(false);
     if (this.cinemaTop) this.cinemaTop.setVisible(false);
