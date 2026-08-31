@@ -97,7 +97,30 @@ experience a *place* rather than a referendum.
 
 ## 7. The story clock is the calendar.
 
-**7 days = one season. 28 days = one year.** Episodes, benchmarks, and
-evaluations align to season boundaries — we measure play in *springs lived*
-and *years survived*, not arbitrary step budgets. The calendar is the story's
-heartbeat; a farm is a thing that lives through seasons.
+**One calendar, one implementation.** `shared/calendar.js` is the single
+source of truth: **30 days = one season, 120 days = one year**, season math,
+crop maturity and growth pacing, and the festival dates. The server, the RL
+environment, and the browser all consume that service — nobody reimplements
+the calendar, so changing `DAYS_PER_SEASON` re-tunes the whole game.
+
+**Festivals are yearly, not seasonal.** Each of the colony's four festivals
+occurs exactly once per year on a fixed date, and the dates echo the old
+church calendar Earth left behind — kept as memory, not worship. No festival
+sits on the first day of every season; that was dull and is gone:
+
+| Festival | Fixed date | Earth calendar echo |
+|---|---|---|
+| **The Naming** | Spring 25 | Annunciation / Lady Day (25 March) |
+| **Solar Flare Fair** | Summer 24 | Midsummer / Saint John (24 June) |
+| **Galactic Harvest Festival** | Fall 29 | Michaelmas (29 September) |
+| **Hearthnight** (the Sol Earth Festival) | Winter 25 | Christmas (25 December) |
+
+Hearthnight is the ACT 3 finale and deadline — the festival, the finale, the
+deadline — and the one colony holiday kept for everyone, whatever they
+believe ("happy holidays", in the loudest voice we have): hearth, light,
+gifts, and the night the whole colony eats Earth rations.
+
+Episodes, benchmarks, and evaluations use **one full season (30 days)** as
+the default horizon — we measure play in *springs lived* and *years survived*,
+not arbitrary step budgets. The calendar is the story's heartbeat; a farm
+is a thing that lives through seasons.

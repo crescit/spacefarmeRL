@@ -125,7 +125,7 @@ class IntroScene extends Phaser.Scene {
     this.crawlWindow = 7;
     // dark backing panel so the crawl reads cleanly over the busy starfield
     this.crawlPanel = this.add.rectangle(width / 2, height * 0.42, Math.min(Math.round(width * 0.8), 680), 300, 0x1b2436, 0.88)
-      .setStrokeStyle(3, 0x39c5bb, 0.75);
+      .setStrokeStyle(3, 0x39c5bb, 0.75).setScrollFactor(0);
     this.textObject = this.add.text(width / 2, height * 0.42, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
       fontSize: '20px',
@@ -134,11 +134,11 @@ class IntroScene extends Phaser.Scene {
       lineSpacing: 12,
       stroke: '#000000',
       strokeThickness: 3,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0);
 
-    // input: skip crawl (SPACE) or begin (once title shown)
+    // input: skip crawl (SPACE / A) or begin (once title shown)
     this.input.keyboard.on('keydown', (e) => {
-      if (e.key === 'Space') this.handleSpace();
+      if (e.key === 'Space' || e.key === 'a' || e.key === 'A') this.handleSpace();
     });
     this.input.on('pointerdown', () => this.handleSpace());
 
@@ -147,6 +147,7 @@ class IntroScene extends Phaser.Scene {
     // ── Audio: boot BGM + SFX on first input (autoplay policy) ──
     this.audio = new AudioSystem(this);
     const bootAudio = () => { this.audio.boot(); if (window.SpaceFarmer?.music) window.SpaceFarmer.music.setContext('intro'); };
+    this._bootAudio = bootAudio;            // TouchControls reuses this for DOM-button gestures
     this.input.once('pointerdown', bootAudio);
     this.input.keyboard.once('keydown', bootAudio);
   }
@@ -170,26 +171,29 @@ class IntroScene extends Phaser.Scene {
   }
 
   _renderCrawl() {
-    const win = this.shownLines.slice(-this.crawlWindow);
-    this.textObject.setText(win.map((l, i) => i === win.length - 1 ? l + this.currentLine : l).join('\n'));
+    if (this.titleShown || !this.textObject) return;   // crawl is gone (skipped/faded) — never touch it
+    // Completed lines scroll through the window; the line being typed lives
+    // ONLY as currentLine (not yet in shownLines), so it never renders twice.
+    const comp = this.shownLines.slice(-(this.crawlWindow - 1));
+    const lines = this.currentLine ? [...comp, this.currentLine] : comp;
+    this.textObject.setText(lines.join('\n'));
   }
 
   nextLine() {
-    if (this.line >= INTRO_TEXT.length) {
-      this.showTitle();
-      return;
-    }
+    if (this.line >= INTRO_TEXT.length) { this.showTitle(); return; }
+    if (this.titleShown) return;            // crawl was skipped mid-roll
     this.currentLine = '';
     this.charIndex = 0;
     const full = INTRO_TEXT[this.line];
     this.line++;
-    this.shownLines.push(full);   // keep blank spacer lines as paragraph breaks
     this._renderCrawl();
     this.typeNext(full);
   }
 
   typeNext(full) {
+    if (this.titleShown) return;            // skip happened mid-type — stop cleanly
     if (this.charIndex >= full.length) {
+      this.shownLines.push(full);           // line finished → it enters the scroll window
       this.currentLine = '';
       this._renderCrawl();
       this.time.delayedCall(1200, () => this.nextLine());

@@ -23,15 +23,23 @@ const mkState = () => ({
 });
 room.state = mkState();
 
+// The season arithmetic lives in the shared calendar service — this test asks
+// it the boundaries (30-day seasons, 120-day year) and checks FarmRoom agrees.
+const { createCalendar, DEFAULT_CALENDAR } = require(path.join(__dirname, '..', 'shared', 'calendar.js'));
+
 console.log('== Seasons ==');
 {
+  const cal = createCalendar();
   check('season starts at spring (0)', room.state.season === 0);
-  room.state.day = 14;  // day 14 → (13 % 28)/7 = 1 → summer
-  const s1 = Math.floor(((room.state.day - 1) % 28) / 7);
-  check('day 14 → summer (1)', s1 === 1, `got ${s1}`);
-  room.state.day = 29;  // day 29 → (28%28)/7 = 0 → new year spring
-  const s2 = Math.floor(((room.state.day - 1) % 28) / 7);
-  check('day 29 → spring again (0)', s2 === 0, `got ${s2}`);
+  check('day 1 → spring', cal.seasonIndex(1) === 0, `got ${cal.seasonIndex(1)}`);
+  check('day 30 → spring (last spring day)', cal.seasonIndex(30) === 0, `got ${cal.seasonIndex(30)}`);
+  check('day 31 → summer', cal.seasonIndex(31) === 1, `got ${cal.seasonIndex(31)}`);
+  check('day 61 → fall', cal.seasonIndex(61) === 2, `got ${cal.seasonIndex(61)}`);
+  check('day 91 → winter', cal.seasonIndex(91) === 3, `got ${cal.seasonIndex(91)}`);
+  check('day 121 → spring again (new 120-day year)', cal.seasonIndex(121) === 0, `got ${cal.seasonIndex(121)}`);
+  const roomCal = room._cal();
+  check('FarmRoom reads its calendar from the same service', roomCal.daysPerSeason === cal.daysPerSeason && roomCal.yearLength === 120,
+    `daysPerSeason=${roomCal.daysPerSeason} year=${roomCal.yearLength}`);
 }
 
 console.log('== Livestock ==');

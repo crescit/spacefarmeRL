@@ -3,6 +3,11 @@
 const { Room } = require('@colyseus/core');
 const { Schema, ArraySchema, defineTypes } = require('@colyseus/schema');
 const { savePlayer, loadPlayer } = require('../persistence');
+// The B-612 calendar is a SERVICE we depend on, never reimplemented here:
+// days-per-season, season boundaries, growth pacing, crop maturity, and the
+// yearly festival dates all come from the single shared module. Inject a
+// different Calendar for tests/variants via FarmRoom.calendar or room.calendar.
+const { createCalendar, DEFAULT_CALENDAR } = require('../../shared/calendar.js');
 
 // ── Schema definitions ──
 
@@ -391,7 +396,7 @@ const QUESTS = {
   },
   q3_festival_stock: {
     act: 3, giver: 'comet', title: 'Stocks for the Big Day',
-    brief: 'The Sol Earth Festival is coming. Comet\u2019s trading post needs a buffer — the whole colony eats in one night. Sell enough, and add one fish to the reserve.',
+    brief: 'Hearthnight — the colony\u2019s Sol Earth Festival — comes the 25th of every winter. Comet\u2019s trading post needs a buffer: the whole colony eats in one night. Sell enough, and add one fish to the reserve.',
     objectives: [
       { type: 'sell', n: 300, label: 'Earn 300cr selling' },
       { type: 'fish', n: 1, label: 'Catch 1 fish for the reserve' },
@@ -400,7 +405,7 @@ const QUESTS = {
   },
   q3_earth_feast: {
     act: 3, giver: 'rhea', title: 'The Earth Feast',
-    brief: 'On festival day, the whole colony eats Earth rations — the meal that tastes like grief and salt. Rhea needs three dishes ready before the line wraps the block.',
+    brief: 'On Hearthnight the whole colony eats Earth rations — the meal that tastes like grief and salt. Rhea needs three dishes ready before the line wraps the block.',
     objectives: [
       { type: 'cook', n: 3, festival: true, dish: 'earth-feast-plate', label: 'Cook 3 Earth Feast Plates on festival day' },
     ],
@@ -408,7 +413,7 @@ const QUESTS = {
   },
   q3_heart_of_stardust: {
     act: 3, giver: 'nova', title: 'The Heart of Stardust',
-    brief: 'The last maintenance is the core itself. Nova wants the old heart running one more festival night — then the stardust core goes in and the light stops being old. It stops being anyone\u2019s grief.',
+    brief: 'The last maintenance is the core itself. Nova wants the old heart running one more Hearthnight — then the stardust core goes in and the light stops being old. It stops being anyone\u2019s grief.',
     objectives: [
       { type: 'mine', n: 5, label: 'Mine 5 more ores for the core' },
       { type: 'festival', n: 1, label: 'Attend the festival' },
@@ -447,6 +452,19 @@ function mulberry32(seed) {
 }
 
 class FarmRoom extends Room {
+  // Calendar service injection seam: FarmRoom.calendar (class-level) defaults
+  // the whole class; per-room this.calendar overrides it; everything else
+  // falls back to the shared DEFAULT_CALENDAR. The RL env injects its own via
+  // room.calendar so a variant calendar reaches every handler unchanged.
+  static calendar = DEFAULT_CALENDAR;
+
+  constructor(...args) {
+    super(...args);
+    this.calendar = FarmRoom.calendar || DEFAULT_CALENDAR;
+  }
+
+  _cal() { return this.calendar || FarmRoom.calendar || DEFAULT_CALENDAR; }
+
   onCreate() {
     this.setState(new FarmState());
     this.rng = Math.random;      // stochastic seam (see setRng)
@@ -1062,17 +1080,20 @@ class FarmRoom extends Room {
 
   onAdvanceDay(client) {
     this.state.day += 1;
-    // Seasons: a full year is 28 days, 7 days per season (spring→summer→fall→winter)
-    const newSeason = Math.floor(((this.state.day - 1) % 28) / 7);
-    this.state.season = newSeason;
-    // Each season opens with a festival day (the first day of the season),
-    // which resets the claim so every season festival can be attended once.
-    const isFestival = (this.state.day % 7) === 1 && this.state.day > 1;
-    this.state.festival = isFestival;
+    const cal = this._cal();   // calendar service — the ONLY source for this math
+    // Seasons come from the calendar service: DAYS_PER_SEASON (default 30) per
+    // season, a full year = 4 seasons (default 120 days).
+    this.state.season = cal.seasonIndex(this.state.day);
+    // Festivals recur yearly on fixed dates (calendar service): The Naming
+    // (spring 25), Solar Flare Fair (summer 24), Galactic Harvest Festival
+    // (fall 29), and Hearthnight / Sol Earth Festival (winter 25). Claim resets
+    // every festival so each can be attended once.
+    const festival = cal.festivalForDay(this.state.day);
+    this.state.festival = !!festival;
     this.state.festivalClaimed = false;
     // M3 — festival day phases: waking up ON the festival → setup (morning),
     // waking up the day AFTER a festival → afterglow (one morning), then none.
-    if (isFestival) {
+    if (festival) {
       this.state.feastPeak = false;   // new festival day → the peak can fire again
       this._applyFestivalPhase('setup');
     }
@@ -1080,8 +1101,10 @@ class FarmRoom extends Room {
     else if (this.state.festivalPhase === 'afterglow') this._applyFestivalPhase('none');
     this.state.farms.forEach((farm) => {
       if (!farm || !farm.tiles) return;
-      // Crop growth rate by season: spring(0)/summer(1) grow fast, winter(3) slowest
-      const growthMult = this.state.season === 3 ? 0.5 : (this.state.season === 0 || this.state.season === 1 ? 1 : 0.75);
+      // Growth pacing and maturity both come from the calendar service — one
+      // formula the server, RL mirrors, and client all agree on.
+      const growthMult = cal.growthMultiplier(this.state.season);
+      const maturityDays = cal.maturityDays();
       for (const tile of farm.tiles) {
         const info = CROP_INFO[tile.crop];
         // out-of-season crops stall — only some plants grow in certain seasons
@@ -1090,7 +1113,7 @@ class FarmRoom extends Room {
           tile.growthDay += growthMult;
           if (tile.type === 'seeded') tile.type = 'growing';
         }
-        if (tile.growthDay >= 3 && tile.crop) {
+        if (tile.growthDay >= maturityDays && tile.crop) {
           tile.type = 'mature';
         }
         tile.watered = false;

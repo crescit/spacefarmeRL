@@ -321,6 +321,30 @@ Harvest Moon mechanics + EarthBound humor + Space vibes. Funny, raunchy, heartwa
 
 ---
 
+## The B-612 Calendar
+
+A B-612 **year is 120 days: four seasons of 30 days.** The rock's orbit has
+nothing to do with Earth's, but the colony kept Earth's names for the turning
+of a year — spring, summer, fall, winter — because those are the words their
+ancestors gave to *rebirth, heat, harvest, and the long dark*, and memory is
+the only way to keep them true.
+
+The colony also keeps the old church calendar of home — the feast days the
+first colonists' bells used to ring — as **memory, not worship**. Each yearly
+festival lands on a fixed date, once per year:
+
+| Season day | Festival | What it remembers |
+|---|---|---|
+| Spring 25 | **The Naming** | The first dawn of B-612 — the day the land was already named. The old mission bell rings at first light. (Echo: Annunciation / Lady Day.) |
+| Summer 24 | **Solar Flare Fair** | Midsummer, the feast kept for Saint John: bonfires outshining the flares, Rhea's zero-g cooking contest, fireworks at dusk. (Echo: Midsummer / St. John's Eve.) |
+| Fall 29 | **Galactic Harvest Festival** | Michaelmas, the old end of the harvest: the fields give their last, full answer, exchange prices run at festival rates, and Orion challenges you to a harvest-off. (Echo: Michaelmas.) |
+| Winter 25 | **Hearthnight** — the Sol Earth Festival | The colony's one midwinter holiday, kept for everyone, whatever they believe: hearth, light, gifts. And the night they eat Earth rations — the meal that tastes like grief and salt. (Echo: Christmas, twenty-fifth of the long dark.) |
+
+Hearthnight is the year's finale and the story's deadline — ACT III of
+*The Stardust Story* runs straight to it.
+
+---
+
 ## Game Structure
 
 ### Phase 1: Spaceship Tutorial
@@ -337,7 +361,7 @@ Wake from cryo. C.O.R.A. guides you through:
 - 💕 Find Love — Heart events at 60+ friendship. Dating. Marriage. Kids.
 - ⛏️ Mine — Asteroid caves with rare minerals
 - 🚀 Ship — Package harvest for outer colonies
-- 🎉 Festivals — Galactic Harvest Festival, Zero-G Cooking Contest, Solar Flare Fireworks
+- 🎉 Festivals — yearly, on fixed dates: **The Naming** (spring 25), **Solar Flare Fair** (summer 24), **Galactic Harvest Festival** (fall 29), **Hearthnight** — the Sol Earth Festival, the ACT 3 finale (winter 25)
 
 ### Phase 3: Generations
 - Children inherit traits from parents

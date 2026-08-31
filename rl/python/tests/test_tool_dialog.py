@@ -106,6 +106,7 @@ class ToolDialogTests(unittest.TestCase):
                 response(content="Goodnight, colony."),
             ]
             env = FarmGymEnv(horizon_days=28)
+            self.addCleanup(env.close)
             env.reset(seed=4, options={"narrative": True, "horizon_days": 28})
             policy = ToolDialogPolicy(
                 base_url=f"http://127.0.0.1:{srv.port}/v1",
@@ -194,6 +195,7 @@ class ToolDialogTests(unittest.TestCase):
     def test_model_tools_passthrough(self):
         with StubServer() as srv:
             env = FarmGymEnv(horizon_days=28)
+            self.addCleanup(env.close)
             env.reset(seed=4)
             policy = ToolDialogPolicy(
                 base_url=f"http://127.0.0.1:{srv.port}/v1",

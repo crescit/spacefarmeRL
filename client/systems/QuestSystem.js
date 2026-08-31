@@ -86,7 +86,7 @@ export const QUESTS = {
   },
   q3_festival_stock: {
     act: 3, giver: 'comet', title: 'Stocks for the Big Day',
-    brief: 'The Sol Earth Festival is coming. The whole colony eats in one night — build the buffer.',
+    brief: 'Hearthnight — the colony\u2019s Sol Earth Festival — comes the 25th of every winter. The whole colony eats in one night — build the buffer.',
     objectives: [
       { type: 'sell', n: 300, label: 'Earn 300cr selling' },
       { type: 'fish', n: 1, label: 'Catch 1 fish for the reserve' },
@@ -95,13 +95,13 @@ export const QUESTS = {
   },
   q3_earth_feast: {
     act: 3, giver: 'rhea', title: 'The Earth Feast',
-    brief: 'On festival day the whole colony eats Earth rations — grief and salt. Three dishes, before the line wraps the block.',
+    brief: 'On Hearthnight the whole colony eats Earth rations — grief and salt. Three dishes, before the line wraps the block.',
     objectives: [{ type: 'cook', n: 3, festival: true, dish: 'earth-feast-plate', label: 'Cook 3 Earth Feast Plates on festival day' }],
     reward: { credits: 150, items: { 'cooked-food': 2 } }, next: 'q3_heart_of_stardust',
   },
   q3_heart_of_stardust: {
     act: 3, giver: 'nova', title: 'The Heart of Stardust',
-    brief: 'The old heart runs one more festival night — then the stardust core goes in, and the light stops being old. It stops being anyone\u2019s grief.',
+    brief: 'The old heart runs one more Hearthnight — then the stardust core goes in, and the light stops being old. It stops being anyone\u2019s grief.',
     objectives: [
       { type: 'mine', n: 5, label: 'Mine 5 more ores for the core' },
       { type: 'festival', n: 1, label: 'Attend the festival' },
@@ -115,7 +115,7 @@ export const QUEST_ORDER = [
   'q2_meet_nova', 'q2_mine_crystal', 'q2_upgrade_tool', 'q2_cook_feast', 'q2_bond',
   'q3_animal_farm', 'q3_festival_stock', 'q3_earth_feast', 'q3_heart_of_stardust',
 ];
-export const ACT_NAMES = { 1: 'ACT I — THE DEBT', 2: 'ACT II — THE FAILING HEART', 3: 'ACT III — EARTH DAY' };
+export const ACT_NAMES = { 1: 'ACT I — THE DEBT', 2: 'ACT II — THE FAILING HEART', 3: 'ACT III — EARTH DAY (HEARTHNIGHT)' };
 
 const TOOL_RANK = { base: 0, iron: 1, gold: 2 };
 

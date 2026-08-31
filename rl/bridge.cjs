@@ -4,7 +4,6 @@
 console.log = (...args) => console.error(...args);
 const readline = require('node:readline');
 const { FarmEnv, ITEMS, ACTION_TYPES, TOOLS, SEASONS, DAYS_PER_SEASON, NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS } = require('./env_core.cjs');
-
 let env = null;
 const reply = (payload) => process.stdout.write(JSON.stringify({ ok: true, ...payload }) + '\n');
 const fail = (error) => process.stdout.write(JSON.stringify({
@@ -27,7 +26,7 @@ async function handle(command) {
       });
     case 'reset': {
       if (env) env.close();
-      env = new FarmEnv({ horizonDays: command.horizonDays || 28, narrative: !!command.narrative });
+      env = new FarmEnv({ horizonDays: command.horizonDays || DAYS_PER_SEASON, narrative: !!command.narrative });
       const obs = env.reset({ seed: command.seed ?? 1 });
       return reply({ obs, info: { seed: command.seed ?? 1, narrative: env.narrative } });
     }

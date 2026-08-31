@@ -58,7 +58,8 @@ def run_episode(policy: str, seed: int, horizon_days: int) -> Episode:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seeds", type=int, default=5)
-    parser.add_argument("--horizon-days", type=int, default=12)
+    parser.add_argument("--horizon-days", type=int, default=None,
+                        help="days per episode (default: one season per Node's calendar)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     episodes = [

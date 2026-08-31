@@ -12,8 +12,10 @@
 import { NPC_DATA } from '../entities/NPCData.js';
 import { ALIEN_DATA, CONTACT_DOCTRINES } from '../entities/AlienData.js';
 import { TouchControls } from '../systems/TouchControls.js';
+import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { questView, questChip, QUESTS, rewardLine } from '../systems/QuestSystem.js';
+import { calendar, SEASON_NAMES, DAYS_PER_SEASON } from '../systems/CalendarService.js';
 import {
   MAP_W, MAP_H, ground, blocks, BUILDINGS, DECOR, NPC_POS,
   PLAYER_START, fenceSpans, FENCE_Y_EXPORT,
@@ -35,7 +37,8 @@ const CROP_SEASONS = {
   'nebula-pepper': { seasons: [2],    regrow: true },
   'glow-kelp':     { seasons: [3],    regrow: true },
 };
-const SEASON_NAMES = ['SPRING', 'SUMMER', 'FALL', 'WINTER'];
+// SEASON_NAMES comes from the shared calendar service (imported above) — the
+// browser, server, and RL env ALL read the same season labels and dates.
 
 // ── Kitchen recipes (M4) — mirrors server/rooms/FarmRoom.js RECIPES ──
 const RECIPES_CLIENT = {
@@ -73,7 +76,7 @@ const FEST_BUNTING = [                               // garlands between the lam
   { x1: 24, x2: 27, y: 11 }, { x1: 32, x2: 29, y: 11 },
 ];
 const FEST_STALLS = [{ x: 20, y: 14 }, { x: 28, y: 14 }];
-const FEST_GUESTS = [                                // 7 visiting guests (festival crowd)
+const FEST_GUESTS = [                                // festival crowd (one sprite per guest)
   { tex: 'nova', x: 22, y: 13 }, { tex: 'luna', x: 24, y: 13 },
   { tex: 'vega', x: 26, y: 13 }, { tex: 'astra', x: 23, y: 14 },
   { tex: 'comet', x: 25, y: 14 }, { tex: 'rhea', x: 22, y: 15 },
@@ -520,6 +523,7 @@ class PlanetScene extends Phaser.Scene {
 
     // ── audio (2000s JRPG) ──
     this.audio = new AudioSystem(this);
+    this._bootAudio = () => this.audio.boot();   // TouchControls reuses this for DOM-button gestures
     this.input.once('pointerdown', () => this.audio.boot());
     this.input.keyboard.once('keydown', () => this.audio.boot());
 
@@ -553,81 +557,68 @@ class PlanetScene extends Phaser.Scene {
     }).setOrigin(0, 0).setDepth(1000);
   }
   buildDialogue(width, height) {
-    const bw = width - 96, bh = 148, cx = width / 2, cy = height - 92;
+    const bw = width - 96, bh = 158, cx = width / 2, cy = height - 92;
     const boxL = cx - bw / 2, boxT = cy - bh / 2;
-    this.dialogueBox = this.add.rectangle(cx, cy, bw, bh, 0x0a0a18, 0.95)
-      .setStrokeStyle(3, 0x39c5bb).setDepth(1000).setVisible(false);
-    // EarthBound tail — triangle nudging up toward the speaker in the world
-    this.dialogueTail = this.add.triangle(cx, boxT, -15, 7, 15, 7, 0, -9, 0x0a0a18)
-      .setStrokeStyle(1, 0x39c5bb).setDepth(999).setVisible(false);
-    // animated speaking portrait (upper-left)
-    const ppx = boxL + 21, ppy = boxT + 53;
-    this.portraitPlate = this.add.rectangle(ppx, ppy, 46, 52, 0x141426, 1)
-      .setStrokeStyle(2, 0x39c5bb).setDepth(1001).setVisible(false);
-    this.dialoguePortrait = this.add.image(ppx, ppy, 'port.nova_0').setDepth(1002).setVisible(false);
-    // name plate (left-aligned beside the portrait)
-    this.dialogueTitle = this.add.text(boxL + 54, boxT + 15, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#39c5bb',
-      stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0, 0.5).setDepth(1001).setVisible(false);
-    // body text — types out left-aligned
-    this.dialogueText = this.add.text(boxL + 58, boxT + 42, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#e8ecff',
-      wordWrap: { width: bw - 82 }, lineSpacing: 6, align: 'left',
-    }).setOrigin(0, 0).setDepth(1002).setVisible(false);
-    // footer hint (prompt / gift keys)
-    this.dialogueHint = this.add.text(cx + bw / 2 - 12, cy + bh / 2 - 14, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
-    }).setOrigin(1, 0.5).setDepth(1001).setVisible(false);
-
-    // typewriter + portrait blab state
-    this._diaFull = ''; this._diaShown = 0; this._diaDone = true;
-    this._diaNPC = null; this._diaFooter = ''; this._diaEvt = null;
-    this._portraitBaseY = ppy;
+    this._diaBox = { cx, boxL, boxR: cx + bw / 2, boxT, boxB: cy + bh / 2, bw, bh };
+    // One shared dialogue component (clip + scroll + collapse) used by every scene.
+    this.dialog = new DialoguePanel(this, {
+      x: cx, y: cy, width: bw, height: bh,
+      portrait: { texture: 'port.nova_0' },
+      tail: {},
+      textX: boxL + 58, textTopY: boxT + 46,
+      wrapWidth: bw - 82,
+      fontSize: '10px',
+      clipTop: boxT + 38, clipHeight: bh - 56,
+    });
+    // Alias the old field names so the rest of the scene (input, update,
+    // HUD, panels) keeps reading/writing the same refs — now backed by the
+    // shared panel's internals.
+    this.dialogueBox    = this.dialog.box;
+    this.dialogueText   = this.dialog.text;
+    this.dialogueTitle  = this.dialog.title;
+    this.dialoguePortrait = this.dialog.portrait;
+    this.dialogueHint   = this.dialog.hint;
+    this.portraitPlate  = this.dialog.portraitPlate;
+    this.dialogueTail   = this.dialog.tail;
+    this.diaScrollUp    = this.dialog.scrollUp;
+    this.diaScrollDown  = this.dialog.scrollDown;
+    this.diaCollapseBtn = this.dialog.collapseBtn;
+    this._portraitBaseY = this.dialog.portraitBaseY || (boxT + 58);
+    // dialogue state kept here — update()/input read these
+    this._diaNPC = null; this._diaFooter = ''; this._diaDone = true;
+    this._diaFull = ''; this._diaShown = 0;
   }
 
-  // EarthBound-style speech: typewriter reveal + portrait mouth-blab while typing
+  // EarthBound-style speech: typewriter reveal + portrait mouth-blab while typing.
+  // The shared panel owns the text/scroll/collapse; this scene adds the portrait
+  // and the [SPACE to continue] choreography.
   _speak(full, npcId, opts = {}) {
-    if (this._diaEvt) { this._diaEvt.remove(); this._diaEvt = null; }
-    this.dialogueText.setText('');
-    this.dialogueHint.setText('').setVisible(false);
+    this._diaDone = false;
     this._diaFull = full;
     this._diaShown = 0;
-    this._diaDone = false;
     this._diaNPC = npcId || (this.selectedNPC && this.selectedNPC.id) || 'nova';
     this._diaFooter = opts.footer || '';
-    if (opts.title !== undefined) { this.dialogueTitle.setText(opts.title).setVisible(true); }
-    if (this.dialoguePortrait.texture.key !== `port.${this._diaNPC}_0`) {
-      this.dialoguePortrait.setTexture(`port.${this._diaNPC}_0`);
-    }
-    this.dialoguePortrait.setVisible(true);
-    this.portraitPlate.setVisible(true);
-    this.dialogueBox.setVisible(true);
-    this.dialogueText.setVisible(true);
-    this.dialogueTail.setVisible(true);
-    const P = this;
-    this._diaEvt = this.time.addEvent({
-      delay: 28, loop: true, callback: () => {
-        P._diaShown = Math.min(P._diaFull.length, P._diaShown + 2);
-        P.dialogueText.setText(P._diaFull.slice(0, P._diaShown));
-        if (P._diaShown >= P._diaFull.length) {
-          P._diaDone = true;
-          P.dialoguePortrait.setTexture(`port.${P._diaNPC}_0`);
-          P.dialogueHint.setText(P._diaFooter || '[SPACE to continue]');
-          P.dialogueHint.setVisible(true);
-          P._diaEvt.remove(); P._diaEvt = null;
-        }
-      },
+    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_0`);
+    this.dialog.setText(full, {
+      title: opts.title,
+      footer: opts.footer,
+      typewriter: true,
+      onDone: () => { this._diaDone = true; this._diaTypesFinished(); },
     });
   }
 
+  // Called when the shared panel finishes typing — settle the portrait and hint.
+  _diaTypesFinished() {
+    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_0`);
+    this.dialogueHint.setText(this._diaFooter || '[SPACE to continue]');
+    this.dialogueHint.setVisible(true);
+  }
+
   _finishTyping() {
-    if (this._diaEvt) { this._diaEvt.remove(); this._diaEvt = null; }
     if (this._diaDone) return;
-    this._diaShown = this._diaFull.length;
-    this.dialogueText.setText(this._diaFull);
+    this.dialog.finishTyping();
     this._diaDone = true;
-    if (this._diaNPC) this.dialoguePortrait.setTexture(`port.${this._diaNPC}_0`);
+    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_0`);
     this.dialogueHint.setText(this._diaFooter || '[SPACE to continue]');
     this.dialogueHint.setVisible(true);
   }
@@ -818,7 +809,7 @@ class PlanetScene extends Phaser.Scene {
       }
     }
 
-    // the visiting crowd — 7 guest sprites (reused villager art), hidden unless festival
+    // the visiting crowd — festival guests (reused villager art), hidden unless festival
     this.festivalGuests = FEST_GUESTS.map((g, i) => {
       const tx = px(g.x), ty = py(g.y);
       const shadow = this.add.image(tx, ty + 30, 'fx.shadow').setScale(1.3).setAlpha(0.8);
@@ -1020,7 +1011,8 @@ rations, and your name on the manifest.
     if (led.fished) bits.push(`🎣 ${led.fished} caught`);
     if (led.mined) bits.push(`⛏ ${led.mined} mined`);
     if (led.gifts) bits.push(`🎁 ${led.gifts} gifts`);
-    const head = `DAY ${d.day}${d.ngPlus ? ` · NG+${d.ngPlus}` : ''}${d.festival ? ' — FESTIVAL' : (d.festivalPhase === 'afterglow' ? ' — AFTERGLOW' : '')}`;
+    const fest = d.festival ? calendar.festivalForDay(d.day) : null;
+    const head = `DAY ${d.day}${d.ngPlus ? ` · NG+${d.ngPlus}` : ''}${fest ? ` — ${fest.short}` : (d.festivalPhase === 'afterglow' ? ' — AFTERGLOW' : '')}`;
     const body = bits.length ? bits.join('   ') : 'A quiet day. The dome hums. Rest is also farming.';
     const { width } = this.game.config;
     const card = this.add.text(width / 2, 108, head + '\n' + body, {
@@ -1120,7 +1112,12 @@ rations, and your name on the manifest.
         this.updateHUD();
       });
     } else {
-      this.showToast('No festival today. They arrive the first day of each season.');
+      const next = calendar.nextFestivalAfter(this.roomState?.day || 0);
+      this.showToast(
+        next
+          ? `No festival today. ${next.name} arrives ${calendar.seasonName(next.day)} ${calendar.dayInSeason(next.day)}.`
+          : 'No festival today.'
+      );
     }
   }
 
@@ -1608,6 +1605,7 @@ rations, and your name on the manifest.
   stopMove() { this.touchDir = null; }
 
   update(time) {
+    const { width, height } = this.game.config;   // viewport in world coords (meteor/cloud spawn)
     // Task 4: lamp/door light-pool flicker — each pool wobbles on its own
     // phase (rare deep dip = "old lamp" feel). Cheap: alpha only, no textures.
     if (this.isNight && this.lightPools) {
@@ -1705,7 +1703,7 @@ rations, and your name on the manifest.
         if (this.contactPhase === "choice") {
           const keys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey, this.fiveKey];
           keys.forEach((key, index) => { if (Phaser.Input.Keyboard.JustDown(key)) this.chooseContactDoctrine(CONTACT_DOCTRINES[index].id); });
-        } else if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
+        } else if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey) || Phaser.Input.Keyboard.JustDown(this.wasd.A)) {
           if (!this._diaDone) this._finishTyping(); else this.advanceAlienCutscene();
         }
         if (Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
@@ -1713,7 +1711,7 @@ rations, and your name on the manifest.
       }
       // heart-event cutscene: SPACE/ENTER finishes typing, then advances line-by-line; ESC skips
       if (this.eventQueue) {
-        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey) || Phaser.Input.Keyboard.JustDown(this.wasd.A)) {
           if (this._diaDone) this.advanceEvent();
           else this._finishTyping();
         } else if (Phaser.Input.Keyboard.JustDown(this.escKey)) {
@@ -1735,8 +1733,8 @@ rations, and your name on the manifest.
           if (!this._diaDone) this.dialoguePortrait.setTexture(`port.${this._diaNPC}_${Math.floor(time / 55) % 3}`);
           this.dialoguePortrait.y = this._portraitBaseY + Math.sin(time / 280) * 2.5;
         }
-        // space: finish the typewriter first, then close the box
-        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
+        // space/a/e: finish the typewriter first, then close the box
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey) || Phaser.Input.Keyboard.JustDown(this.wasd.A)) {
           if (!this._diaDone) this._finishTyping();
           else this.closeAllPanels();
         }
@@ -2150,9 +2148,13 @@ rations, and your name on the manifest.
         }
       }
     }
-    const SEASONS = ['SPRING', 'SUMMER', 'FALL', 'WINTER'];
-    const sName = SEASONS[this.season ?? 0] || 'SPRING';
-    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${this.roomState && this.roomState.festival ? '   ·   FESTIVAL' : ''}`);
+    const sName = SEASON_NAMES[this.season ?? 0] || 'SPRING';
+    let hudFest = '';
+    if (this.roomState && this.roomState.festival) {
+      const fest = calendar.festivalForDay(this.roomState.day || 0);
+      hudFest = fest ? `   ·   ${fest.short}` : '   ·   FESTIVAL';
+    }
+    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${hudFest}`);
     if (this.energyFill) {
       const energyRatio = Math.max(0, Math.min(1, this.energy / (this.staminaMax || 100)));
       this.energyFill.width = 170 * energyRatio;
@@ -2174,6 +2176,16 @@ rations, and your name on the manifest.
 
   // ── interaction ──
   handleInteract() {
+    // During any dialogue, the A button (keyboard or touch) advances it — finish
+    // typing first, then move the conversation on (or close the box).
+    if (this.inAlienContact || this.eventQueue || this.inDialogue) {
+      if (this.inAlienContact && this.contactPhase === 'choice') return; // doctrine picks use number keys
+      if (!this._diaDone) { this._finishTyping(); return; }
+      if (this.inAlienContact) this.advanceAlienCutscene();
+      else if (this.eventQueue) this.advanceEvent();
+      else this.closeAllPanels();
+      return;
+    }
     // Inside the house: A-near-chest opens storage, A-near-stove cooks, A-near-bed sleeps, A-near-door exits.
     if (this.inInterior && this.intPlayer && this.intBed && this.intDoor) {
       const dBed = Math.hypot(this.intPlayer.x - this.intBed.x, this.intPlayer.y - this.intBed.y);
@@ -2496,8 +2508,7 @@ rations, and your name on the manifest.
 
   showContactCouncil(alien, prior = null) {
     this.contactPhase = "choice";
-    this.dialogueBox.setVisible(false); this.dialogueTitle.setVisible(false); this.dialogueText.setVisible(false);
-    this.dialogueHint.setVisible(false); this.dialoguePortrait.setVisible(false); this.portraitPlate.setVisible(false); this.dialogueTail.setVisible(false);
+    if (this.dialog) this.dialog.hide();
     this.contactTitle.setText(alien.glyph + " " + alien.name.toUpperCase() + " // COLONY COUNCIL");
     this.contactPremise.setText(alien.premise + "\n\n" + alien.stakes);
     this.contactNote.setText(prior ? "Current doctrine: " + prior.toUpperCase() + " · choose again to revise the charter" : "No reward · no correct answer · this becomes colony history");
@@ -2717,14 +2728,7 @@ rations, and your name on the manifest.
 
   // ── panels ──
   closeAllPanels() {
-    this.dialogueBox.setVisible(false);
-    this.dialogueTitle.setVisible(false);
-    this.dialogueText.setVisible(false);
-    if (this.dialogueHint) this.dialogueHint.setVisible(false);
-    if (this.dialoguePortrait) this.dialoguePortrait.setVisible(false);
-    if (this.portraitPlate) this.portraitPlate.setVisible(false);
-    if (this.dialogueTail) this.dialogueTail.setVisible(false);
-    if (this._diaEvt) { this._diaEvt.remove(); this._diaEvt = null; }
+    if (this.dialog) this.dialog.hide();   // hides + resets dialogue box/scroll/collapse
     this._diaDone = true;
     this.gePanel.setVisible(false);
     if (this.contactPanel) this.contactPanel.setVisible(false);

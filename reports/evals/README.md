@@ -10,7 +10,7 @@ Leaderboard entries must use:
 
 - action interface `masked-macro-v3-strict`;
 - seeds 1 through 10;
-- a 12-day horizon;
+- a 30-day horizon (one full B-612 season);
 - deterministic model sampling;
 - the same environment revision.
 
@@ -24,7 +24,7 @@ export OPENAI_MODEL=model-id
 npm run eval:local-model -- \
   --seeds 10 \
   --seed-start 1 \
-  --horizon-days 12 \
+  --horizon-days 30 \
   --max-steps 500 \
   --timeout 120 \
   --thinking \

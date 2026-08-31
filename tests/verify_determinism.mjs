@@ -134,22 +134,26 @@ console.log('== Env-level checkpoint (deterministic replay) ==');
 {
   const { FarmEnv } = require(path.join(__dirname, '..', 'rl', 'env_core.cjs'));
   const ck = path.join(os.tmpdir(), `farmenv-ckpt-test-${process.pid}.json`);
+  const E0 = new FarmEnv({ horizonDays: 12 });
+  E0.reset({ seed: 77 });
+  const MD = E0.calendar.maturityDays();   // shared calendar service → 6
+  E0.close();
   const script = [
     { type: 'till', tileX: 0, tileY: 0 },
     { type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' },
     { type: 'water', tileX: 0, tileY: 0 },
-    { type: 'advance_day' }, { type: 'water', tileX: 0, tileY: 0 },
-    { type: 'advance_day' }, { type: 'water', tileX: 0, tileY: 0 },
-    { type: 'advance_day' },
+  ];
+  for (let d = 0; d < MD; d++) script.push({ type: 'advance_day' }, { type: 'water', tileX: 0, tileY: 0 });
+  script.push(
     { type: 'mine' }, { type: 'mine' }, { type: 'fish', spot: 'stardust' },
     { type: 'advance_day' },
     { type: 'harvest', tileX: 0, tileY: 0 },
     { type: 'mine' }, { type: 'mine' }, { type: 'fish', spot: 'copper' },
-  ];
+  );
   const traj = (rs, obs) => rs.join(',') + '|' + JSON.stringify(obs);
 
   // uninterrupted
-  const E1 = new FarmEnv({ horizonDays: 10 });
+  const E1 = new FarmEnv({ horizonDays: 12 });
   E1.reset({ seed: 77 });
   const r1 = [];
   for (const a of script) r1.push(E1.step(a).reward.toFixed(6));
@@ -157,15 +161,15 @@ console.log('== Env-level checkpoint (deterministic replay) ==');
   E1.close();
 
   // stop midway, checkpoint, fresh env, restore, run the rest
-  const E2 = new FarmEnv({ horizonDays: 10 });
+  const E2 = new FarmEnv({ horizonDays: 12 });
   E2.reset({ seed: 77 });
-  const cut = 10;
+  const cut = 12;
   const rPre = [];
   for (const a of script.slice(0, cut)) rPre.push(E2.step(a).reward.toFixed(6));
   const file = E2.save(ck);
   check('checkpoint file written outside saves/', file.startsWith(os.tmpdir()) && fs.existsSync(file));
 
-  const E3 = new FarmEnv({ horizonDays: 10 });
+  const E3 = new FarmEnv({ horizonDays: 12 });
   const obs0 = E3.load(ck);
   check('load reproduces obs at the checkpoint', JSON.stringify(obs0) === JSON.stringify(E2.obs()));
   const rPost = [];

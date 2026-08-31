@@ -17,6 +17,8 @@ class MusicDirector {
     this.activity = null;     // null | fishing | mining
     this.season = 0;          // 0 spring, 1 summer, 2 fall, 3 winter
     this.verb = null;         // shared convolution reverb (added later if cheap)
+    this.muted = false;      // user mute (toggled by the 🔊 button)
+    this.vol = 0.5;          // normal master volume
   }
 
   // Call from a user gesture (autoplay policy). Safe to call repeatedly.
@@ -28,8 +30,8 @@ class MusicDirector {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.0;
     this.master.connect(this.ctx.destination);
-    // gentle fade-in so the song emerges, not snaps
-    this.master.gain.linearRampToValueAtTime(0.5, this.ctx.currentTime + 2.5);
+    // gentle fade-in so the song emerges, not snaps (respects current mute)
+    this.master.gain.linearRampToValueAtTime(this.muted ? 0.0 : this.vol, this.ctx.currentTime + 2.5);
     this.nextBar = this.ctx.currentTime;   // start scheduling at "now", not the epoch
     this.timer = setInterval(() => this.tick(), 90);
   }
@@ -39,6 +41,15 @@ class MusicDirector {
   setContext(c) { if (c !== this.context) { this.context = c; } }
   // M3 — Earth Day: brighter, faster, with a melody layer over the pad.
   setMood(m) { if (m !== this.mood) { this.mood = m; } }
+  // Mute/unmute the whole generative soundtrack (master gain).
+  setMuted(m) {
+    this.muted = !!m;
+    if (this.ctx && this.master) {
+      const target = this.muted ? 0 : this.vol;
+      this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.master.gain.setTargetAtTime(target, this.ctx.currentTime, 0.05);
+    }
+  }
 
   tempo() { return this.config().tempo; }
 

@@ -40,7 +40,7 @@ parallel under P0.3) — everything RL sits on this.
 | ID | Task | Deps | Done when |
 |---|---|---|---|
 | P0.1 | **Charter doc** — write `docs/COLONY_SAGA.md`: 7 design laws, free-will/ consequence-symmetry spec, mission-era framing, Serra-homage placement, season/year clock | — | Doc reviewed & committed; ROADMAP points at it |
-| P0.2 | **Calendar** — add `SEASONS`, 7-day season / 28-day year constants, `seasonOf(day)`/`horizonInSeasons` helpers to `env_core.cjs` | — | `node -e` prints season boundaries; unit tests |
+| P0.2 | **Calendar** — single-source calendar service (`shared/calendar.js`, injected everywhere): `DAYS_PER_SEASON` (30) / 120-day year, `seasonOf(day)`/`dayInSeason`/`maturityDays`/`growthMultiplier`, yearly festivals on fixed dates (The Naming · Solar Flare Fair · Galactic Harvest Festival · Hearthnight=Sol Earth Festival, Christmas-echo winter 25) | — | `node -e` prints season boundaries; unit tests; FarmRoom/env/client all read one implementation |
 | P0.3 | **Tool schema** — single-source `TOOLS` (18 tools: till/plant/water/harvest/sell/buy_animal/feed/upgrade_tool/fish/mine/gift/talk/claim_festival/advance_day + inspect/get_state/read_colony_log/write_journal) with world-voice descriptions + JSON params | P0.1, P0.2 | Schema validates against engine params; 0 drift between consumers by construction |
 | P0.4 | **Bridge spec v2** — expose `tools` + `narrative` capability in `spec`; bump `protocolVersion` backward-compatibly | P0.3 | Bridge spec test; old clients unaffected |
 | P0.5 | **Colony Briefing** — headless `briefing()` in `env_core`: sensory prose + colony pressure (debt, generator, winter, Earth Day) + quest arc (ACT 1–3) + compact legal-state block | P0.2, P0.3, P0.1 | Deterministic briefing renders; prose snapshot test |
@@ -130,7 +130,7 @@ parallel under P0.3) — everything RL sits on this.
 ## Progress log (append-only)
 
 - **2026-08-29 (overnight sprint)** — `6fe8dba`:
-  - ✅ P0.1 charter (`docs/COLONY_SAGA.md`) · ✅ P0.2 story clock (7d/28d, `seasonOf`)
+  - ✅ P0.1 charter (`docs/COLONY_SAGA.md`) · ✅ P0.2 story clock (30d/120d, `shared/calendar.js` Calendar service, yearly festivals)
   - ✅ P0.3 single-source `TOOLS` (18 world-voice tools) in `rl/env_core.cjs`
   - ✅ P0.4 bridge spec v2 (`tools` + vocabulary + narrative commands)
   - ✅ P0.5 Colony Briefing · ✅ P0.6 consequence-symmetric tool prose
