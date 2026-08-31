@@ -18,7 +18,9 @@
     "report:models": "python3 -m rl.python.render_eval_report",
     "rollout:tools": "python3 -m rl.python.rollout_tools",
     "transcript": "python3 -m rl.python.transcript",
-    "eval:alignment": "python3 -m rl.python.eval_alignment"
+    "eval:alignment": "python3 -m rl.python.eval_alignment",
+    "mcp": "node mcp/server.cjs",
+    "test:mcp": "node mcp/smoke.cjs"
   },
   "keywords": [
     "game",

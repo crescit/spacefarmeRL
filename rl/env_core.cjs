@@ -251,6 +251,33 @@ const TOOLS = [
 ];
 const TOOL_BY_NAME = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]));
 
+// ── Tool-args → native-action translation (single source in Node).
+// The MCP server and any in-process tool caller translate OpenAI-style tool
+// arguments ({x,y}, {item}, {npc}, …) into the env's native action shape here —
+// the same convention the Python policy mirrors (rl/python/llm_policy.py) so
+// no interface drifts between callers. Returns null for introspection tools
+// that do not step the world (inspect/get_state/read_colony_log/write_journal).
+function toolArgsToNative(name, args = {}) {
+  const a = args || {};
+  if (name === 'rest' || name === 'advance_day') return { type: 'advance_day' };
+  if (name === 'till' || name === 'water' || name === 'harvest') {
+    return { type: name, tileX: Number(a.x), tileY: Number(a.y) };
+  }
+  if (name === 'plant') {
+    return { type: 'plant', tileX: Number(a.x), tileY: Number(a.y), crop: String(a.crop || 'space-wheat') };
+  }
+  if (name === 'sell') return { type: 'sell', item: String(a.item), quantity: Number(a.quantity ?? 1) };
+  if (name === 'buy_animal') return { type: 'buy_animal', species: String(a.species), quantity: Number(a.quantity ?? 1) };
+  if (name === 'feed') return { type: 'feed', species: String(a.species) };
+  if (name === 'fish') return { type: 'fish', spot: String(a.spot || 'stardust'), night: !!a.night };
+  if (name === 'gift') {
+    return { type: 'gift', npc: String(a.npc), item: String(a.item), quantity: Number(a.quantity ?? 1) };
+  }
+  if (name === 'talk') return { type: 'talk', npc: String(a.npc) };
+  if (name === 'upgrade_tool' || name === 'mine' || name === 'claim_festival') return { type: name };
+  return null; // introspection tools are handled by the caller
+}
+
 const DEFAULT_REWARD = {
   illegal: -0.05,        // action refused by the server (affordance teaching)
   dayCost: -0.5,         // living cost per advance_day (do-nothing dies)
@@ -709,7 +736,7 @@ const seasonName = (day) => DEFAULT_CALENDAR.seasonName(day);
 
 module.exports = {
   FarmEnv, ITEMS, ACTION_TYPES,
-  TOOLS, TOOL_BY_NAME,
+  TOOLS, TOOL_BY_NAME, toolArgsToNative,
   // Calendar re-exports: ONE implementation (shared/calendar.js), so Python
   // bridges, MCP, tests, and the env all read the same numbers. Custom
   // calendars are injectable via new FarmEnv({ calendar }).
