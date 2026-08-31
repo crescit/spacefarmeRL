@@ -20,23 +20,31 @@
     #touchbar { width: min(100vw, 960px); flex: 0 0 auto;
       background: linear-gradient(180deg, #1a2038 0%, #121a2c 100%); border-top: 2px solid #39c5bb;
       box-shadow: 0 0 14px rgba(57,197,187,.22), inset 0 1px 0 rgba(120,220,215,.18);
-      padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+      padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     #touchbar.hidden { display: none; }
     .tbtn { border: 2px solid #39c5bb; background: linear-gradient(180deg, #232a48 0%, #181e34 100%); color: #bfeeff;
       font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .04em;
       padding: 14px 12px; min-width: 66px; border-radius: 10px; user-select: none; -webkit-user-select: none;
-      touch-action: none; text-align: center; box-shadow: inset 0 1px 0 rgba(150,230,225,.22), 0 6px rgba(57,197,187,.18); }
+      touch-action: none; text-align: center; box-shadow: inset 0 1px 0 rgba(150,230,225,.22), 0 6px rgba(57,197,187,.18);
+      cursor: pointer; }
     .tbtn:active { background: linear-gradient(180deg, #39c5bb 0%, #2aa 100%); color: #04141a; box-shadow: 0 0 12px rgba(57,197,187,.55); }
     .tbtn.primary { border-color: #9ddd72; color: #c8ffd8; box-shadow: inset 0 1px 0 rgba(160,240,170,.22), 0 0 6px rgba(157,221,114,.22); }
     .tbtn.danger { border-color: #ff6b6b; color: #ffc0c0; }
     .tbtn.amber { border-color: #ffdd44; color: #ffe9a0; }
-    .tdpad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 40px); gap: 4px; }
-    .tdpad .tbtn { min-width: 0; padding: 4px; font-size: 16px; }
+    /* D-pad: a three-by-three cross of responsive square cells, sized by viewport
+       (clamp) so it grows on tablets without pixel math. Buttons to the right
+       (A/B/MENU) sit in their own column, so the D-pad owns the freed width. */
+    .tdpad { display: grid; grid-template-columns: repeat(3, clamp(50px, 13.5vw, 80px)); grid-template-rows: auto auto auto; gap: 6px; }
+    .tdpad .tbtn { min-width: 0; aspect-ratio: 1/1; padding: 0; font-size: 20px; display: grid; place-content: center; }
+    /* Action cluster: MENU / B / A stacked on the right of the D-pad. */
+    .tacts { display: flex; flex-direction: column; gap: 8px; }
+    .tacts .tbtn { width: clamp(62px, 17vw, 92px); height: clamp(42px, 11vw, 60px); font-size: 15px; display: grid; place-content: center; }
     #touch-toggle { border: 1px solid rgba(150,160,190,.5); background: rgba(30,34,54,0.9); color: #cfd6ff; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif;
       font-size: 11px; padding: 10px 12px; border-radius: 6px; cursor: pointer; }
     /* Always-visible floating toggle so touch controls can be re-enabled
-       even after the bar is hidden (desktop). Sits bottom-right, above scanlines. */
-    #touch-float { position: fixed; right: 10px; bottom: 10px; z-index: 40; border: 2px solid #39c5bb;
+       even after the bar is hidden (desktop). Top-right, clear of the bottom
+       #touchbar so it never covers the on-screen controls. */
+    #touch-float { position: fixed; right: 10px; top: 10px; z-index: 40; border: 2px solid #39c5bb;
       background: linear-gradient(180deg, #232a48 0%, #181e34 100%); color: #bfeeff; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; font-size: 13px; font-weight: 600;
       box-shadow: 0 0 12px rgba(57,197,187,.30); width: 48px; height: 48px; border-radius: 50%; cursor: pointer; display: grid; place-content: center; }
     #loading { position: fixed; z-index: 10; inset: 0; display: grid; place-content: center; gap: 12px; padding: 24px; background: #0a0a1a; text-align: center; transition: opacity .35s; }
@@ -45,8 +53,8 @@
     .title { color: #9ddd72; font-size: 24px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
     @keyframes spin { to { transform: rotate(1turn); } }
     #controls-info { position: fixed; bottom: 8px; left: 8px; color: #39c5bb; font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; z-index: 5; background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid #39c5bb33; pointer-events: none; }
-    /* Touch-friendly note */
-    #touch-note { position: fixed; bottom: 8px; right: 8px; color: #9ddd72; font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; z-index: 5; background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid #9ddd7233; pointer-events: none; display: none; }
+    /* Touch-friendly note (removed: the fixed bottom-right hint sat over the
+       touch bar's SLEEP/MENU buttons on phones — buttons are self-explanatory). */
     /* 2026 visual system: bioluminescent frontier glass + warm harvest accents. */
     :root { --ink:#061116; --teal:#67e1cd; --amber:#f2bd68; --coral:#ef786d; }
     html, body { background:#061116; }
@@ -80,12 +88,11 @@
         <button class="tbtn" data-dir="right" style="grid-column:3;grid-row:2">▶</button>
         <button class="tbtn" data-dir="down" style="grid-column:2;grid-row:3">▼</button>
       </div>
-      <div style="display:flex;gap:6px">
-        <button class="tbtn primary" data-act="a">A</button>
-        <button class="tbtn danger" data-act="b">B</button>
+      <div class="tacts">
         <button class="tbtn" data-act="menu">MENU</button>
+        <button class="tbtn danger" data-act="b">B</button>
+        <button class="tbtn primary" data-act="a">A</button>
       </div>
-      <button class="tbtn amber" data-act="sleep">🛏 SLEEP</button>
     </div>
   </div>
   <button id="touch-float" title="Toggle touch controls">🎮</button>
@@ -98,7 +105,6 @@
   <div id="controls-info">
     WASD/Arrows: Move · SPACE/E: Interact · TAB: Grand Exchange · I: Shop · ESC: Close
   </div>
-  <div id="touch-note">📱 Touch: D-pad moves · A: interact · B: close</div>
 
   <!-- Phaser 3 (vendored locally — no CDN dependency) -->
   <script src="vendor/phaser.min.js"></script>
@@ -118,11 +124,6 @@
   <script>
     const loading = document.getElementById('loading');
     const msg = document.getElementById('message');
-
-    // Show touch hint on mobile
-    if ('ontouchstart' in document.documentElement) {
-      document.getElementById('touch-note').style.display = 'block';
-    }
 
     window.addEventListener('load', () => {
       msg.textContent = 'Initializing game…';

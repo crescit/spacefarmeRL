@@ -38,6 +38,7 @@ export class TouchControls {
       const dir = btn.dataset.dir;
       btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        _bootAudio(activeScene);           // DOM touches never reach Phaser input → unlock audio here
         btn.style.background = '#3aa';
         btn.style.color = '#02101a';
         activeDir = dir;
@@ -60,9 +61,15 @@ export class TouchControls {
     // ── Action buttons (tap) ──
     const actBtns = bar.querySelectorAll('[data-act]');
     actBtns.forEach((btn) => {
-      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); _buttonPress(btn.dataset.act); });
+      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); _bootAudio(activeScene); _buttonPress(btn.dataset.act); });
       btn.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
     });
+
+    // iOS Safari only treats certain gestures as audio-qualifying; pointerdown
+    // can leave the AudioContext suspended forever. A click (fires after
+    // touchend) is reliably qualifying, so re-boot audio on any bar click too —
+    // idempotent, and covers the case where pointerdown didn't un-suspend it.
+    if (bar) bar.addEventListener('click', () => _bootAudio(activeScene));
 
     // ── Desktop / mobile toggle (floating button — always reachable) ──
     if (this.toggle) {
@@ -81,6 +88,20 @@ export class TouchControls {
       (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
     const show = userPref !== null ? userPref === '1' : isTouch;
     this.bar.classList.toggle('hidden', !show);
+
+    // The corner instructions (#controls-info) must describe the controls the
+    // player actually has: keyboard hints on desktop, and hidden entirely when
+    // the touch bar is up — it sits fixed at bottom-left, so on a phone it would
+    // cover the D-pad. The on-screen buttons are self-explanatory.
+    const info = document.getElementById('controls-info');
+    if (info) {
+      if (show) {
+        info.style.display = 'none';      // bar is up → don't let it block the D-pad
+      } else {
+        info.style.display = '';
+        info.textContent = 'WASD/Arrows: Move · SPACE/E: Interact · TAB: Grand Exchange · I: Shop · ESC: Close';
+      }
+    }
   }
 
   /** Hide the touch bar (e.g. during cutscenes). */
@@ -92,6 +113,20 @@ export class TouchControls {
   show() {
     if (this.bar) this.bar.classList.remove('hidden');
   }
+}
+
+/** Unlock audio from a DOM touch control. Scenes only boot audio on Phaser
+ * pointer/keyboard events, which DOM buttons never fire — so a touch-first
+ * player would otherwise get no music. Reuses each scene's `_bootAudio` (which
+ * also sets the right music context). Idempotent. */
+function _bootAudio(scene) {
+  try {
+    if (scene && typeof scene._bootAudio === 'function') scene._bootAudio();
+    else if (scene && scene.audio && typeof scene.audio.boot === 'function') scene.audio.boot();
+  } catch (e) { /* no audio */ }
+  try {
+    if (window.SpaceFarmer && window.SpaceFarmer.music) window.SpaceFarmer.music.ensure();
+  } catch (e) { /* no audio ctx */ }
 }
 
 /** Route an action-button tap to the active scene's method. */
@@ -109,11 +144,6 @@ function _buttonPress(id) {
     case 'menu':
       if (typeof scene.openGrandExchange === 'function') scene.openGrandExchange();
       else if (typeof scene.openShop === 'function') scene.openShop();
-      break;
-    case 'sleep':
-      // go to bed (Harvest Moon "sleep to advance day")
-      if (typeof scene.goToBed === 'function') scene.goToBed();
-      else if (typeof scene.sleep === 'function') scene.sleep();
       break;
   }
 }

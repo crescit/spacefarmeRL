@@ -522,6 +522,7 @@ class PlanetScene extends Phaser.Scene {
 
     // ── audio (2000s JRPG) ──
     this.audio = new AudioSystem(this);
+    this._bootAudio = () => this.audio.boot();   // TouchControls reuses this for DOM-button gestures
     this.input.once('pointerdown', () => this.audio.boot());
     this.input.keyboard.once('keydown', () => this.audio.boot());
 

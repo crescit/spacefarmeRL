@@ -147,6 +147,7 @@ class IntroScene extends Phaser.Scene {
     // ── Audio: boot BGM + SFX on first input (autoplay policy) ──
     this.audio = new AudioSystem(this);
     const bootAudio = () => { this.audio.boot(); if (window.SpaceFarmer?.music) window.SpaceFarmer.music.setContext('intro'); };
+    this._bootAudio = bootAudio;            // TouchControls reuses this for DOM-button gestures
     this.input.once('pointerdown', bootAudio);
     this.input.keyboard.once('keydown', bootAudio);
   }
@@ -170,26 +171,29 @@ class IntroScene extends Phaser.Scene {
   }
 
   _renderCrawl() {
-    const win = this.shownLines.slice(-this.crawlWindow);
-    this.textObject.setText(win.map((l, i) => i === win.length - 1 ? l + this.currentLine : l).join('\n'));
+    if (this.titleShown || !this.textObject) return;   // crawl is gone (skipped/faded) — never touch it
+    // Completed lines scroll through the window; the line being typed lives
+    // ONLY as currentLine (not yet in shownLines), so it never renders twice.
+    const comp = this.shownLines.slice(-(this.crawlWindow - 1));
+    const lines = this.currentLine ? [...comp, this.currentLine] : comp;
+    this.textObject.setText(lines.join('\n'));
   }
 
   nextLine() {
-    if (this.line >= INTRO_TEXT.length) {
-      this.showTitle();
-      return;
-    }
+    if (this.line >= INTRO_TEXT.length) { this.showTitle(); return; }
+    if (this.titleShown) return;            // crawl was skipped mid-roll
     this.currentLine = '';
     this.charIndex = 0;
     const full = INTRO_TEXT[this.line];
     this.line++;
-    this.shownLines.push(full);   // keep blank spacer lines as paragraph breaks
     this._renderCrawl();
     this.typeNext(full);
   }
 
   typeNext(full) {
+    if (this.titleShown) return;            // skip happened mid-type — stop cleanly
     if (this.charIndex >= full.length) {
+      this.shownLines.push(full);           // line finished → it enters the scroll window
       this.currentLine = '';
       this._renderCrawl();
       this.time.delayedCall(1200, () => this.nextLine());

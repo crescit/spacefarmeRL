@@ -258,6 +258,7 @@ class SpaceshipScene extends Phaser.Scene {
     // ── Audio: boot BGM + SFX on first input (autoplay policy) ──
     this.audio = new AudioSystem(this);
     const bootAudio = () => { this.audio.boot(); if (window.SpaceFarmer?.music) window.SpaceFarmer.music.setContext('ship'); };
+    this._bootAudio = bootAudio;            // TouchControls reuses this for DOM-button gestures
     this.input.once('pointerdown', bootAudio);
     this.input.keyboard.once('keydown', bootAudio);
 
