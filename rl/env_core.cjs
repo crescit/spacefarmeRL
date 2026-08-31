@@ -1,4 +1,4 @@
-// rl/env_core.mjs — Space Farmer RL environment (Gymnasium-shaped core).
+// rl/env_core.cjs — Space Farmer RL environment (Gymnasium-shaped core).
 //
 // Wraps the authoritative FarmRoom logic as reset(seed)/step(action) →
 // {obs, reward, terminated, truncated, info}. No network, no render — the

@@ -179,7 +179,7 @@ const NPC_GIFTS = Object.fromEntries(
     { loved: npc.lovedGift, liked: npc.likedGifts, hated: npc.hatedGifts },
   ]),
 );
-const HEART_THRESHOLDS = [20, 40, 60, 80, 100];
+const HEART_THRESHOLDS = [20, 40, 60, 80, 100]; // friendship points at which heart events fire
 
 // ── Tool upgrades (hoe tiers) ──
 // Higher tiers let you farm more efficiently (client reads tier for energy cost).
@@ -198,7 +198,7 @@ const TOOLS = {
 const ENERGY_COSTS = { till: 5, plant: 5, water: 5, harvest: 5, fish: 10, mine: 5 };
 
 // ── Stamina (a skill you build, not a tax you pay). Work costs stamina;
-//    resting/living overnight recovers STAmina_REST_RATE toward the ceiling;
+//    resting/living overnight recovers STAMINA_REST_RATE toward the ceiling;
 //    and doing real work conditions the body — staminaMax creeps up over
 //    days of honest labor, capped at STAMINA_MAX. Tool tiers are technique:
 //    a better hoe spends less stamina per action. ──
@@ -432,7 +432,7 @@ const QUEST_ORDER = [
 // ── Room ──
 
 // Deterministic PRNG (mulberry32). Live play keeps Math.random; the RL env
-// (rl/env_core.mjs) injects a seeded one via room.setRng(seed) so every
+// (rl/env_core.cjs) injects a seeded one via room.setRng(seed) so every
 // stochastic seam — fishing pool, vein hardness, ore roll, festival NPC —
 // replays identically episode to episode.
 // getState/setState expose the internal stream position so a mid-episode
@@ -936,9 +936,13 @@ class FarmRoom extends Room {
   onSell(client, data) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
+    // Sellable prices. ('nebula-cream' was a phantom item — it appears in no
+    // crop/ITEMS/SALEABLE table and no quest — so it's gone.) Note the farm's
+    // harvest sink is CROP_INFO.cr (see onHarvest); the crop rows here are
+    // the historical sell prices, retained pending a product call on harvest.
     const prices = {
       'space-wheat': 20, 'star-berry': 35, 'moon-melon': 50,
-      'plasma-tomato': 40, 'nebula-cream': 60, 'stardust-crystal': 100,
+      'plasma-tomato': 40, 'stardust-crystal': 100,
       'nebulite-ore': 75, 'egg': 25, 'milk': 30, 'wool': 45,
       'moonfish': 25, 'stardust-salmon': 45, 'comet-trout': 65, 'nebula-marlin': 120,
       'asteroid-dust': 40, 'nickel-iron': 75, 'silicon-carbide': 110, 'void-diamond': 250,
@@ -1010,8 +1014,7 @@ class FarmRoom extends Room {
   heartEvent(player, npcId) {
     const cv = player.friendships.get(npcId) || 0;
     const fired = player.heartEvents.get(npcId) || 0;
-    const THRESHOLDS = [20, 40, 60, 80, 100];
-    for (const th of THRESHOLDS) {
+    for (const th of HEART_THRESHOLDS) {
       if (cv >= th && fired < th) { player.heartEvents.set(npcId, th); return th; }
     }
     return 0;
@@ -1122,7 +1125,7 @@ class FarmRoom extends Room {
     });
     this.state.players.forEach((p) => {
       if (!p) return;
-      // Stamina, not a tax. Resting returns STAmina_REST_RATE toward your
+      // Stamina, not a tax. Resting returns STAMINA_REST_RATE toward your
       // ceiling — and a day of real work conditions the body, so the ceiling
       // (staminaMax) creeps upward like a skill learned under load.
       if ((p.todayWork || 0) > 0) {
