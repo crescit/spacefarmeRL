@@ -1308,7 +1308,7 @@ rations, and your name on the manifest.
     const d1 = Math.hypot(px - 27, py - 22), d2 = Math.hypot(px - 38, py - 21);
     let near = false, label = '';
     if (d1 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · stardust shore / some fish bite'; }
-    else if (d2 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · deep drop (rare, deep-water)'; }
+    else if (d2 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · deep drop (rare — some fish only bite at night)'; }
     this.fishHint.setVisible(near).setPosition(this.playerSpr.x, this.playerSpr.y - 46).setAlpha(near ? 0.9 : 0);
     if (near && this._fishHintLabel !== label) { this._fishHintLabel = label; if (this._fishHintTxt) this._fishHintTxt.setText(label); }
   }
@@ -2222,6 +2222,17 @@ rations, and your name on the manifest.
             this.season = net.room.state.season;
             if (window.SpaceFarmer && window.SpaceFarmer.music) {
               window.SpaceFarmer.music.setSeason(this.season);  // seasonal soundtrack
+            }
+          }
+          // The colony clock is server-authoritative: when the world turns dark
+          // (isDay false), the browser follows — lamp pools, glows, night
+          // fishing, and the moon all come alive on the same light everyone sees.
+          if (!this._nightOverride && net.room.state.isDay !== undefined) {
+            const night = !net.room.state.isDay;
+            if (night !== this.isNight) {
+              this.isNight = night;
+              this.updateNightVisuals();
+              this._updateFishHint?.();
             }
           }
         }

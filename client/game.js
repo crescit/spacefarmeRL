@@ -100,6 +100,7 @@ function init() {
         game.scene.start(sceneKey, data);
         const sc = game.scene.getScene(sceneKey);
         if (params.get('night') === '1' && sc && sc.isNight !== undefined) {
+          sc._nightOverride = true;   // screenshot debug: keep night even though the clock says day
           sc.isNight = true; sc.updateNightVisuals?.(); sc.nightOverlay?.setAlpha(0.42);
           (sc.glowRegistry || []).forEach(g => g.setVisible(true));
           (sc.lampGlows || []).forEach(g => g.setVisible(true));

@@ -27,6 +27,7 @@ const offline = [
 const live = [
   'tests/verify_cooking_wire.mjs',
   'tests/verify_shop_ge_wire.mjs',
+  'tests/verify_night_wire.mjs',
   'tests/verify_presence.mjs',
   'tests/verify_e2e_live.mjs',
 ];

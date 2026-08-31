@@ -313,7 +313,7 @@ class FarmEnv {
     const room = Object.create(FarmRoom.prototype);
     room.state = {
       players: new MapSchema(), farms: new MapSchema(), orders: new ArraySchema(),
-      day: 1, time: 360, isDay: true, season: 0, festival: false, festivalClaimed: false,
+      day: 1, time: 0, isDay: true, season: 0, festival: false, festivalClaimed: false,
       festivalPhase: 'none', feastPeak: false,
     };
     // inject OUR calendar into the room so every handler (season, maturity,
