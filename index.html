@@ -47,6 +47,12 @@
     #touch-float { position: fixed; right: 10px; top: 10px; z-index: 40; border: 2px solid #39c5bb;
       background: linear-gradient(180deg, #232a48 0%, #181e34 100%); color: #bfeeff; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; font-size: 13px; font-weight: 600;
       box-shadow: 0 0 12px rgba(57,197,187,.30); width: 48px; height: 48px; border-radius: 50%; cursor: pointer; display: grid; place-content: center; }
+    /* Always-visible music mute, placed next to the 🎮 controller toggle
+       (top-right) so music stays always-on but you can silence it in one tap. */
+    #mute-float { position: fixed; right: 66px; top: 10px; z-index: 40; border: 2px solid #39c5bb;
+      background: linear-gradient(180deg, #232a48 0%, #181e34 100%); color: #bfeeff; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; font-size: 14px; font-weight: 600;
+      box-shadow: 0 0 12px rgba(57,197,187,.30); width: 48px; height: 48px; border-radius: 50%; cursor: pointer; display: grid; place-content: center; }
+    #mute-float.muted { background: linear-gradient(180deg, #3a2230 0%, #24141d 100%); color: #ffb0a0; border-color: #ff6b6b; }
     #loading { position: fixed; z-index: 10; inset: 0; display: grid; place-content: center; gap: 12px; padding: 24px; background: #0a0a1a; text-align: center; transition: opacity .35s; }
     #loading.hidden { opacity: 0; pointer-events: none; }
     .spinner { width: 42px; height: 42px; margin: auto; border: 3px solid #333; border-top-color: #7c5; border-radius: 50%; animation: spin 1s linear infinite; }
@@ -96,6 +102,7 @@
     </div>
   </div>
   <button id="touch-float" title="Toggle touch controls">🎮</button>
+  <button id="mute-float" title="Toggle music">🔊</button>
   <div id="loading">
     <div class="eyebrow">B-612 Colony Link</div>
     <div class="spinner"></div>

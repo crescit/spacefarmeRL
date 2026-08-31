@@ -9,6 +9,14 @@
 // own `preload()` (or rely on a shared scene that does). Then `boot()` (gated on a
 // user gesture for autoplay policy) starts the BGM loop.
 class AudioSystem {
+  // Live instances + global mute, so the 🔊 button silences every scene's BGM.
+  static _instances = [];
+  static _muted = false;
+  static setMuted(m) {
+    AudioSystem._muted = !!m;
+    for (const i of AudioSystem._instances) i.applyMute();
+  }
+
   // Register all sound assets into a scene's loader. Call from scene.preload().
   static preload(scene) {
     scene.load.audio('bgm_town', '/sounds/bgm_town.wav');
@@ -30,27 +38,31 @@ class AudioSystem {
     this.ready = false;
     this.bgm = null;
     this._dup = false;
+    this.muted = AudioSystem._muted;
+    AudioSystem._instances.push(this);
   }
 
   // Call on first user gesture (Phaser blocks audio before a gesture).
   boot() {
+    // The generative soundtrack ALWAYS starts on the first gesture (autoplay
+    // policy requires a tap). This is separate from the wav BGM, so music plays
+    // on mobile even if a background wav isn't loaded/ready yet.
+    if (window.SpaceFarmer && window.SpaceFarmer.music) {
+      try { window.SpaceFarmer.music.ensure(); } catch (e) { /* no audio ctx */ }
+    }
     if (this.ready || this._dup) return;
-    this._dup = true;
     const sound = this.scene.sound;
     if (!sound) return;
     // Files are loaded by AudioSystem.preload(); just verify the key exists.
     if (!sound.game.cache.audio.has('bgm_town')) {
-      // Not loaded — nothing we can play yet. The owning scene should have
-      // called preload(). Fail quietly rather than throw.
+      // Not loaded yet — don't lock out; the next gesture retries (so a mobile
+      // page that loads slowly still gets its BGM once the assets arrive).
       this.ready = false;
       return;
     }
     this.ready = true;
+    this._dup = true;
     this.startBGM();
-    // Also ensure the generative soundtrack engine is up (graceful if absent).
-    if (window.SpaceFarmer && window.SpaceFarmer.music) {
-      try { window.SpaceFarmer.music.ensure(); } catch (e) { /* no audio ctx */ }
-    }
   }
 
   // Which BGM fits this scene: cozy town theme on the planet, airy ship/cryo
@@ -69,10 +81,14 @@ class AudioSystem {
       // play() config can ignore the flag on some builds, causing one-shot).
       this.bgm = this.scene.sound.add(track, { loop: true, volume: 0.32 });
       this.bgm.play();
+      this.applyMute();   // respect the 🔊 mute state (startBGM can run after mute)
     } catch (e) { /* no audio */ }
   }
 
   stopBGM() { if (this.bgm) { this.bgm.stop(); this.bgm = null; } }
+  // Push the global mute onto this scene's BGM.
+  applyMute() { if (this.bgm) this.bgm.setVolume(this.muted ? 0 : 0.32); }
+
 
   // play a one-shot SFX by registered key
   sfx(key, { volume = 0.5 } = {}) {

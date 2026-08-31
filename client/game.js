@@ -7,6 +7,7 @@ import { IntroScene } from './scenes/IntroScene.js';
 import { NetworkSystem } from './systems/NetworkSystem.js';
 import { TEXTURES } from './systems/SpriteSystem.js';
 import { MusicDirector } from './systems/MusicDirector.js';
+import { AudioSystem } from './systems/AudioSystem.js';
 
 window.SpaceFarmer = {};
 
@@ -111,6 +112,30 @@ function init() {
 
   window.SpaceFarmer.game = game;
   window.SpaceFarmer.music = new MusicDirector();   // generative soundtrack
+
+  // Music mute — always-on 🔊 button beside the 🎮 controller toggle. Music
+  // autostarts on the first gesture (autoplay policy); this is the single
+  // user control. Silences both the generative soundtrack and the wav BGM.
+  (function wireMute() {
+    const btn = document.getElementById('mute-float');
+    if (!btn) return;
+    let muted = false;
+    try { muted = localStorage.getItem('spacefarmer_mute') === '1'; } catch (e) {}
+    const apply = () => {
+      window.SpaceFarmer.muted = muted;
+      if (window.SpaceFarmer.music) window.SpaceFarmer.music.setMuted(muted);
+      AudioSystem.setMuted(muted);
+      btn.textContent = muted ? '🔇' : '🔊';
+      btn.classList.toggle('muted', muted);
+    };
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      muted = !muted;
+      try { localStorage.setItem('spacefarmer_mute', muted ? '1' : '0'); } catch (e2) {}
+      apply();
+    });
+    apply();
+  })();
 
   // Default to the page's origin so HTTPS deployments automatically use WSS
   // and platform-assigned ports. Embedders may override the endpoint before

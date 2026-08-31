@@ -4,6 +4,7 @@
 
 import { SHIP_SPRITES } from '../systems/SpriteSystem.js';
 import { TouchControls } from '../systems/TouchControls.js';
+import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 
 const TILE_SIZE = 32;  // painterly colony scale (matches world)
@@ -205,17 +206,17 @@ class SpaceshipScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe3a8',
     }).setScrollFactor(0);
 
-    // ── Dialogue system (warm framed panel, cozy JRPG; fixed to screen) ──
-    this.dialogueBox = this.add.rectangle(width / 2, height * 0.86, Math.round(width * 0.7), Math.round(height * 0.17), 0x221a18, 0.92)
-      .setStrokeStyle(2, 0xe8b878).setScrollFactor(0);
-    this.dialogueText = this.add.text(width / 2, height * 0.86, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
-      fontSize: '14px', color: '#fdf2e2',
-      fontStyle: 'bold',
-      wordWrap: { width: Math.round(width * 0.62) }, lineSpacing: 6,
-    }).setOrigin(0.5).setScrollFactor(0);
-    this.dialogueBox.setVisible(false);
-    this.dialogueText.setVisible(false);
+    // ── Dialogue system (shared component: warm framed panel, cozy JRPG) ──
+    // One DialoguePanel backs every scene's speech box — this one shows C.O.R.A.'s
+    // tutorial lines, clipped + scrollable + collapsible like the planet's.
+    this.dialog = new DialoguePanel(this, {
+      x: width / 2, y: height * 0.84,
+      width: Math.round(width * 0.7), height: Math.round(height * 0.2),
+      fontSize: '14px',
+    });
+    // alias for any legacy refs
+    this.dialogueBox = this.dialog.box;
+    this.dialogueText = this.dialog.text;
 
     // ── Tutorial state ──
     this.tutorialStep = 0;
@@ -525,14 +526,11 @@ class SpaceshipScene extends Phaser.Scene {
 
   showDialogue(lines) {
     const text = Array.isArray(lines) ? lines.join('\n') : lines;
-    this.dialogueBox.setVisible(true);
-    this.dialogueText.setVisible(true);
-    this.dialogueText.setText(text);
+    this.dialog.setText(text);
 
     if (this.dialogueTimer) this.dialogueTimer.remove();
     this.dialogueTimer = this.time.delayedCall(8000, () => {
-      this.dialogueBox.setVisible(false);
-      this.dialogueText.setVisible(false);
+      this.dialog.hide();
     });
   }
 

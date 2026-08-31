@@ -125,7 +125,7 @@ class IntroScene extends Phaser.Scene {
     this.crawlWindow = 7;
     // dark backing panel so the crawl reads cleanly over the busy starfield
     this.crawlPanel = this.add.rectangle(width / 2, height * 0.42, Math.min(Math.round(width * 0.8), 680), 300, 0x1b2436, 0.88)
-      .setStrokeStyle(3, 0x39c5bb, 0.75);
+      .setStrokeStyle(3, 0x39c5bb, 0.75).setScrollFactor(0);
     this.textObject = this.add.text(width / 2, height * 0.42, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
       fontSize: '20px',
@@ -134,11 +134,11 @@ class IntroScene extends Phaser.Scene {
       lineSpacing: 12,
       stroke: '#000000',
       strokeThickness: 3,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0);
 
-    // input: skip crawl (SPACE) or begin (once title shown)
+    // input: skip crawl (SPACE / A) or begin (once title shown)
     this.input.keyboard.on('keydown', (e) => {
-      if (e.key === 'Space') this.handleSpace();
+      if (e.key === 'Space' || e.key === 'a' || e.key === 'A') this.handleSpace();
     });
     this.input.on('pointerdown', () => this.handleSpace());
 
