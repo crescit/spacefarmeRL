@@ -24,27 +24,35 @@
     }
   },
   "runs": {
-    "deepseek-mia.json": {
-      "note": "Invalid as a model comparison: its native-action fingerprints exactly match Qwen and the deterministic first-valid fallback across all checked seeds.",
+    "deepseek-mia-masked-macro-v2-invalid.json": {
+      "archived": true,
+      "protocol": "masked-macro-v2",
+      "note": "INVALID — archived (protocol lock): its native-action fingerprints exactly match Qwen and the deterministic first-valid fallback across all checked seeds. Retained as an infrastructure diagnostic, not evidence of model quality.",
       "validity": "invalid",
       "reasoning_effort": "low (request override; inferred effective setting)",
       "reasoning_provenance": "The evaluator sent reasoning_effort=low. DeepSeek Mia uses the thinking template key and its server default kept thinking enabled.",
       "thinking": true
     },
-    "qwen38-flash-longctx.json": {
-      "note": "Invalid as a model comparison: all ten native-action trajectories exactly match DeepSeek and the deterministic first-valid fallback.",
+    "qwen38-flash-longctx-masked-macro-v2-invalid.json": {
+      "archived": true,
+      "protocol": "masked-macro-v2",
+      "note": "INVALID — archived (protocol lock): all ten native-action trajectories exactly match DeepSeek and the deterministic first-valid fallback.",
       "validity": "invalid",
       "reasoning_effort": "low",
       "reasoning_provenance": "The evaluator explicitly sent thinking=true, enable_thinking=true, and reasoning_effort=low; a live preflight request verified this payload.",
       "thinking": true
     },
     "qwen38-flash-longctx-macro-v1.json": {
-      "note": "Historical masked-macro-v1 result; do not compare with v2.",
+      "archived": true,
+      "protocol": "masked-macro-v1",
+      "note": "Historical masked-macro-v1 result; do not compare with the locked protocol.",
       "reasoning_effort": "low",
       "reasoning_provenance": "Historical run before reasoning fields were recorded.",
       "thinking": false
     },
     "qwen38-flash-longctx-thinking-disabled-v2-partial.json": {
+      "archived": true,
+      "protocol": "masked-macro-v2",
       "note": "Failed/non-comparable partial run: thinking was disabled and only two seeds checkpointed.",
       "reasoning_effort": "low",
       "reasoning_provenance": "The older evaluator explicitly sent enable_thinking=false with reasoning_effort=low.",

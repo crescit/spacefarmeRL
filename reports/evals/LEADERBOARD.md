@@ -1,12 +1,13 @@
 # Space Farmer model leaderboard
 
-Protocol: `masked-macro-v2` · horizon: 12 days · seeds: 1–10 (10 episodes/model)
+*No valid reports on the locked protocol yet.* The pipeline refuses to present invalid/archived runs as comparable.
 
-| Model | Reward μ±σ | Credits μ±σ | Steps μ | Latency/action | Δ vs random | Gap to oracle | Replay |
-|---|---:|---:|---:|---:|---:|---:|:---:|
-| deepseek-mia | -15.525 ± 0.377 | 1113.5 ± 29.2 | 500.0 | 2890.2 ms (9/10 eps) | -9.290 | 24.300 | ✓ |
-| qwen38-flash-longctx | -15.525 ± 0.377 | 1113.5 ± 29.2 | 500.0 | 2541.6 ms | -9.290 | 24.300 | ✓ |
 
-Higher reward and credits are better. “Δ vs random” is model reward minus
-the masked-random baseline; “Gap to oracle” is economic-baseline reward
-minus model reward. Compare only reports generated with this exact protocol.
+## ⚠ Invalid / archived reports — NOT compared
+
+These reports fail the validity gate (see `models.json`); they are infrastructure diagnostics, never evidence of model quality:
+
+| Report | Model | Protocol | Reason |
+|---|---|---|---|
+| `deepseek-mia-masked-macro-v2-invalid.json` | deepseek-mia | `masked-macro-v2` | INVALID — archived (protocol lock): its native-action fingerprints exactly match Qwen and the deterministic first-valid fallback across all checked seeds. Retained as an infrastructure diagnostic, not evidence of model quality. |
+| `qwen38-flash-longctx-masked-macro-v2-invalid.json` | qwen38-flash-longctx | `masked-macro-v2` | INVALID — archived (protocol lock): all ten native-action trajectories exactly match DeepSeek and the deterministic first-valid fallback. |

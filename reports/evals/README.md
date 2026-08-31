@@ -54,8 +54,17 @@ Rebuild the comparison table after adding reports:
 ~~~bash
 npm run compare:models -- \
   reports/evals/*.json \
+  --models reports/evals/models.json \
   --markdown reports/evals/LEADERBOARD.md
 ~~~
+
+`compare_evals.py` is the protocol-lock gate: it refuses to combine reports
+whose seeds, horizon, or action-interface version differ, and it refuses any
+report whose filename is marked `invalid` (or `archived`) in `models.json` —
+loudly, with a list of the offending files. Pass `--allow-invalid` only to
+render those runs in a clearly separated “Invalid / archived — NOT compared”
+section; they never enter the comparable table. `models.json` is skipped
+automatically if a glob picks it up.
 
 Build the standalone HTML dashboard after an evaluation checkpoint or completed run:
 
@@ -66,14 +75,12 @@ npm run report:models
 Open the generated [HTML dashboard](report.html) in a browser. Metrics and per-seed trajectory
 rows come from report JSON; backend, checkpoint, context, quantization,
 speculative decoding, hardware, thinking, and reasoning provenance live in
-`models.json`. In-progress reports render their last completed checkpoint. The current Qwen and
-DeepSeek reports are retained but marked invalid because their native-action
-fingerprints are identical to each other and to the deterministic first-valid
-fallback; they are infrastructure diagnostics, not evidence of model quality.
-
-The comparison command refuses to combine reports whose seeds, horizon, or
-action-interface version differ. This prevents an attractive but invalid
-leaderboard.
+`models.json`. In-progress reports render their last completed checkpoint.
+Reports moved to `archive/` render as archived cards at reduced opacity with
+their `models.json` validity note. The DeepSeek and Qwen masked-macro-v2 runs
+are archived there and marked invalid because their native-action fingerprints
+are identical to each other and to the deterministic first-valid fallback;
+they are infrastructure diagnostics, not evidence of model quality.
 
 ## Reward-neutral first contact
 
