@@ -175,6 +175,25 @@ class SpaceshipScene extends Phaser.Scene {
     this.porthole = this.add.image(696, 184, 'ship.porthole').setDepth(210).setScale(1.6);
     this.warmGlow = this.add.image(704, 256, 'fx.lamp_glow').setDepth(150)
       .setScale(2.4).setAlpha(0.22).setBlendMode(Phaser.BlendModes.ADD);
+    // living porthole — a drift of stars behind the glass, twinkle + parallax
+    this.portholeStars = [];
+    this._portholeX = 696; this._portholeY = 184;
+    for (let i = 0; i < 28; i++) {
+      const st = this.add.circle(
+        this._portholeX - 52 + Math.random() * 104,
+        this._portholeY - 22 + Math.random() * 52,
+        Math.random() < 0.7 ? 1 : 1.6,
+        0xdffbff, 0.25 + Math.random() * 0.6
+      ).setDepth(212);
+      st.sp = 0.004 + Math.random() * 0.012;   // drift speed
+      st.ph = Math.random() * Math.PI * 2;      // twinkle phase
+      this.portholeStars.push(st);
+    }
+    // cryo-pod + bridge console breathe softly (the ship is alive, not a diorama)
+    this.consoleGlow = this.add.image(40 * TILE_SIZE + TILE_SIZE / 2, 4 * TILE_SIZE + 12, 'fx.lamp_glow')
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(1.1).setAlpha(0.18);
+    this.cryoGlow = this.add.image(12 * TILE_SIZE + TILE_SIZE / 2, 8 * TILE_SIZE + 14, 'fx.lamp_glow')
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(0.95).setAlpha(0.14);
 
     // ── Bunk (your bed) — warm PX banner + label, sleep to end the day ──
     const bunkX = 22, bunkY = 4;
@@ -357,20 +376,33 @@ class SpaceshipScene extends Phaser.Scene {
     );
 
     // ── Update planter visuals + render sprites ──
-    this.renderSprites();
+    this.moveIntent = !!(dx || dy);
+    this.renderSprites(time);
   }
 
   // ── Pixel-art render pass ──
-  renderSprites() {
-    // Update player sprite
-    let pKey;
-    switch (this.playerDir) {
-      case 'back': pKey = PLAYER_TEX_BACK; break;
-      case 'left': pKey = PLAYER_TEX_LEFT; break;
-      case 'right': pKey = PLAYER_TEX_RIGHT; break;
-      default: pKey = PLAYER_TEX_FRONT;
+  renderSprites(time = 0) {
+    // walk cycle — 3 frames × 4 directions (single-sourced player frames),
+    // matching the planet's player exactly; idle holds frame 0.
+    const moving = !!(this.touchDir || this.moveIntent);
+    const f = moving ? Math.floor(time / 120) % 3 : 0;
+    this.playerSpr.setTexture(`player.${this.playerDir}_${f}`);
+
+    // living porthole: stars drift, twinkle, and slide in parallax
+    if (this.portholeStars) {
+      for (const st of this.portholeStars) {
+        st.x -= 0.008; st.y += 0.004;
+        if (st.x < this._portholeX - 56) st.x = this._portholeX + 56;
+        if (st.y > this._portholeY + 30) st.y = this._portholeY - 28;
+        st.alpha = 0.15 + 0.5 * (0.5 + 0.5 * Math.sin(time * st.sp + st.ph));
+      }
     }
-    this.playerSpr.setTexture(pKey);
+    if (this.warmGlow) {
+      this.warmGlow.setAlpha(0.16 + 0.10 * Math.sin(time * 0.0022));
+      this.warmGlow.y = 256 + Math.sin(time * 0.0014) * 2;
+    }
+    if (this.consoleGlow) this.consoleGlow.setScale(0.9 + 0.16 * (0.5 + 0.5 * Math.sin(time * 0.0037)));
+    if (this.cryoGlow) this.cryoGlow.setAlpha(0.10 + 0.08 * Math.sin(time * 0.0029));
 
     // Update tile sprites based on value
     for (let i = 0; i < this.tileSprites.length; i++) {
@@ -388,6 +420,10 @@ class SpaceshipScene extends Phaser.Scene {
       const spr = this.tileSprites[idx];
       if (!spr) continue;
       spr.setTexture(FARM_TEX[p.state] || 'tile.soil');
+      // sway the living crop — growing/mature plants breathe
+      const baseY = p.y * TILE_SIZE + TILE_SIZE / 2;
+      const sway = (p.state === 'growing' || p.state === 'mature') ? Math.sin(time * 0.004 + p.x * 0.7) * 1.6 : 0;
+      spr.y = baseY + sway;
     }
   }
 

@@ -303,6 +303,7 @@ class PlanetScene extends Phaser.Scene {
         const glow = this.add.image(b.x * T, b.y * T, b.glow)
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(1001).setVisible(false);
         this.world.add(glow);
+        glow.phase = Math.random() * Math.PI * 2;   // each landmark breathes on its own beat
         this.glowRegistry.push(glow);
         this.buildingGlows.push(glow);
         if (b.key === 'house') this.houseGlow = glow;
@@ -1491,12 +1492,22 @@ rations, and your name on the manifest.
       .setBlendMode(Phaser.BlendModes.ADD).setScale(2.6, 1.6).setAlpha(0.20));
 
     // window (against far wall) — glows with the sky
-    stage.add(this.add.image(cx, top + 44, 'int.window').setScale(0.9));
+    const windowImg = this.add.image(cx, top + 44, 'int.window').setScale(0.9);
+    stage.add(windowImg);
+    this.intWindow = windowImg;
+    // soft sky-light breathing behind the glass (the room never sits still)
+    const windowGlow = this.add.image(cx, top + 46, 'fx.lamp_glow')
+      .setBlendMode(Phaser.BlendModes.ADD).setScale(2.3, 1.2).setAlpha(0.10).setDepth(-1);
+    stage.add(windowGlow);
+    this.intWindowGlow = windowGlow;
 
     // rug center, plant + bookcase side
     stage.add(this.add.image(cx, cy + 30, 'int.rug').setScale(1));
     stage.add(this.add.image(cx - W / 2 + 55, cy - 40, 'int.bookcase').setScale(0.9));
-    stage.add(this.add.image(cx + W / 2 - 55, cy + 20, 'int.plant').setScale(0.9));
+    const plantImg = this.add.image(cx + W / 2 - 55, cy + 20, 'int.plant').setScale(0.9);
+    stage.add(plantImg);
+    this.intPlant = plantImg;
+    this._intPlantBaseY = cy + 20;
     stage.add(this.add.image(cx, cy - H / 2 + 90, 'int.table').setScale(0.9));
 
     // ── spouse: moves in when you marry (sits near the table) ──
@@ -1504,6 +1515,7 @@ rations, and your name on the manifest.
     spouse.setVisible(false);
     stage.add(spouse);
     this.intSpouse = spouse;
+    this._intSpouseBaseY = cy + 42;
     const spouseName = this.add.text(cx + 95, cy + 14, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#ffe9a0',
     }).setOrigin(0.5);
@@ -1691,6 +1703,14 @@ rations, and your name on the manifest.
       if (bs.b.key === 'exchange') bs.img.setTexture(Math.floor(time / 400) % 2 === 0 ? 'bld.exchange_a' : 'bld.exchange_b');
       if (bs.b.key === 'tavern') bs.img.setTexture(['bld.tavern_a', 'bld.tavern_b', 'bld.tavern_c'][Math.floor(time / 300) % 3]);
     }
+    // buildings breathe at night — windows/doors/signs pulse on their own beat
+    if (this.isNight && this.buildingGlows.length) {
+      for (let i = 0; i < this.buildingGlows.length; i++) {
+        const g = this.buildingGlows[i];
+        if (!g.visible) continue;
+        g.setAlpha(0.82 + 0.18 * Math.sin(time * 0.0018 + g.phase));
+      }
+    }
     // ── NPC errand brains (wander, work at POIs, pause, move on) ──
     const dt = Math.min(50, time - (this._lastT || time));
     this._lastT = time;
@@ -1809,6 +1829,19 @@ rations, and your name on the manifest.
         else if (dBed < 60) { this.sleep(); }
         else if (dDoor < 60) { this.exitHouse(); }
       }
+
+      // ── the room is alive: window light breathes, the plant sways, and a
+      // spouse (if any) rocks gently by the table whenever you are home
+      if (this.intWindowGlow) {
+        this.intWindowGlow.setAlpha(0.07 + 0.07 * Math.sin(time * 0.0016));
+      }
+      if (this.intPlant && this._intPlantBaseY != null) {
+        this.intPlant.y = this._intPlantBaseY + Math.sin(time * 0.0024) * 1.6;
+      }
+      if (this.intSpouse && this.intSpouse.visible && this._intSpouseBaseY != null) {
+        this.intSpouse.y = this._intSpouseBaseY + Math.sin(time * 0.003) * 1.4;
+      }
+
       this.updateHUD();
       return;
     }

@@ -1,0 +1,125 @@
+// verify_screens_wired.mjs — makes sure every screen is properly WIRED:
+// the same single-sourced building/interior/player textures exist, every
+// BUILDING door is walkable and its action key is handled by PlanetScene,
+// the three scene classes load and register their keys, and the intro +
+// spaceship actually use the shared building/player assets. This is the
+// "nothing is a sticker" gate — it fails loudly if a building, interior
+// fixture, or screen-wiring link ever drifts out of sync.
+globalThis.Phaser = {
+  Scene: class { },
+  Input: { Keyboard: { JustDown: () => false, SPACE: 32, ESC: 27 } },
+  BlendModes: { ADD: 0, MULTIPLY: 1 },
+};
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+let pass = 0, fail = 0;
+function check(name, cond, detail = '') {
+  if (cond) pass++;
+  else { fail++; console.log(`  ✗ ${name} ${detail}`); }
+}
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (rel) => readFileSync(path.join(root, rel), 'utf8');
+
+const SS = await import('../client/systems/SpriteSystem.js');
+const MD = await import('../client/systems/MapData.js');
+const PS = await import('../client/scenes/PlanetScene.js');
+const IS = await import('../client/scenes/IntroScene.js');
+const SPS = await import('../client/scenes/SpaceshipScene.js');
+const { TEXTURES } = SS;
+const { BUILDINGS, blocks, verifyWalkability } = MD;
+
+// ── 1. Single-source texture wiring: buildings, interiors, player frames ──
+const BUILDING_TEX = [
+  'bld.house', 'bld.house_glow',
+  'bld.shop', 'bld.shop_glow',
+  'bld.barn',
+  'bld.tavern_a', 'bld.tavern_b', 'bld.tavern_c', 'bld.tavern_glow',
+  'bld.exchange_a', 'bld.exchange_b', 'bld.exchange_glow',
+];
+const INTERIOR_TEX = [
+  'int.window', 'int.rug', 'int.bookcase', 'int.plant', 'int.table', 'int.bed',
+];
+const PLAYER_WALK_FRAMES = [];
+for (const dir of ['front', 'back', 'left', 'right'])
+  for (let f = 0; f < 3; f++) PLAYER_WALK_FRAMES.push(`player.${dir}_${f}`);
+
+for (const tex of [...BUILDING_TEX, ...INTERIOR_TEX, ...PLAYER_WALK_FRAMES]) {
+  check(`texture exists: ${tex}`, !!TEXTURES[tex], '(missing from SpriteSystem registry)');
+}
+
+// ── 2. Map layout wiring: every building has a door, label, action; all
+//     doors are walkable; the map is reachable from the player start ──
+const KNOWN_ACTIONS = new Set(['shop', 'exchange', 'ranch', 'sleep', 'talk_rhea']);
+for (const b of BUILDINGS) {
+  check(`building ${b.key} has door+label+action`,
+    !!b.door && !!b.label && !!b.action, JSON.stringify(b));
+  check(`building ${b.key} action known: ${b.action}`, KNOWN_ACTIONS.has(b.action));
+  if (b.door) {
+    const { x, y } = b.door;
+    check(`building ${b.key} door (${x},${y}) walkable`,
+      !blocks[y]?.[x], `blocked tile`);
+  }
+}
+const walk = verifyWalkability();
+check('map walkability: all buildings/soil/NPCs reachable', walk.ok,
+  JSON.stringify(walk.unreachable && walk.unreachable.slice(0, 5)));
+
+// ── 3. PlanetScene building-action wiring: every BUILDINGS.action key is
+//     dispatched to a real handler method ──
+{
+  const calls = [];
+  const ps = Object.create(PS.PlanetScene.prototype);
+  ps.openShop = () => calls.push('openShop');
+  ps.openGrandExchange = () => calls.push('openGrandExchange');
+  ps.openRanch = () => calls.push('openRanch');
+  ps.enterHouse = () => calls.push('enterHouse');
+  ps.startNPCDialogue = () => calls.push('startNPCDialogue');
+  ps.showToast = () => {};
+  // prototype methods the wiring relies on must actually exist
+  for (const m of ['buildingAction', 'enterHouse', 'exitHouse', 'buildInterior',
+    'openShop', 'openGrandExchange', 'openRanch', 'startNPCDialogue']) {
+    check(`PlanetScene.prototype.${m} exists`, typeof ps[m] === 'function');
+  }
+  const byAction = { shop: 'openShop', exchange: 'openGrandExchange', ranch: 'openRanch', sleep: 'enterHouse', talk_rhea: 'startNPCDialogue' };
+  for (const b of BUILDINGS) {
+    calls.length = 0;
+    try {
+      ps.buildingAction(b);
+      check(`buildingAction(${b.key}) → ${byAction[b.action]}`,
+        calls.includes(byAction[b.action]), `got [${calls}]`);
+    } catch (error) {
+      check(`buildingAction(${b.key}) → ${byAction[b.action]}`,
+        false, `threw: ${error.message}`);
+    }
+  }
+}
+
+// ── 4. Scene classes load and register keys; boot sequence is wired ──
+{
+  const introSrc = read('client/scenes/IntroScene.js');
+  const shipSrc = read('client/scenes/SpaceshipScene.js');
+  const planetSrc = read('client/scenes/PlanetScene.js');
+  const gameSrc = read('client/game.js');
+
+  check('scene classes export', !!IS.IntroScene && !!SPS.SpaceshipScene && !!PS.PlanetScene);
+  check('IntroScene registers key', /super\(\{\s*key:\s*'IntroScene'\s*\}\)/.test(introSrc));
+  check('SpaceshipScene registers key', /super\(\{\s*key:\s*'SpaceshipScene'\s*\}\)/.test(shipSrc));
+  check('PlanetScene registers key', /super\(\{\s*key:\s*'PlanetScene'\s*\}\)/.test(planetSrc));
+  check('game.js scene registry: Intro→Ship→Planet',
+    /scene:\s*\[IntroScene,\s*SpaceshipScene,\s*PlanetScene\]/.test(gameSrc));
+  check('intro starts the ship', /scene\.start\('SpaceshipScene'\)/.test(introSrc));
+  check('ship lands on the planet', /scene\.start\('PlanetScene'/.test(shipSrc));
+
+  // the intro's building is the SAME house the planet renders — one texture
+  check('intro renders the shared house (bld.house)', /'bld\.house'/.test(introSrc));
+  check('intro renders the shared house glow (bld.house_glow)', /'bld\.house_glow'/.test(introSrc));
+  // the ship's player walks with the same frames the planet player uses
+  check('ship uses shared player walk frames', /\$\{this\.playerDir\}_\$\{f\}/.test(shipSrc));
+}
+
+console.log(`\n===== ${pass} passed, ${fail} failed =====`);
+process.exit(fail ? 1 : 0);

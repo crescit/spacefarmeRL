@@ -188,6 +188,21 @@ class IntroScene extends Phaser.Scene {
       duration: 700,
       ease: 'Quad.easeOut',
     });
+    // the little dome house on the plate is ALIVE, not a sticker:
+    // its window-glow breathes like a hearth and the house rocks a breath-scale
+    if (this.houseGlow) {
+      this.tweens.add({
+        targets: this.houseGlow,
+        alpha: [0.45, 0.95, 0.55],
+        duration: 2600,
+        ease: 'Sine.easeInOut',
+        repeat: -1,
+      });
+      this.tweens.add({
+        targets: this.houseImg,
+        scale: { start: 2.14, to: 2.26, ease: 'Sine.easeInOut', duration: 2800, yoyo: true, repeat: -1 },
+      });
+    }
     // blink the press-start prompt
     this.tweens.add({
       targets: this.pressStart,
@@ -217,6 +232,11 @@ class IntroScene extends Phaser.Scene {
     this.nebula.tilePositionX -= 0.02;
     this.nebula.tilePositionY -= 0.006;
     if (this.planet) this.planet.y += Math.sin(this.time.now * 0.0003) * 0.05;
+    // the asteroid slowly tumbles through the void (rotation + bob)
+    if (this.asteroid) {
+      this.asteroid.rotation = Math.sin(this.time.now * 0.00018) * 0.07;
+      this.asteroid.y += Math.sin(this.time.now * 0.0004) * 0.06;
+    }
     this.drawStarfield();
   }
 }

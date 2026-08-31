@@ -20,6 +20,7 @@ const offline = [
   'tests/verify_quests.mjs',
   'tests/verify_reflection.mjs',
   'tests/verify_rl_env.mjs',
+  'tests/verify_screens_wired.mjs',
   'tests/verify_sprites.mjs',
   'tests/verify_textures.mjs',
 ];
