@@ -252,6 +252,56 @@ def aggregate(episodes: list[dict[str, Any]]) -> dict[str, float]:
     return result
 
 
+DEFAULT_PARSE_FLOOR = 0.8
+DEFAULT_FALLBACK_CEILING = 0.1
+
+
+def validate_runtime_quality(
+    episodes: list[ModelEpisode],
+    *,
+    parse_floor: float = DEFAULT_PARSE_FLOOR,
+    fallback_ceiling: float = DEFAULT_FALLBACK_CEILING,
+    allow_capped: int = 0,
+) -> None:
+    """W4 validity gate: a trustworthy report XOR a loud refusal.
+
+    Raises ValueError listing every offending episode when a run's decision
+    quality cannot support a valid report: model output parsed on the primary
+    attempt below ``parse_floor``, unparsed (fallback) steps above
+    ``fallback_ceiling`` of the episode, or silent capping past max_steps.
+
+    Episodes recovered on resume carry no decision telemetry
+    (``primary_valid_rate`` is None) and are exempt — they were already
+    replay-validated on adoption; they cannot be re-gated.
+    """
+    offenders: list[str] = []
+    capped = 0
+    for episode in episodes:
+        if episode.primary_valid_rate is None:
+            continue  # recovered/untracked — no validity signal to gate on
+        if episode.capped:
+            capped += 1
+            offenders.append(f"seed={episode.seed}: hit max_steps without terminating")
+            continue
+        if episode.primary_valid_rate < parse_floor:
+            offenders.append(
+                f"seed={episode.seed}: primary_valid_rate="
+                f"{episode.primary_valid_rate:.3f} < {parse_floor}"
+            )
+        fallback = episode.fallback_count / max(1, episode.steps)
+        if fallback > fallback_ceiling:
+            offenders.append(
+                f"seed={episode.seed}: fallback_ratio={fallback:.3f} > {fallback_ceiling}"
+            )
+    if capped > allow_capped:
+        offenders.append(f"{capped} capped episode(s) exceed allow_capped={allow_capped}")
+    if offenders:
+        raise ValueError(
+            "validity gate refused — this run produced no trustworthy report; "
+            + "; ".join(offenders)
+        )
+
+
 ACTION_INTERFACE = "masked-macro-v3-strict"
 
 
@@ -486,6 +536,14 @@ def main() -> None:
             f"Model endpoint unavailable at {policy.base_url}: {exc}\n"
             "Restart with --resume after the endpoint is healthy."
         ) from exc
+
+    # W4 validity gate: a trustworthy report XOR a loud refusal. A run whose
+    # model decisions never parsed (or that silently capped) is diagnostic data,
+    # not model evidence — refuse before a complete report is written.
+    try:
+        validate_runtime_quality(model_episodes)
+    except ValueError as exc:
+        raise SystemExit(f"validity-gate refused: {exc}") from exc
 
     policies: dict[str, list[dict[str, Any]]] = {
         "model": [asdict(episode) for episode in model_episodes]
