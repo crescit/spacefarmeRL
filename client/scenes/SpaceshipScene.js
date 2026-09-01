@@ -440,7 +440,12 @@ class SpaceshipScene extends Phaser.Scene {
     //    TAB/menu toggles the hub, ESC/B closes panels, and the number keys
     //    drive equip rows (the same interaction the planet uses). ──
     if (this.showingBackpack || (this.showingHub && this.hub)) {
-      if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.toggleHub();
+      // TAB over the backpack closes panels rather than stacking the hub on top;
+      // over the hub it toggles the hub like the mobile MENU button does.
+      if (Phaser.Input.Keyboard.JustDown(this.tabKey)) {
+        if (this.showingBackpack) this.closeAllPanels();
+        else this.toggleHub();
+      }
       if (Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
       if (this.showingBackpack) {
         const rowTools = ['', 'hoe', 'watering', 'pickaxe', 'rod'];

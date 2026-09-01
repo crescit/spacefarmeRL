@@ -528,8 +528,8 @@ class PlanetScene extends Phaser.Scene {
     this.mineKey = this.input.keyboard.addKey('K');
     this.casting2 = false;
     this.mineHint = this.add.container(0, 0).setDepth(988);
-    this.mineHint.add(this.add.rectangle(0, 10, 190, 24, 0x101a26, 0.88).setStrokeStyle(1, 0xd8a05a));
-    this.mineHint.add(this.add.text(0, 10, '[K] MINE · -5 EP / swing', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#ffe9a0' }).setOrigin(0.5));
+    this.mineHint.add(this.add.rectangle(0, 10, 252, 24, 0x101a26, 0.88).setStrokeStyle(1, 0xd8a05a));
+    this.mineHint.add(this.add.text(0, 10, 'MINE the vein (A/SPACE · pickaxe)', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#ffe9a0' }).setOrigin(0.5));
     this.mineHint.setVisible(false);
 
     this.casting = false;
@@ -1138,19 +1138,23 @@ rations, and your name on the manifest.
   openRanch() {
     this.showingRanch = true;
     this.ranchPanel.setVisible(true);
-    const net = window.SpaceFarmer.net;
     const animals = this.animals || {};
     const inv = this.inventory || {};
-    // swap species via [B]/[C]/[D], feed via [F], buy via [1..3]
-    this.ranchContent.setText(
-      `CHICKEN .... 100 CR  [1]  (eggs)\n` +
-      `COW ........ 350 CR  [2]  (milk)\n` +
-      `SHEEP ...... 300 CR  [3]  (wool)\n\n` +
-      `Owned: 🐔${animals.chicken || 0} 🐮${animals.cow || 0} 🐑${animals.sheep || 0}\n` +
-      `Products: egg×${inv.egg || 0} milk×${inv.milk || 0} wool×${inv.wool || 0}\n\n` +
-      `[F] Feed all   [1-3] Buy   [S] Sell products\n\n` +
-      `${this.credits} CR on hand`
-    );
+    this.ranchContent.setPosition(0, -100);   // header above the tap rows; [CLOSE] stays at the foot
+    this.ranchContent.setText(`SPACE RANCH — tap a row (or [1-3]/[F]/[S])   ·   ${this.credits} CR on hand`);
+    this._panelRows('_ranchTapRows', [
+      { label: '[1] BUY CHICKEN', item: 'chicken', hot: true, sub: `100 CR · eggs · own ${animals.chicken || 0}` },
+      { label: '[2] BUY COW', item: 'cow', hot: true, sub: `350 CR · milk · own ${animals.cow || 0}` },
+      { label: '[3] BUY SHEEP', item: 'sheep', hot: true, sub: `300 CR · wool · own ${animals.sheep || 0}` },
+      { label: '[F] FEED ALL', item: 'feed', hot: true, sub: 'daily — fed animals produce tomorrow' },
+      { label: '[S] SELL PRODUCTS', item: 'sell', hot: true, sub: `egg×${inv.egg || 0} milk×${inv.milk || 0} wool×${inv.wool || 0}` },
+    ], (d) => {
+      if (d.item === 'chicken') this.buyAnimal('chicken');
+      else if (d.item === 'cow') this.buyAnimal('cow');
+      else if (d.item === 'sheep') this.buyAnimal('sheep');
+      else if (d.item === 'feed') this.feedAnimals();
+      else this.sellProducts();
+    }, { panelKey: 'ranchPanel', rowH: 32, gap: 7, top: -30 });
   }
 
   buyAnimal(species) {
@@ -1259,13 +1263,19 @@ rations, and your name on the manifest.
     const inv = this.inventory || {};
     const st = this.storage || this._storage || {};
     this.chestContent.setText(
-      `CHEST  —  stash harvests at home\n\n` +
-      `INVENTORY\n${Object.entries(inv).filter(([,v]) => v > 0).map(([k, v]) => ` ${k}: ${v}`).join('\n') || '  (empty)'}\n\n` +
-      `STORED\n${Object.entries(st).filter(([,v]) => v > 0).map(([k, v]) => ` ${k}: ${v}`).join('\n') || '  (empty)'}\n\n` +
-      `[1] Deposit 1 crop   [2] Deposit 1 fish\n` +
-      `[3] Withdraw 1 crop [4] Withdraw 1 fish\n` +
-      `[SPACE] Close`
+      `CHEST — TAP A ROW (or [1-4])   ·   stash harvests at home`
     );
+    const invKinds = Object.keys(inv).filter(k => (inv[k] || 0) > 0).length;
+    const stKinds = Object.keys(st).filter(k => (st[k] || 0) > 0).length;
+    this._panelRows('_chestTapRows', [
+      { label: '[1] DEPOSIT A CROP', action: 'deposit', kind: 'crop', sub: `${invKinds} kinds in inventory` },
+      { label: '[2] DEPOSIT A FISH', action: 'deposit', kind: 'fish', sub: 'stash 1 fish' },
+      { label: '[3] WITHDRAW A CROP', action: 'withdraw', kind: 'crop', sub: `${stKinds} kinds stored` },
+      { label: '[4] WITHDRAW A FISH', action: 'withdraw', kind: 'fish', sub: 'take 1 fish' },
+    ], (d) => {
+      if (d.action === 'withdraw') this.withdrawFromChest(d.kind);
+      else this.depositToChest(d.kind);
+    }, { panelKey: 'chestPanel', rowH: 30, gap: 4, top: 22, width: 320 });
   }
 
   depositToChest(kind) {
@@ -1341,14 +1351,19 @@ rations, and your name on the manifest.
     let spot = null;
     if (d1 <= 3.5) spot = 'stardust';
     else if (d2 <= 3.5) spot = 'deep';
-    if (!spot) { this.showToast('Pick a spot — the stardust shore or the deep drop.'); return; }
+    if (!spot) {
+      this._pingSpot(27, 22, 'STARDUST SHORE');
+      this.showToast('Cast at the stardust shore (or the deep drop) — a short walk east.');
+      return;
+    }
     if (!net || !net.connected) { this.showToast('Offline — no fishing.'); return; }
     if (this.casting) return;                       // one cast at a time
     this.casting = true;
     if (this.audio) this.audio.sfx('space', { volume: 0.3 });
     if (window.SpaceFarmer?.music) window.SpaceFarmer.music.setActivity('fishing');
     const isNight = !!this.isNight;
-    this.showToast(`🎣 Casting ${spot === 'deep' ? 'into the deep drop' : 'at the stardust shore'}${isNight ? ' (night)' : ''}... (10 EP)`);
+    const epCost = this._energyCost('fish', 10);     // rod tier cuts the casting cost
+    this.showToast(`🎣 Casting ${spot === 'deep' ? 'into the deep drop' : 'at the stardust shore'}${isNight ? ' (night)' : ''}... (~${epCost} EP)`);
     const pondX = 27 * T, pondY = 21.5 * T;
     // a little bobber that bobs on the water while we wait
     const bob = this.add.graphics().setDepth(235);
@@ -1413,8 +1428,8 @@ rations, and your name on the manifest.
     const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
     const d1 = Math.hypot(px - 27, py - 22), d2 = Math.hypot(px - 38, py - 21);
     let near = false, label = '';
-    if (d1 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · stardust shore / some fish bite'; }
-    else if (d2 <= 3.5 && !this.casting) { near = true; label = '[J] CAST · deep drop (rare — some fish only bite at night)'; }
+    if (d1 <= 3.5 && !this.casting) { near = true; label = 'CAST · stardust shore (rod in hand)'; }
+    else if (d2 <= 3.5 && !this.casting) { near = true; label = 'CAST · deep drop (rare · night fish)'; }
     this.fishHint.setVisible(near).setPosition(this.playerSpr.x, this.playerSpr.y - 46).setAlpha(near ? 0.9 : 0);
     if (near && this._fishHintLabel !== label) { this._fishHintLabel = label; if (this._fishHintTxt) this._fishHintTxt.setText(label); }
   }
@@ -1440,7 +1455,11 @@ rations, and your name on the manifest.
     const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
     const d = Math.hypot(px - this.mineX, py - this.mineY);
     const net = window.SpaceFarmer.net;
-    if (d > 4) { this.showToast('The asteroid field rumbles nearby.'); return; }
+    if (d > 4) {
+      this._pingSpot(this.mineX, this.mineY, 'ASTEROID VEIN');
+      this.showToast('Swing can only reach the vein — it sits at the farm\u2019s east edge.');
+      return;
+    }
     if (!net || !net.connected) { this.showToast('Offline — no mining.'); return; }
     if (this.casting2) return;                    // one swing at a time (keep picking)
     this.casting2 = true;
@@ -1542,6 +1561,24 @@ rations, and your name on the manifest.
     for (let s = 0; s < 4; s++) this._recipeOrder.push(...groups[s]);
     this._recipeOrder.push(...festival);
     if (this._recipeSel >= this._recipeOrder.length) this._recipeSel = 0;
+    // mobile parity: ▲/▼ pick a dish, COOK makes it, CLOSE leaves — desktop
+    // arrows/SPACE/C still work; rows re-render on every pick so the ▶ shows.
+    if (this._recipeTapG) { for (const o of this._recipeTapG) o.destroy(); }
+    this._recipeTapG = [];
+    const mkBtn = (label, x, w, cb) => {
+      const r = this.add.rectangle(x, 150, w, 26, 0x132432, 0.94)
+        .setStrokeStyle(1, 0xd8a05a).setInteractive({ useHandCursor: true });
+      const t = this.add.text(x, 150, label, {
+        fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#ffe9a0', stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5);
+      r.on('pointerdown', cb);
+      this.recipePanel.add([r, t]);
+      this._recipeTapG.push(r, t);
+    };
+    mkBtn('▲', -140, 70, () => this._moveRecipeCursor(-1));
+    mkBtn('▼', -70, 70, () => this._moveRecipeCursor(1));
+    mkBtn('COOK', 40, 110, () => this._cookRecipeAt(this._recipeSel));
+    mkBtn('CLOSE', 146, 90, () => this.closeAllPanels());
     this._renderRecipeBook();
     this.recipePanel.setVisible(true);
   }
@@ -1559,7 +1596,7 @@ rations, and your name on the manifest.
       lines.push(this._recipeLine(key, r, inv, i === this._recipeSel));
     });
     lines.push('');
-    lines.push('[▲▼] pick   [SPACE] cook   [C] close');
+    lines.push('[▲▼] pick   [SPACE] cook   [C] close   (tap ▲▼/COOK on touch)');
     this.recipeContent.setText(lines.join('\n'));
   }
 
@@ -2524,8 +2561,10 @@ rations, and your name on the manifest.
     const pty = Math.floor(this.playerSpr.y / T);
 
     // Shore tap: watering can in hand, the pond's edge refills the tank.
-    if (this.equipped === 'watering' && this.waterLevel < WATER_TANK_MAX) {
-      if (Math.hypot(ptx - FILL_SPOT.x, pty - FILL_SPOT.y) <= 3.5) { this.fillWater(); return; }
+    // Unconditional (not just when low) so a full can still gets feedback —
+    // the server answers "already full" instead of the press going dead.
+    if (this.equipped === 'watering' && Math.hypot(ptx - FILL_SPOT.x, pty - FILL_SPOT.y) <= 3.5) {
+      this.fillWater(); return;
     }
 
     for (const alien of ALIEN_DATA) {
@@ -2598,10 +2637,18 @@ rations, and your name on the manifest.
   }
 
   // ── farm actions ──
-  // tool tiers reduce farming energy: base ×1.0, iron ×0.8, gold ×0.6
-  _energyCost(base) {
-    const m = { base: 1.0, iron: 0.8, gold: 0.6 }[this.tool] || 1.0;
-    return Math.max(1, Math.round(base * m));
+  // Tool tiers cut energy: base ×1.0, iron ×0.8, gold ×0.6. Mirror of the
+  // server's TOOL_FOR_ACTION — each activity scales with ITS tool's tier (hoe
+  // for till, can for water, pickaxe for mine, rod for fish); plant/harvest are
+  // bare-handed and never scale. Online the server is authoritative anyway
+  // (_burnEnergy reads it back); this keeps the offline sandbox honest with the
+  // RL environment, where an agent pays the same per-tool prices.
+  _energyCost(action, base) {
+    const TOOL_FOR_ACTION = { till: 'hoe', water: 'watering', mine: 'pickaxe', fish: 'rod' };
+    const toolId = TOOL_FOR_ACTION[action];
+    const tier = (toolId && (this.toolTiers || {})[toolId]) || 'base';
+    const m = { base: 1.0, iron: 0.8, gold: 0.6 }[tier] || 1.0;
+    return Math.max(1, Math.round((base || 0) * m));
   }
 
   // Energy is server-authoritative: online we read it back from the room
@@ -2656,8 +2703,9 @@ rations, and your name on the manifest.
     switch (s.type) {
       case 'empty':
         if (this.equipped !== 'hoe') { this.showToast('Equip the HOE (backpack) to till the soil.'); break; }
+        const tillCost = this._energyCost('till', 5);   // hoe tier scales the till
         s.type = 'tilled';
-        this._burnEnergy(this._energyCost(5));
+        this._burnEnergy(tillCost);
         ft.img.setTexture('tile.tilled');
         const netTill = window.SpaceFarmer.net;
         if (netTill && netTill.connected) netTill.send('till', { tileX: s.x, tileY: s.y });
@@ -2684,7 +2732,8 @@ rations, and your name on the manifest.
         }
         if (!s.watered) {
           s.watered = true;
-          this._burnEnergy(this._energyCost(5));
+          const wcost = this._energyCost('water', 5);      // can tier scales the water
+          this._burnEnergy(wcost);
           const net2 = window.SpaceFarmer.net;
           if (net2 && net2.connected) net2.send('water', { tileX: s.x, tileY: s.y });
           this._tileFX(s.x, s.y, 'water');            // a dew-ring on the shoot
@@ -2731,7 +2780,7 @@ rations, and your name on the manifest.
     const c = CROPS[key] || { label: key };
     s.crop = key; s.type = 'seeded';
     this.inventory.seeds--;
-    this._burnEnergy(this._energyCost(5));
+    this._burnEnergy(this._energyCost('plant', 5));        // planting is bare-handed
     ft.img.setTexture('tile.seeded');
     this._tileFX(s.x, s.y, 'plant');                   // a gold glint in the soil
     const net = window.SpaceFarmer.net;
@@ -3148,30 +3197,65 @@ rations, and your name on the manifest.
       ore: ['asteroid-dust', 'nickel-iron', 'silicon-carbide', 'void-diamond']
         .filter(i => (this.inventory[i] || 0) > 0).length,
     };
+    this.geContent.setPosition(0, -100);
     this.geContent.setText(
-      `GRAND EXCHANGE — SELL BOARD\n\n` +
-      `[1] CROP ................. ${counts.crop} kinds\n` +
-      `[2] FISH ................. ${counts.fish} kinds\n` +
-      `[3] PRODUCE (egg/milk/wool) ${counts.produce} kinds\n` +
-      `[4] ORE / MINERAL ......... ${counts.ore} kinds\n\n` +
-      `Each press sells 1 unit at market price.\n` +
-      `[SPACE] Close\n\n` +
-      `${this.credits} CR on hand`
+      `GRAND EXCHANGE — tap a row (or [1-4]) · each sells 1   ·   ${this.credits} CR on hand`
     );
+    this._panelRows('_geTapRows', [
+      { label: '[1] CROP', kind: 'crop', sub: `${counts.crop} kinds you hold` },
+      { label: '[2] FISH', kind: 'fish', sub: `${counts.fish} kinds you hold` },
+      { label: '[3] PRODUCE (egg/milk/wool)', kind: 'produce', sub: `${counts.produce} kinds you hold` },
+      { label: '[4] ORE / MINERAL', kind: 'ore', sub: `${counts.ore} kinds you hold` },
+    ], (d) => this.sellCategory(d.kind), { panelKey: 'gePanel', rowH: 34, gap: 5, top: -20 });
   }
 
-  // ── Bounce marker over a building so the player can SEE where to walk. ──
-  _pingBuilding(key) {
-    const bs = (this.buildingSprites || []).find(o => o.b && o.b.key === key);
-    if (!bs) return;
-    const bx = bs.b.x * T, by = bs.b.y * T;
-    const m = this.add.text(bx, by - 40, `${bs.b.label || ''}  ▼`, {
+  // ── Bounce marker over a world spot (building, shore, vein) so the player
+  //    can SEE where to walk — the same guidance the hub rows give for places. ──
+  _pingSpot(tx, ty, label) {
+    const mx = tx * T + T / 2, my = ty * T;
+    const m = this.add.text(mx, my - 26, `${label}  ▼`, {
       fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#ffe9a0',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(960);
     this.world.add(m);
-    this.tweens.add({ targets: m, y: by - 28, duration: 260, yoyo: true, repeat: 7 });
+    this.tweens.add({ targets: m, y: my - 14, duration: 260, yoyo: true, repeat: 7 });
     this.time.delayedCall(4500, () => m.destroy());
+  }
+
+  _pingBuilding(key) {
+    const bs = (this.buildingSprites || []).find(o => o.b && o.b.key === key);
+    if (!bs) return;
+    this._pingSpot(bs.b.x, bs.b.y, bs.b.label || '');
+  }
+
+  // ── Mobile parity for panels: rebuild a set of tappable rows over a panel so
+  //    both desktop number keys AND touch taps drive the same actions — the
+  //    same tap-row pattern the hub/backpack/smithy use. Rows are destroyed and
+  //    re-created on every open so counts/prices never lie. ──
+  _panelRows(store, defs, onTap, opts = {}) {
+    if (!(this[store] instanceof Array)) this[store] = [];
+    for (const o of this[store]) o.destroy();
+    this[store] = [];
+    const panel = this[opts.panelKey];
+    if (!panel) return;
+    const rowH = opts.rowH || 36, gap = opts.gap || 6, width = opts.width || 420;
+    const top = opts.top != null ? opts.top : 12;
+    const f = { fontFamily: "system-ui, 'Segoe UI', sans-serif", stroke: '#04080c', strokeThickness: 2 };
+    defs.forEach((d, i) => {
+      const y = top + i * (rowH + gap);
+      const rect = this.add.rectangle(0, y, width, rowH, 0x132432, 0.92)
+        .setStrokeStyle(1, d.hot ? 0xd8a05a : 0x2a4650)
+        .setInteractive({ useHandCursor: true });
+      rect.on('pointerdown', () => onTap(d, i));
+      const label = this.add.text(-width / 2 + 18, y, d.label, {
+        ...f, fontSize: '11px', fontStyle: 'bold', color: '#e8ecff',
+      }).setOrigin(0, 0.5);
+      const sub = this.add.text(width / 2 - 18, y, d.sub || '', {
+        ...f, fontSize: '10px', color: '#8fb8ae',
+      }).setOrigin(1, 0.5);
+      panel.add([rect, label, sub]);
+      this[store].push(rect, label, sub);
+    });
   }
 
   // ── Grand Exchange sell — turn holdings into credits (server ledger).
@@ -3209,15 +3293,16 @@ rations, and your name on the manifest.
     this.showingShop = true;
     this.shopPanel.setVisible(true);
     const inv = this.inventory || {};
+    this.shopContent.setPosition(0, -100);
     this.shopContent.setText(
-      `QUASAR'S SUPPLY DEPOT\n\n` +
-      `[1] SPACE SEEDS ......... 5 CR   (have ${inv.seeds || 0})\n` +
-      `[2] STARDUST CRYSTAL ... 100 CR  (have ${inv['stardust-crystal'] || 0})\n` +
-      `[3] TECH PART .......... 40 CR   (have ${inv['tech-part'] || 0})\n` +
-      `[4] COOKED FOOD ........ 40 CR   (have ${inv['cooked-food'] || 0})\n\n` +
-      `[1-4] Buy   [SPACE] Close\n\n` +
-      `${this.credits} CR on hand`
+      `QUASAR'S SUPPLY DEPOT — tap a row (or [1-4])   ·   ${this.credits} CR on hand`
     );
+    this._panelRows('_shopTapRows', [
+      { label: '[1] SPACE SEEDS', item: 'seeds', sub: `5 CR · have ${inv.seeds || 0}` },
+      { label: '[2] STARDUST CRYSTAL', item: 'stardust-crystal', sub: `100 CR · have ${inv['stardust-crystal'] || 0}` },
+      { label: '[3] TECH PART', item: 'tech-part', sub: `40 CR · have ${inv['tech-part'] || 0}` },
+      { label: '[4] COOKED FOOD', item: 'cooked-food', sub: `40 CR · have ${inv['cooked-food'] || 0}` },
+    ], (d) => this.buyFromShop(d.item), { panelKey: 'shopPanel', rowH: 34, gap: 5, top: -20 });
   }
 
   // ── The Colony Hub — one menu, one path. Desktop TAB and the mobile MENU

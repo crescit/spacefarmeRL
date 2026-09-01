@@ -1,7 +1,7 @@
 """Gymnasium adapter for the authoritative Space Farmer simulation.
 
 The Node process owns all game rules. Python supplies transport, observation
-flattening, and a compact 14-action macro codec suitable for starter agents.
+flattening, and a compact 16-action macro codec suitable for starter agents.
 Native action dictionaries remain available through SimBridge.
 """
 from __future__ import annotations
@@ -161,7 +161,7 @@ def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
 
 
 class MacroActionCodec:
-    """Map the 14 engine action types to useful, state-aware native actions."""
+    """Map the 16 engine action types to useful, state-aware native actions."""
 
     def __init__(self, items: Iterable[str]):
         self.items = tuple(items)
