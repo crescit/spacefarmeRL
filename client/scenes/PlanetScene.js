@@ -13,6 +13,7 @@ import { NPC_DATA } from '../entities/NPCData.js';
 import { ALIEN_DATA, CONTACT_DOCTRINES } from '../entities/AlienData.js';
 import { story } from '../systems/StoryService.js';
 import { TouchControls } from '../systems/TouchControls.js';
+import { ColonyHub } from '../systems/ColonyHub.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { questView, questChip, QUESTS, rewardLine } from '../systems/QuestSystem.js';
@@ -523,6 +524,23 @@ class PlanetScene extends Phaser.Scene {
     this.vKey = this.input.keyboard.addKey('V');
     this.qKey = this.input.keyboard.addKey('Q'); // The Stardust Story — quest log
     this.cKey = this.input.keyboard.addKey('C'); // Kitchen — recipe book
+
+    // ── The Colony Hub — ONE menu for every activity. Desktop TAB and the
+    //    mobile MENU button both call toggleHub(), so both inputs drive the
+    //    same panel through the same code path (no more desktop-only hotkeys). ──
+    this.showingHub = false;
+    this.hub = new ColonyHub(this).build();
+    this.hub.setSections([
+      { id: 'backpack', label: 'BACKPACK', hint: 'equip tools · inventory · can tank', run: () => this.openBackpack() },
+      { id: 'fish', label: 'FISH', hint: 'cast the stardust shore', run: () => this.fish() },
+      { id: 'mine', label: 'MINE', hint: 'swing at the asteroid vein', run: () => this.mine() },
+      { id: 'ranch', label: 'RANCH', hint: 'feed the herd · sell goods', run: () => this.openRanch() },
+      { id: 'depot', label: 'SUPPLY DEPOT', hint: 'buy seeds & goods', run: () => this.openShop() },
+      { id: 'smithy', label: 'SMITHY', hint: 'upgrade tools for credits', run: () => this.openSmithy() },
+      { id: 'exchange', label: 'GRAND EXCHANGE', hint: 'trade at the Exchange building', run: () => this.openGrandExchange() },
+      { id: 'quests', label: 'THE STARDUST STORY', hint: 'the quest log', run: () => this.toggleQuestLog() },
+      { id: 'codex', label: 'COLONY CODEX', hint: 'world lore & guidance', run: () => this._toggleCodex() },
+    ]);
 
     this.touchCtrl = new TouchControls(this);
     this.touchCtrl.build();
@@ -1663,6 +1681,11 @@ rations, and your name on the manifest.
       else this.closeAllPanels();
       return;
     }
+    if (this.showingHub && this.hub) {
+      // mobile A confirms the hub's selected row (parity with keyboard SPACE)
+      this.hub.confirm(this.hub.sel);
+      return;
+    }
     if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes) {
       this.closeAllPanels();
       return;
@@ -1771,7 +1794,7 @@ rations, and your name on the manifest.
       this.tickNpc(b, dt, time);
     }
 
-    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes) {
+    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub) {
       if (this.inAlienContact) {
         if (this._diaNPC && !this._diaDone) this.dialoguePortrait.setTexture("port." + this._diaNPC + "_" + (Math.floor(time / 70) % 3));
         if (this.contactPhase === "choice") {
@@ -1850,10 +1873,20 @@ rations, and your name on the manifest.
         if (!this.inDialogue && Phaser.Input.Keyboard.JustDown(this.spaceKey)) { this._cookRecipeAt(this._recipeSel); }
         if (this.cKey && Phaser.Input.Keyboard.JustDown(this.cKey)) this.closeAllPanels();
       }
+      // ── Colony Hub: keys 1-9 jump straight to a row, arrows move, SPACE/A
+      //    confirms, ESC closes — the SAME panel the touch bar drives. ──
+      if (this.showingHub && this.hub) {
+        const numKeys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey, this.fiveKey];
+        numKeys.forEach((k, i) => { if (k && Phaser.Input.Keyboard.JustDown(k)) this.hub.confirm(i); });
+        if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) this.hub.move(-1);
+        else if (Phaser.Input.Keyboard.JustDown(this.cursors.down)) this.hub.move(1);
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) this.hub.confirm(this.hub.sel);
+        if (Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
+      }
       // non-dialogue panels close on space/esc
       if (this.lKey && Phaser.Input.Keyboard.JustDown(this.lKey)) this._toggleCodex();
       if (this.showingQuests && this.qKey && Phaser.Input.Keyboard.JustDown(this.qKey)) this.toggleQuestLog();
-      if (!this.inDialogue && (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey))) {
+      if (!this.inDialogue && !this.showingHub && (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey))) {
         this.closeAllPanels();
       }
       this.updateHUD();
@@ -1934,7 +1967,10 @@ rations, and your name on the manifest.
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
       this.handleInteract();
     }
-    if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.openGrandExchange();
+    // TAB opens the Colony Hub — the one menu both inputs share (touch bar:
+    // MENU). The Grand Exchange is now a PLACE: walk to its building (or pick
+    // the row in the hub) rather than a global hotkey.
+    if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.toggleHub();
     if (Phaser.Input.Keyboard.JustDown(this.iKey)) this.openShop();
     if (Phaser.Input.Keyboard.JustDown(this.uKey)) this.upgradeTool();
     if (Phaser.Input.Keyboard.JustDown(this.vKey)) this.claimFestival();
@@ -2910,6 +2946,8 @@ rations, and your name on the manifest.
     this.chestPanel.setVisible(false);
     if (this.recipePanel) this.recipePanel.setVisible(false);
     if (this.questPanel) this.questPanel.setVisible(false);
+    if (this.hub) this.hub.close();
+    this.showingHub = false;
     this.showingGE = false;
     this.showingShop = false;
     this.showingRanch = false;
@@ -2991,6 +3029,26 @@ rations, and your name on the manifest.
       `[1-4] Buy   [SPACE] Close\n\n` +
       `${this.credits} CR on hand`
     );
+  }
+
+  // ── The Colony Hub — one menu, one path. Desktop TAB and the mobile MENU
+  //    button both land here; the hub's rows route to this scene's methods. ──
+  toggleHub() {
+    this.showingHub = !this.showingHub;
+    if (this.hub) this.hub.toggle();
+  }
+
+  // ── Backpack: the colony's TRUE inventory (Slice 3 — equip tools, view
+  //    holdings, read the watering-can tank). ──
+  openBackpack() {
+    if (typeof this._openBackpackPanel === 'function') this._openBackpackPanel();
+    else this.showToast('Your backpack is being unpacked…');
+  }
+
+  // ── Smithy: tool upgrades for credits (Slice 4). ──
+  openSmithy() {
+    if (typeof this._openSmithyPanel === 'function') this._openSmithyPanel();
+    else this.showToast('The smithy is being fitted out…');
   }
 
   // ── Supply Depot purchase — the farm needs seeds, and the depot can't be a

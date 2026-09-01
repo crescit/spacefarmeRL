@@ -99,7 +99,7 @@ export class TouchControls {
         info.style.display = 'none';      // bar is up → don't let it block the D-pad
       } else {
         info.style.display = '';
-        info.textContent = 'WASD/Arrows: Move · SPACE/E: Interact · TAB: Grand Exchange · I: Shop · ESC: Close';
+        info.textContent = 'WASD/Arrows: Move · SPACE/E: Interact · TAB: Colony Hub · I: Shop · U: Upgrades · ESC: Close';
       }
     }
   }
@@ -147,7 +147,10 @@ function _buttonPress(id) {
       else if (typeof scene.handleInteract === 'function') scene.handleInteract();
       break;
     case 'menu':
-      if (typeof scene.openGrandExchange === 'function') scene.openGrandExchange();
+      // MENU opens the Colony Hub (the one menu both inputs share). Scenes
+      // without a hub fall back to their old shortcuts.
+      if (typeof scene.toggleHub === 'function') scene.toggleHub();
+      else if (typeof scene.openGrandExchange === 'function') scene.openGrandExchange();
       else if (typeof scene.openShop === 'function') scene.openShop();
       break;
   }
