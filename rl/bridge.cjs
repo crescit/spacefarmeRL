@@ -53,6 +53,12 @@ async function handle(command) {
       if (!env) throw new Error('reset must be called before journal');
       if (command.entry != null) return reply({ reply: env.writeJournal(command.entry) });
       return reply({ journal: env.journalText() });
+    case 'stats':
+      if (!env) throw new Error('reset must be called before stats');
+      return reply({ stats: env.narrativeStats() });
+    case 'testimony':
+      if (!env) throw new Error('reset must be called before testimony');
+      return reply({ testimony: env.testimony() });
     case 'step':
       if (!env) throw new Error('reset must be called before step');
       return reply(env.step(command.action));

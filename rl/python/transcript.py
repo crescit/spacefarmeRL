@@ -54,7 +54,9 @@ def _records(path: Path) -> list[dict[str, Any]]:
 
 def build_diary(path: Path) -> tuple[dict[str, Any], list[tuple[int, list[dict[str, Any]]]]]:
     rows = _records(path)
-    header, transitions = rows[0], rows[1:]
+    header, rest = rows[0], rows[1:]
+    summary = next((record for record in rest if record.get("kind") == "episode-summary"), None)
+    transitions = [record for record in rest if record.get("kind") != "episode-summary"]
     days: list[tuple[int, list[dict[str, Any]]]] = []
     for record in transitions:
         if days and days[-1][0] == _day(record):
@@ -67,11 +69,29 @@ def build_diary(path: Path) -> tuple[dict[str, Any], list[tuple[int, list[dict[s
         "days_lived": len(days),
         "actions": len(transitions),
         "total_reward": round(sum(float(r.get("reward", 0)) for r in transitions), 2),
-        "final_credits": (transitions[-1].get("observation") or {}).get("credits", 0),
-        "final_stamina": (transitions[-1].get("observation") or {}).get("energy", 0),
-        "stamina_max": (transitions[-1].get("observation") or {}).get("staminaMax", 100),
+        "final_credits": (transitions[-1].get("observation") or {}).get("credits", 0) if transitions else 0,
+        "final_stamina": (transitions[-1].get("observation") or {}).get("energy", 0) if transitions else 0,
+        "stamina_max": (transitions[-1].get("observation") or {}).get("staminaMax", 100) if transitions else 100,
+        "narrative": (summary or {}).get("stats") or {},
+        "testimony": (summary or {}).get("testimony") or "",
     }
     return stats, days
+
+
+def _narrative_line(stats: dict[str, Any]) -> str:
+    n = stats.get("narrative") or {}
+    if not n:
+        return ""
+    parts = []
+    for key, label in (
+        ("daysSurvived", "days survived"), ("questsCompleted", "quests completed"),
+        ("friendsMade", "friends made"), ("journalEntries", "journal entries"),
+        ("festivalsClaimed", "festivals claimed"), ("seedsPlanted", "seeds planted"),
+        ("cropsHarvested", "harvests"),
+    ):
+        if n.get(key) not in (None, 0, ""):
+            parts.append(f"{n[key]} {label}")
+    return " · ".join(parts) if parts else "nothing recorded of the season yet"
 
 
 def render_markdown(path: Path) -> str:
@@ -80,6 +100,10 @@ def render_markdown(path: Path) -> str:
                       "", f"*{stats['actions']} actions · {stats['days_lived']} days lived · "
                           f"reward {stats['total_reward']} · {stats['final_credits']} cr at dusk · "
                           f"stamina {stats['final_stamina']}/{stats['stamina_max']}*", ""]
+    narrative = _narrative_line(stats)
+    if narrative:
+        out.append(f"> Record: {narrative}")
+        out.append("")
     for day, records in days:
         out.append(f"## Day {day}")
         for record in records:
@@ -89,6 +113,12 @@ def render_markdown(path: Path) -> str:
             prose = (record.get("prose") or "").strip() or "The world takes that quietly."
             reward = float(record.get("reward", 0))
             out.append(f"- {glyph} **{label}** — {prose} {_reward_tag(reward)}")
+        out.append("")
+    if stats.get("testimony"):
+        out.append("---")
+        out.append("## Testimony — what kind of keeper were you?")
+        out.append("")
+        out.append(stats["testimony"])
         out.append("")
     out.append("---")
     out.append("_Replay-verified trajectory · generated from `" + str(path) + "`_")
@@ -106,6 +136,10 @@ def _reward_tag(reward: float) -> str:
 def render_html(path: Path) -> str:
     stats, days = build_diary(path)
     glyph = lambda t: TOOL_GLYPH.get(t, "•")
+    narrative = _narrative_line(stats)
+    record_html = ""
+    if narrative:
+        record_html = f'<p class="stats narrative">Record: {html.escape(narrative)}</p>'
     day_html = []
     for day, records in days:
         rows = []
@@ -119,6 +153,10 @@ def render_html(path: Path) -> str:
                         f"<span class='act'>{html.escape(label)}</span> "
                         f"<span class='prose'>{prose}</span> {tag}</li>")
         day_html.append(f"<h3>Day {day}</h3><ul>{''.join(rows)}</ul>")
+    testimony_html = ""
+    if stats.get("testimony"):
+        testimony_html = (f'<h2>Testimony — what kind of keeper were you?</h2>'
+                          f'<pre class="testimony">{html.escape(stats["testimony"])}</pre>')
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>B-612 · seed {stats['seed']}</title>
 <style>
   body{{max-width:760px;margin:2rem auto;padding:0 1rem;background:#081018;color:#e7f0ee;font-family:system-ui,sans-serif}}
@@ -126,12 +164,15 @@ def render_html(path: Path) -> str:
   ul{{list-style:none;padding:0}} li{{margin:.4rem 0}}
   .glyph{{margin-right:.5rem}} .act{{color:#ffe9a0;font-weight:600}}
   .prose{{color:#cdd9d6}} .reward{{color:#b9f0a0;font-size:.85em;margin-left:.4rem}}
-  .stats{{color:#93aeb7;font-size:.9em;margin-bottom:1.5rem}}
+  .stats{{color:#93aeb7;font-size:.9em;margin-bottom:1.5rem}} .narrative{{color:#f8d797}}
+  .testimony{{background:#0d1a24;border-left:3px solid #62e5ff;padding:1rem;white-space:pre-wrap;color:#cfe0ef}}
 </style></head><body>
 <h1>A Season on B-612 — seed {stats['seed']}</h1>
 <div class="stats">{stats['actions']} actions · {stats['days_lived']} days · reward {stats['total_reward']} ·
 {stats['final_credits']} cr at dusk · stamina {stats['final_stamina']}/{stats['stamina_max']}</div>
+{record_html}
 {''.join(day_html)}
+{testimony_html}
 <p><em>Replay-verified trajectory.</em></p>
 </body></html>"""
 

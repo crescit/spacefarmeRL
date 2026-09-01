@@ -49,6 +49,38 @@ the earlier
 `masked-macro-v1` protocol are retained under `archive/` for provenance but
 must not be mixed into the current leaderboard.
 
+### Release protocol — 30 season-ones (report v4)
+
+The release eval is **thirty one-season episodes** (30 seeds × 30 days each —
+year-long horizons are reserved for committed sagas and can be slow). Run it
+parallelized across seeds so wall-clock stays tolerable:
+
+~~~bash
+export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+export OPENAI_API_KEY=sk-local
+export OPENAI_MODEL=model-id
+
+python -m rl.python.eval_local_model \
+  --seeds 30 --horizon 1 season --workers 4 --resume \
+  --max-steps 500 --timeout 120 \
+  --output reports/evals/model-id.json \
+  --trajectory-dir trajectories/model-id
+~~~
+
+`--horizon 1 season | 1 year | N` resolves against the single-source B-612
+calendar (season = 30 days). `--workers N` runs seeds on independent
+simulation processes and policy instances while still checkpointing a partial
+report after every completed seed.
+
+Reports are **report v4**: besides reward, credits, steps, latency, validity
+rates and the random/economic baselines, every episode carries the
+environment's own **narrative record** — days survived, quests completed,
+friendships gained, journal entries, festivals claimed, unique tools — and the
+deterministic **testimony** ("What kind of keeper were you?"), reward-neutral
+prose the Node authority renders from the record. The Markdown leaderboard and
+HTML dashboard surface those columns; per-seed testimony renders in the
+dashboard and in `transcript.py` diaries.
+
 Rebuild the comparison table after adding reports:
 
 ~~~bash

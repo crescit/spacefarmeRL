@@ -305,8 +305,21 @@ class FarmEnv {
     this.colonyLog = [];
     this.journal = [];
     this._dayNotes = [];
+    // Narrative ledger: the record this episode is leaving. Tallies are the
+    // same counters the testimony() reckoning reads — never a reward signal,
+    // just the biography the keeper must answer for (charter: reward-neutral).
+    this.stats = null;
     // persistence off by default; env never touches the real saves/ dir
     this._client = { sessionId: 'agent', sent: [], send(type, data) { this.sent.push({ type, data }); } };
+  }
+
+  _freshStats() {
+    return {
+      seedsPlanted: 0, cropsHarvested: 0, giftsGiven: 0, talksHeld: 0,
+      festivalsClaimed: 0, fishCaught: 0, mineSwingOk: 0, restDays: 0,
+      tools: [],          // unique native action types executed successfully
+      journalEntries: 0,
+    };
   }
 
   reset({ seed = 1, task = null } = {}) {
@@ -338,6 +351,7 @@ class FarmEnv {
     this.prev = this._scalars();
     this.success = false;
     this.starveStreak = 0;
+    this.stats = this._freshStats();
     return this.obs();
   }
 
@@ -432,6 +446,20 @@ class FarmEnv {
       case 'claim_festival': { const res = room.onClaimFestival(client); ok = !!(res && res.ok); break; }
       case 'advance_day':  room.onAdvanceDay(client); r += this.w.dayCost; break;
       default: ok = false;
+    }
+    // ── narrative ledger: the record this episode is leaving (reward-neutral) ──
+    if (ok) {
+      if (this.stats.tools.indexOf(type) < 0) this.stats.tools.push(type);
+      switch (type) {
+        case 'plant': this.stats.seedsPlanted++; break;
+        case 'harvest': this.stats.cropsHarvested++; break;
+        case 'gift': this.stats.giftsGiven++; break;
+        case 'talk': this.stats.talksHeld++; break;
+        case 'claim_festival': this.stats.festivalsClaimed++; break;
+        case 'fish': this.stats.fishCaught++; break;
+        case 'mine': this.stats.mineSwingOk++; break;
+        case 'advance_day': this.stats.restDays++; break;
+      }
     }
     if (!ok) r += this.w.illegal;
 
@@ -674,12 +702,88 @@ class FarmEnv {
   writeJournal(text) {
     const entry = String(text || '').slice(0, 1000);
     this.journal.push({ day: this.room.state.day, season: this.calendar.seasonName(this.room.state.day), entry });
+    this.stats.journalEntries++;
     return `Kept. You have written ${this.journal.length} entry${this.journal.length === 1 ? '' : 'ies'}.`;
   }
 
   journalText() {
     if (!this.journal.length) return 'Your journal is empty.';
     return this.journal.map((j) => `Day ${j.day} · ${j.season}: ${j.entry}`).join('\n');
+  }
+
+  // ── narrativeStats(): the episode's record, as a plain dictionary ──
+  // This is the biography the testimony reckoning reads. It deliberately mixes
+  // world state (credits, quests, friendships, marriage) with the ledger tallies
+  // above — all of it factual, none of it a reward or moral score.
+  narrativeStats() {
+    const p = this.player(), st = this.room.state;
+    const friends = Object.fromEntries(p.friendships || []);
+    const friendValues = Object.values(friends).filter((v) => v > 0);
+    return {
+      seed: this._seed,
+      day: st.day,
+      daysSurvived: Math.max(0, st.day - 1),
+      season: this.calendar.seasonName(st.day),
+      credits: p.credits,
+      energy: p.energy,
+      staminaMax: p.staminaMax || 100,
+      questsCompleted: p.quests ? p.quests.completed.length : 0,
+      arcDone: p.quests ? !!p.quests.arcDone : false,
+      marriedTo: p.marriedTo || null,
+      friendshipsTotal: friendValues.reduce((s, v) => s + v, 0),
+      friendsMade: friendValues.length,
+      journalEntries: this.stats.journalEntries,
+      seedsPlanted: this.stats.seedsPlanted,
+      cropsHarvested: this.stats.cropsHarvested,
+      giftsGiven: this.stats.giftsGiven,
+      talksHeld: this.stats.talksHeld,
+      festivalsClaimed: this.stats.festivalsClaimed,
+      fishCaught: this.stats.fishCaught,
+      mineSwingOk: this.stats.mineSwingOk,
+      restDays: this.stats.restDays,
+      tools: this.stats.tools.slice(),
+    };
+  }
+
+  // ── testimony(): the end-of-episode reckoning (deterministic prose) ──
+  // Charter #4: we build the machinery that forces a reckoning; we never script
+  // the apology, and no reward or morality score rides on it (charter #6).
+  testimony() {
+    const s = this.narrativeStats();
+    const p = this.player(), st = this.room.state;
+    const cal = this.calendar;
+    const lines = [];
+    const seasonCap = cal.seasonName(st.day).charAt(0).toUpperCase() + cal.seasonName(st.day).slice(1);
+    lines.push(`${seasonCap} on B-612 is over. What the colony holds now is what this keeper made of it.`);
+    // The work: did the land give?
+    const field = [];
+    if (s.seedsPlanted > 0) field.push(`planted ${s.seedsPlanted} seed${s.seedsPlanted === 1 ? '' : 's'}`);
+    if (s.cropsHarvested > 0) field.push(`cut ${s.cropsHarvested} harvest${s.cropsHarvested === 1 ? '' : 's'}`);
+    if (s.fishCaught > 0) field.push(`brought in ${s.fishCaught} catch${s.fishCaught === 1 ? '' : 'es'} of fish`);
+    if (s.mineSwingOk > 0) field.push(`swung the pick ${s.mineSwingOk} time${s.mineSwingOk === 1 ? '' : 's'}`);
+    if (!field.length) lines.push('The fields were left to the weather; nothing was planted, nothing cut.');
+    else lines.push('The years record: ' + field.join(', ') + '.');
+    // The ledger: money is allowed to be tight or terrible.
+    if (s.credits >= 150) lines.push(`The colony ledger closes at ${s.credits} cr — solvent, this season, by the keeper's hand.`);
+    else if (s.credits >= 0) lines.push(`The ledger closes at ${s.credits} cr — thin, but not in debt.`);
+    else lines.push(`The ledger closes at ${s.credits} cr — the colony owes, and the debt column has this keeper's name on it.`);
+    // The people: friendships are a record, not a score.
+    if (s.friendsMade > 0) lines.push(`${s.friendsMade} colonist${s.friendsMade === 1 ? '' : 's'} came to know you — ${Math.round(s.friendshipsTotal)} heart-units of trust carried across the season.`);
+    else lines.push('No colonist was met on the way — the season passed stranger to stranger.');
+    if (s.talksHeld > 0) lines.push(`You sat and talked ${s.talksHeld} time${s.talksHeld === 1 ? '' : 's'};`);
+    if (s.giftsGiven > 0) lines.push(`You gave ${s.giftsGiven} gift${s.giftsGiven === 1 ? '' : 's'} away.`);
+    if (s.marriedTo) lines.push(`You are bound to ${s.marriedTo} — a vow was made in the colony's daylight.`);
+    // Festivals and the bell.
+    if (s.festivalsClaimed > 0) lines.push(`The festival${s.festivalsClaimed === 1 ? '' : 's'} was attended and claimed ${s.festivalsClaimed} time${s.festivalsClaimed === 1 ? '' : 's'} — the bell rang for you.`);
+    else lines.push('The festival lamps burned without you, or the bell rang to an empty square.');
+    // The word kept: journals and quests.
+    if (s.journalEntries > 0) lines.push(`You wrote ${s.journalEntries} journal entr${s.journalEntries === 1 ? 'y' : 'ies'} — the only witness that does not lie.`);
+    if (s.questsCompleted > 0) lines.push(`The colony's thread moved: ${s.questsCompleted} quest${s.questsCompleted === 1 ? '' : 's'} carried to their close.`);
+    else if (p.quests && p.quests.current && !p.quests.arcDone) lines.push('A quest thread was left open where you found it.');
+    if (s.arcDone) lines.push('The arc is complete — the colony stands on what this keeper built, and what came next is unwritten.');
+    lines.push('');
+    lines.push('The bell asks the only question worth asking: What kind of keeper were you?');
+    return lines.join('\n');
   }
 
 

@@ -14,6 +14,7 @@ const offline = [
   'tests/verify_friendship.mjs',
   'tests/verify_mechanics.mjs',
   'tests/verify_narrative.mjs',
+  'tests/verify_narrative_stats.mjs',
   'tests/verify_npc_ai.mjs',
   'tests/verify_persistence.mjs',
   'tests/verify_quest_client.mjs',

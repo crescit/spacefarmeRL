@@ -109,12 +109,22 @@ def run_seed(policy: ToolDialogPolicy, seed: int, horizon_days: int,
         else:
             capped = True
     finally:
+        # Capture the record while the env is still alive; close() appends the
+        # same summary to the trajectory file as its source-of-truth line.
+        if env.raw_obs is not None:
+            narrative = env.narrative_stats()
+            testimony = env.testimony()
         recorder.close()
 
     # Diary + validation
     rep = replay(Path(path))
     print(f"seed={seed} done steps={steps} reward={rep['total_reward']:.2f} "
           f"replay={rep['steps'] == steps}{' CAPPED' if capped else ''}")
+    print(f"seed={seed} record={narrative.get('daysSurvived', 0)} days · "
+          f"{narrative.get('questsCompleted', 0)} quests · "
+          f"{narrative.get('friendsMade', 0)} friends · "
+          f"{narrative.get('journalEntries', 0)} journal entries · "
+          f"{narrative.get('festivalsClaimed', 0)} festivals")
     if diary:
         diary.mkdir(parents=True, exist_ok=True)
         stem = Path(path).stem
@@ -123,7 +133,8 @@ def run_seed(policy: ToolDialogPolicy, seed: int, horizon_days: int,
     return {"seed": seed, "steps": steps, "reward": rep["total_reward"],
             "capped": capped, "trajectory": str(path),
             "primary_tool_calls": policy.primary_tool_calls,
-            "text_only_turns": policy.text_only_turns}
+            "text_only_turns": policy.text_only_turns,
+            "narrative": narrative, "testimony": testimony}
 
 
 def replay(path: Path) -> dict:

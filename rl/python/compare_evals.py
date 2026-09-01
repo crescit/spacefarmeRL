@@ -28,6 +28,11 @@ def report_row(report: dict[str, Any], source: Path) -> dict[str, Any]:
     latency, _latency_std = mean_std(model_episodes, "mean_latency_ms")
     random_reward, _ = mean_std(random_episodes, "reward")
     economic_reward, _ = mean_std(economic_episodes, "reward")
+    quests, _ = mean_std(model_episodes, "quests")
+    friends, _ = mean_std(model_episodes, "friends_made")
+    journal, _ = mean_std(model_episodes, "journal_entries")
+    festivals, _ = mean_std(model_episodes, "festivals")
+    days, _ = mean_std(model_episodes, "days")
     return {
         "source": str(source),
         "file": source.name,
@@ -48,6 +53,13 @@ def report_row(report: dict[str, Any], source: Path) -> dict[str, Any]:
         "vs_random": reward - random_reward if random_episodes else None,
         "oracle_gap": economic_reward - reward if economic_episodes else None,
         "replay_ok": all(bool(row.get("replay_ok")) for row in model_episodes),
+        # report v4 narrative record ("a report row reads like a biography")
+        "narrative": all("days" in row for row in model_episodes),
+        "days": days,
+        "quests": quests,
+        "friends": friends,
+        "journal": journal,
+        "festivals": festivals,
     }
 
 
@@ -136,21 +148,43 @@ def render_markdown(
         )
     lines = [header, ""]
     if rows:
-        lines += [
-            "| Model | Reward μ±σ | Credits μ±σ | Steps μ | Latency/action | Δ vs random | Gap to oracle | Replay |",
-            "|---|---:|---:|---:|---:|---:|---:|:---:|",
-        ]
+        narrative = all(bool(row.get("narrative")) for row in rows)
+        if narrative:
+            lines += [
+                "| Model | Reward μ±σ | Credits μ±σ | Steps μ | Days μ | Quests μ | Friends μ | Journal μ | Fest'ls μ | Latency/action | Δ vs random | Gap to oracle | Replay |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|",
+            ]
+        else:
+            lines += [
+                "| Model | Reward μ±σ | Credits μ±σ | Steps μ | Latency/action | Δ vs random | Gap to oracle | Replay |",
+                "|---|---:|---:|---:|---:|---:|---:|:---:|",
+            ]
         for row in rows:
             latency = f"{row['latency_ms']:.1f} ms"
             if row["latency_episodes"] != row["episodes"]:
                 latency += f" ({row['latency_episodes']}/{row['episodes']} eps)"
-            lines.append(
-                f"| {row['model']} | {row['reward']:.3f} ± {row['reward_std']:.3f} "
-                f"| {row['credits']:.1f} ± {row['credits_std']:.1f} "
-                f"| {row['steps']:.1f} | {latency} "
-                f"| {metric(row['vs_random'], 3)} | {metric(row['oracle_gap'], 3)} "
-                f"| {'✓' if row['replay_ok'] else '✗'} |"
-            )
+            base = [
+                f"| {row['model']} | {row['reward']:.3f} ± {row['reward_std']:.3f} ",
+                f"| {row['credits']:.1f} ± {row['credits_std']:.1f} ",
+                f"| {row['steps']:.1f} ",
+            ]
+            if narrative:
+                middle = [
+                    f"| {row['days']:.0f} ",
+                    f"| {row['quests']:.1f} ",
+                    f"| {row['friends']:.1f} ",
+                    f"| {row['journal']:.1f} ",
+                    f"| {row['festivals']:.1f} ",
+                ]
+            else:
+                middle = []
+            tail = [
+                f"| {latency} ",
+                f"| {metric(row['vs_random'], 3)} ",
+                f"| {metric(row['oracle_gap'], 3)} ",
+                f"| {'✓' if row['replay_ok'] else '✗'} |",
+            ]
+            lines.append("".join(base + middle + tail))
         lines += [
             "",
             "Higher reward and credits are better. “Δ vs random” is model reward minus",
@@ -158,6 +192,13 @@ def render_markdown(
             "minus model reward. Compare only reports generated with this exact protocol.",
             "",
         ]
+        if narrative:
+            lines += [
+                "Narrative (report v4) columns are per-episode means from the environment's",
+                "own record: days survived, quests completed, friends made, journal entries",
+                "written, and festivals claimed — a row that reads like a biography, not a bar.",
+                "",
+            ]
     if invalid:
         lines.append("## ⚠ Invalid / archived reports — NOT compared")
         lines.append("")

@@ -73,3 +73,38 @@ The npm evaluator enables `--resume` by default. Each completed seed is
 checkpointed in the output JSON, and replay-valid partial trajectories continue
 at their next step. With `--resume`, a
 compatible report skips those seeds; an interrupted in-progress seed restarts.
+
+### Report v4 — biography, not a bar
+
+Every episode also carries the environment's own **narrative record** (report
+`report_version: 4`): days survived, quests completed, friendships gained,
+journal entries written, festivals claimed, unique tools used — plus the
+**testimony**, the end-of-season reckoning the env renders from that record
+("What kind of keeper were you?"). The testimony is reward-neutral prose
+computed by the Node authority; it never changes credits or reward. Each
+trajectory stores the same record as its terminal `episode-summary` line
+(replay skips it, so the transition byte-stream stays replay-exact).
+
+### Release protocol — 30 season-ones
+
+For release evals, run thirty one-season episodes (30 days each). The runner
+parallelizes seeds so the wall-clock cost stays tolerable:
+
+~~~bash
+python -m rl.python.eval_local_model \
+  --seeds 30 --horizon 1 season --workers 4 --resume \
+  --max-steps 500 --timeout 120 \
+  --output reports/evals/<model>.json \
+  --trajectory-dir trajectories/<model>
+~~~
+
+- `--horizon 1 season | 1 year | N` resolves against the single-source B-612
+  calendar (season = 30 days); `--horizon-days` still gives exact control.
+- `--workers N` runs independent seeds concurrently — each worker owns its own
+  simulation process and policy instance — while preserving the partial-report
+  checkpoint after every completed seed. Default `--workers 1` behaves exactly
+  like the historical runner.
+- The Markdown leaderboard (`compare_evals.py`) and HTML dashboard
+  (`render_eval_report.py`) surface the narrative columns beside reward,
+  credits, steps, and latency; per-seed testimony renders in the dashboard and
+  in the `transcript.py` diaries.
