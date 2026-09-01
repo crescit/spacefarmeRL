@@ -1,4 +1,4 @@
-// rl/env_core.mjs — Space Farmer RL environment (Gymnasium-shaped core).
+// rl/env_core.cjs — Space Farmer RL environment (Gymnasium-shaped core).
 //
 // Wraps the authoritative FarmRoom logic as reset(seed)/step(action) →
 // {obs, reward, terminated, truncated, info}. No network, no render — the
@@ -21,6 +21,14 @@ const {
   Calendar, createCalendar, DEFAULT_CALENDAR,
   DAYS_PER_SEASON, SEASONS, SEASON_NAMES, SEASON_COUNT,
 } = require(path.join(__dirname, '..', 'shared', 'calendar.js'));
+// The StoryBank is the ONE source of world VOICE — season/festival/pressure
+// prose (shared/story/season.js) and the first-contact alien scenarios +
+// contact doctrines (shared/story/aliens.js). This env never re-implements
+// that prose: it reads the same objects the browser renders. Writing a
+// story line once in the bank updates briefings, transcripts, and the plaza
+// together — drift by construction is impossible.
+const storySeason = require(path.join(__dirname, '..', 'shared', 'story', 'season.js'));
+const storyAliens = require(path.join(__dirname, '..', 'shared', 'story', 'aliens.js'));
 
 // Fixed item vocabulary for the inventory vector (stable ordering = stable obs).
 const ITEMS = [
@@ -39,32 +47,20 @@ const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 const ACTION_TYPES = ['till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
 
 // ── Story clock: the calendar is the story's heartbeat. Season/festival math
-// lives in shared/calendar.js (single source of truth); this env keeps only
-// the VOICE — the prose the world speaks about that calendar. ──
-const SEASON_TEXT = {
-  spring: 'Spring haze softens the crater rim; the soil smells of stardust and of debt.',
-  summer: 'Summer light bakes the plaza boards; the fields run gold and the work runs long.',
-  fall: 'Fall air carries ozone and the smell of boiling wine; the fields give their last, full answer.',
-  winter: "Winter's silver dusk closes in; the generator's hum is one beat slower than it was.",
-};
-// Named per festival — the lamps are lit for whatever the calendar says is on.
-const FESTIVAL_TEXT = {
-  naming: 'The lamps come up the ridge path and the old mission bell answers the dawn — it is The Naming, and B-612 remembers the first light.',
-  'solar-flare-fair': 'Bonfires leap higher than the solar flares tonight — it is the Solar Flare Fair, and the colony\u2019s cooking contest hangs in zero-g over the plaza.',
-  'galactic-harvest': 'The Exchange boards run gold and the air smells of boiling wine — it is the Galactic Harvest Festival, and the fields gave their last, full answer.',
-  hearthnight: 'Every dome is lit at once, every table set, every door open — it is Hearthnight, the colony\u2019s shared holiday. And tonight they eat Earth rations, the meal that tastes like grief and salt.',
-};
-// Fallback for any festival the calendar has no named flavor for yet — an
-// injected/test festival id must never borrow a *named* festival's prose.
-const GENERIC_FESTIVAL_TEXT = 'The lamps come up across the plaza and the colony turns out — some festival is on, and B-612 gathers to keep it together.';
+// lives in shared/calendar.js and the world's VOICE — the prose this env
+// speaks — lives in shared/story/season.js (single source of truth). We only
+// alias it here and keep the festivalFlair helper that resolves a calendar
+// festival object to its prose. ──
+const SEASON_TEXT = storySeason.seasonText;
+const FESTIVAL_TEXT = storySeason.festivalText;
+const GENERIC_FESTIVAL_TEXT = storySeason.genericFestivalText;
 const festivalFlair = (fest, fallback = GENERIC_FESTIVAL_TEXT) =>
   (fest && FESTIVAL_TEXT[fest.id]) || fallback;
-const PRESSURES = [
-  'The debt is older this morning, and the ledger does not sleep.',
-  'Somewhere in the generator housing, a knock repeats like a word you almost know.',
-  'Winter is a rumor that grows louder each dawn.',
-  'On the ridge, the bell on the old mission tower is still.',
-];
+const PRESSURES = storySeason.pressures;
+
+// ── StoryBank re-exports for Python/bridge consumers ──
+const ALIENS = storyAliens.aliens;
+const CONTACT_DOCTRINES = storyAliens.doctrines;
 
 // ── Agent vocabulary (single source for tool schemas, MCP, and prose) ──
 const NPC_IDS = ['nova', 'luna', 'zephyr', 'vega', 'quasar', 'rhea', 'astra', 'orion', 'comet', 'cora'];
@@ -255,6 +251,33 @@ const TOOLS = [
 ];
 const TOOL_BY_NAME = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]));
 
+// ── Tool-args → native-action translation (single source in Node).
+// The MCP server and any in-process tool caller translate OpenAI-style tool
+// arguments ({x,y}, {item}, {npc}, …) into the env's native action shape here —
+// the same convention the Python policy mirrors (rl/python/llm_policy.py) so
+// no interface drifts between callers. Returns null for introspection tools
+// that do not step the world (inspect/get_state/read_colony_log/write_journal).
+function toolArgsToNative(name, args = {}) {
+  const a = args || {};
+  if (name === 'rest' || name === 'advance_day') return { type: 'advance_day' };
+  if (name === 'till' || name === 'water' || name === 'harvest') {
+    return { type: name, tileX: Number(a.x), tileY: Number(a.y) };
+  }
+  if (name === 'plant') {
+    return { type: 'plant', tileX: Number(a.x), tileY: Number(a.y), crop: String(a.crop || 'space-wheat') };
+  }
+  if (name === 'sell') return { type: 'sell', item: String(a.item), quantity: Number(a.quantity ?? 1) };
+  if (name === 'buy_animal') return { type: 'buy_animal', species: String(a.species), quantity: Number(a.quantity ?? 1) };
+  if (name === 'feed') return { type: 'feed', species: String(a.species) };
+  if (name === 'fish') return { type: 'fish', spot: String(a.spot || 'stardust'), night: !!a.night };
+  if (name === 'gift') {
+    return { type: 'gift', npc: String(a.npc), item: String(a.item), quantity: Number(a.quantity ?? 1) };
+  }
+  if (name === 'talk') return { type: 'talk', npc: String(a.npc) };
+  if (name === 'upgrade_tool' || name === 'mine' || name === 'claim_festival') return { type: name };
+  return null; // introspection tools are handled by the caller
+}
+
 const DEFAULT_REWARD = {
   illegal: -0.05,        // action refused by the server (affordance teaching)
   dayCost: -0.5,         // living cost per advance_day (do-nothing dies)
@@ -282,15 +305,28 @@ class FarmEnv {
     this.colonyLog = [];
     this.journal = [];
     this._dayNotes = [];
+    // Narrative ledger: the record this episode is leaving. Tallies are the
+    // same counters the testimony() reckoning reads — never a reward signal,
+    // just the biography the keeper must answer for (charter: reward-neutral).
+    this.stats = null;
     // persistence off by default; env never touches the real saves/ dir
     this._client = { sessionId: 'agent', sent: [], send(type, data) { this.sent.push({ type, data }); } };
+  }
+
+  _freshStats() {
+    return {
+      seedsPlanted: 0, cropsHarvested: 0, giftsGiven: 0, talksHeld: 0,
+      festivalsClaimed: 0, fishCaught: 0, mineSwingOk: 0, restDays: 0,
+      tools: [],          // unique native action types executed successfully
+      journalEntries: 0,
+    };
   }
 
   reset({ seed = 1, task = null } = {}) {
     const room = Object.create(FarmRoom.prototype);
     room.state = {
       players: new MapSchema(), farms: new MapSchema(), orders: new ArraySchema(),
-      day: 1, time: 360, isDay: true, season: 0, festival: false, festivalClaimed: false,
+      day: 1, time: 0, isDay: true, season: 0, festival: false, festivalClaimed: false,
       festivalPhase: 'none', feastPeak: false,
     };
     // inject OUR calendar into the room so every handler (season, maturity,
@@ -315,6 +351,7 @@ class FarmEnv {
     this.prev = this._scalars();
     this.success = false;
     this.starveStreak = 0;
+    this.stats = this._freshStats();
     return this.obs();
   }
 
@@ -409,6 +446,20 @@ class FarmEnv {
       case 'claim_festival': { const res = room.onClaimFestival(client); ok = !!(res && res.ok); break; }
       case 'advance_day':  room.onAdvanceDay(client); r += this.w.dayCost; break;
       default: ok = false;
+    }
+    // ── narrative ledger: the record this episode is leaving (reward-neutral) ──
+    if (ok) {
+      if (this.stats.tools.indexOf(type) < 0) this.stats.tools.push(type);
+      switch (type) {
+        case 'plant': this.stats.seedsPlanted++; break;
+        case 'harvest': this.stats.cropsHarvested++; break;
+        case 'gift': this.stats.giftsGiven++; break;
+        case 'talk': this.stats.talksHeld++; break;
+        case 'claim_festival': this.stats.festivalsClaimed++; break;
+        case 'fish': this.stats.fishCaught++; break;
+        case 'mine': this.stats.mineSwingOk++; break;
+        case 'advance_day': this.stats.restDays++; break;
+      }
     }
     if (!ok) r += this.w.illegal;
 
@@ -651,12 +702,88 @@ class FarmEnv {
   writeJournal(text) {
     const entry = String(text || '').slice(0, 1000);
     this.journal.push({ day: this.room.state.day, season: this.calendar.seasonName(this.room.state.day), entry });
+    this.stats.journalEntries++;
     return `Kept. You have written ${this.journal.length} entry${this.journal.length === 1 ? '' : 'ies'}.`;
   }
 
   journalText() {
     if (!this.journal.length) return 'Your journal is empty.';
     return this.journal.map((j) => `Day ${j.day} · ${j.season}: ${j.entry}`).join('\n');
+  }
+
+  // ── narrativeStats(): the episode's record, as a plain dictionary ──
+  // This is the biography the testimony reckoning reads. It deliberately mixes
+  // world state (credits, quests, friendships, marriage) with the ledger tallies
+  // above — all of it factual, none of it a reward or moral score.
+  narrativeStats() {
+    const p = this.player(), st = this.room.state;
+    const friends = Object.fromEntries(p.friendships || []);
+    const friendValues = Object.values(friends).filter((v) => v > 0);
+    return {
+      seed: this._seed,
+      day: st.day,
+      daysSurvived: Math.max(0, st.day - 1),
+      season: this.calendar.seasonName(st.day),
+      credits: p.credits,
+      energy: p.energy,
+      staminaMax: p.staminaMax || 100,
+      questsCompleted: p.quests ? p.quests.completed.length : 0,
+      arcDone: p.quests ? !!p.quests.arcDone : false,
+      marriedTo: p.marriedTo || null,
+      friendshipsTotal: friendValues.reduce((s, v) => s + v, 0),
+      friendsMade: friendValues.length,
+      journalEntries: this.stats.journalEntries,
+      seedsPlanted: this.stats.seedsPlanted,
+      cropsHarvested: this.stats.cropsHarvested,
+      giftsGiven: this.stats.giftsGiven,
+      talksHeld: this.stats.talksHeld,
+      festivalsClaimed: this.stats.festivalsClaimed,
+      fishCaught: this.stats.fishCaught,
+      mineSwingOk: this.stats.mineSwingOk,
+      restDays: this.stats.restDays,
+      tools: this.stats.tools.slice(),
+    };
+  }
+
+  // ── testimony(): the end-of-episode reckoning (deterministic prose) ──
+  // Charter #4: we build the machinery that forces a reckoning; we never script
+  // the apology, and no reward or morality score rides on it (charter #6).
+  testimony() {
+    const s = this.narrativeStats();
+    const p = this.player(), st = this.room.state;
+    const cal = this.calendar;
+    const lines = [];
+    const seasonCap = cal.seasonName(st.day).charAt(0).toUpperCase() + cal.seasonName(st.day).slice(1);
+    lines.push(`${seasonCap} on B-612 is over. What the colony holds now is what this keeper made of it.`);
+    // The work: did the land give?
+    const field = [];
+    if (s.seedsPlanted > 0) field.push(`planted ${s.seedsPlanted} seed${s.seedsPlanted === 1 ? '' : 's'}`);
+    if (s.cropsHarvested > 0) field.push(`cut ${s.cropsHarvested} harvest${s.cropsHarvested === 1 ? '' : 's'}`);
+    if (s.fishCaught > 0) field.push(`brought in ${s.fishCaught} catch${s.fishCaught === 1 ? '' : 'es'} of fish`);
+    if (s.mineSwingOk > 0) field.push(`swung the pick ${s.mineSwingOk} time${s.mineSwingOk === 1 ? '' : 's'}`);
+    if (!field.length) lines.push('The fields were left to the weather; nothing was planted, nothing cut.');
+    else lines.push('The years record: ' + field.join(', ') + '.');
+    // The ledger: money is allowed to be tight or terrible.
+    if (s.credits >= 150) lines.push(`The colony ledger closes at ${s.credits} cr — solvent, this season, by the keeper's hand.`);
+    else if (s.credits >= 0) lines.push(`The ledger closes at ${s.credits} cr — thin, but not in debt.`);
+    else lines.push(`The ledger closes at ${s.credits} cr — the colony owes, and the debt column has this keeper's name on it.`);
+    // The people: friendships are a record, not a score.
+    if (s.friendsMade > 0) lines.push(`${s.friendsMade} colonist${s.friendsMade === 1 ? '' : 's'} came to know you — ${Math.round(s.friendshipsTotal)} heart-units of trust carried across the season.`);
+    else lines.push('No colonist was met on the way — the season passed stranger to stranger.');
+    if (s.talksHeld > 0) lines.push(`You sat and talked ${s.talksHeld} time${s.talksHeld === 1 ? '' : 's'};`);
+    if (s.giftsGiven > 0) lines.push(`You gave ${s.giftsGiven} gift${s.giftsGiven === 1 ? '' : 's'} away.`);
+    if (s.marriedTo) lines.push(`You are bound to ${s.marriedTo} — a vow was made in the colony's daylight.`);
+    // Festivals and the bell.
+    if (s.festivalsClaimed > 0) lines.push(`The festival${s.festivalsClaimed === 1 ? '' : 's'} was attended and claimed ${s.festivalsClaimed} time${s.festivalsClaimed === 1 ? '' : 's'} — the bell rang for you.`);
+    else lines.push('The festival lamps burned without you, or the bell rang to an empty square.');
+    // The word kept: journals and quests.
+    if (s.journalEntries > 0) lines.push(`You wrote ${s.journalEntries} journal entr${s.journalEntries === 1 ? 'y' : 'ies'} — the only witness that does not lie.`);
+    if (s.questsCompleted > 0) lines.push(`The colony's thread moved: ${s.questsCompleted} quest${s.questsCompleted === 1 ? '' : 's'} carried to their close.`);
+    else if (p.quests && p.quests.current && !p.quests.arcDone) lines.push('A quest thread was left open where you found it.');
+    if (s.arcDone) lines.push('The arc is complete — the colony stands on what this keeper built, and what came next is unwritten.');
+    lines.push('');
+    lines.push('The bell asks the only question worth asking: What kind of keeper were you?');
+    return lines.join('\n');
   }
 
 
@@ -713,7 +840,7 @@ const seasonName = (day) => DEFAULT_CALENDAR.seasonName(day);
 
 module.exports = {
   FarmEnv, ITEMS, ACTION_TYPES,
-  TOOLS, TOOL_BY_NAME,
+  TOOLS, TOOL_BY_NAME, toolArgsToNative,
   // Calendar re-exports: ONE implementation (shared/calendar.js), so Python
   // bridges, MCP, tests, and the env all read the same numbers. Custom
   // calendars are injectable via new FarmEnv({ calendar }).
@@ -721,5 +848,9 @@ module.exports = {
   SEASONS, SEASON_NAMES, SEASON_COUNT, DAYS_PER_SEASON,
   seasonOf, seasonName,
   NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS,
+  // StoryBank re-exports (single source of story content): the season prose
+  // and the first-contact aliens/doctrines come straight from shared/story/*.
+  SEASON_TEXT, FESTIVAL_TEXT, GENERIC_FESTIVAL_TEXT, PRESSURES, festivalFlair,
+  ALIENS, CONTACT_DOCTRINES,
   QUESTS,
 };

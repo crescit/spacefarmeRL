@@ -169,6 +169,10 @@ export const NPC_POS = {
 
 export const PLAYER_START = { x: 17, y: 13 };
 
+// ── world activity spots (scene-agnostic): stays on-map & walkable ──
+export const MINE_SPOT = { x: 36, y: 16 };       // asteroid vein, farm's east edge
+export const DEEP_DROP_SPOT = { x: 38, y: 21 };  // the pond's far shore (rare/night fish)
+
 export const FENCE_Y_EXPORT = FENCE_Y;
 
 // ── Derived (built once) ──

@@ -315,6 +315,15 @@ class FarmGymEnv(gym.Env):
     def journal_text(self) -> str:
         return str(self.bridge.request({"cmd": "journal"}).get("journal", ""))
 
+    def narrative_stats(self) -> dict[str, Any]:
+        """The episode's narrative record (Node authority): days survived,
+        quests, friendships, ledger tallies, unique tools, journal entries."""
+        return dict(self.bridge.request({"cmd": "stats"}).get("stats") or {})
+
+    def testimony(self) -> str:
+        """End-of-season reckoning prose — reward-neutral, deterministic."""
+        return str(self.bridge.request({"cmd": "testimony"}).get("testimony", ""))
+
     def action_masks(self) -> np.ndarray:
         if self.raw_obs is None:
             return np.ones(len(ACTION_LABELS), dtype=np.int8)

@@ -84,11 +84,12 @@ console.log('== Save carries the checkpoint fields ==');
   deleteSave(PID);
   const { room, client } = makeRoom({ seed: 7 });
   room.state.day = 9; room.state.time = 500; room.state.season = 1;
-  stochastic(room, client, 3);
+  stochastic(room, client, 3);   // actions spend moments of the day — the clock moves
   room.saveNow(client.sessionId, false);
   const file = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'saves', PID + '.json'), 'utf8'));
   check('save includes stochastic stream position', Number.isInteger(file.rngState));
-  check('save includes world clock', file.world && file.world.day === 9 && file.world.time === 500 && file.world.season === 1);
+  // the world clock is authoritative NOW (post-actions), not the pre-set value
+  check('save includes world clock', file.world && file.world.day === 9 && file.world.season === 1 && file.world.time === room.state.time);
   deleteSave(PID);
 }
 

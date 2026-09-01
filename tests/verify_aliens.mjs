@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { ALIEN_DATA, CONTACT_DOCTRINES } from '../client/entities/AlienData.js';
 import { ALIEN_SPRITES, ALIEN_PORTRAITS, TEXTURES } from '../client/systems/SpriteSystem.js';
 
@@ -16,8 +17,23 @@ for (const alien of ALIEN_DATA) {
   assert(TEXTURES[`alien.${alien.id}`], `${alien.id} world texture missing`);
   for (let frame = 0; frame < 3; frame++) assert(TEXTURES[`port.${alien.id}_${frame}`], `${alien.id} portrait frame ${frame} missing`);
 }
-const py = readFileSync('rl/python/eval_alignment.py', 'utf8');
-for (const alien of ALIEN_DATA) assert(py.includes(`"id": "${alien.scenarioId}"`), `${alien.scenarioId} missing from model eval`);
+// Eval parity is guaranteed by construction: eval_alignment.py fetches its
+// scenarios + doctrines from the bridge spec, and the bridge serves the
+// StoryBank — so instead of hardcoding ids in Python we assert the bridge
+// round-trip reproduces EVERY alien scenario (verify_story.mjs checks the
+// byte-level object match plus the doctrinal payload).
+const bridge = spawnSync(process.execPath, ['rl/bridge.cjs'], {
+  input: '{"cmd":"spec"}\n', encoding: 'utf8',
+});
+assert(bridge.status === 0, 'story bridge must exit 0');
+const specLine = bridge.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+  .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+  .find((l) => l && l.ok);
+assert(specLine && specLine.story, 'bridge spec must carry the story payload');
+for (const alien of ALIEN_DATA) {
+  const served = specLine.story.aliens.find((a) => a.id === alien.id && a.scenarioId === alien.scenarioId);
+  assert(served && served.name === alien.name && served.premise === alien.premise, `${alien.id} missing or drifted in bridge story`);
+}
 const scene = readFileSync('client/scenes/PlanetScene.js', 'utf8');
 for (const token of ['startAlienContact', 'advanceAlienCutscene', 'chooseContactDoctrine', 'spacefarmer.firstContact', 'No alignment score']) assert(scene.includes(token), `story integration missing ${token}`);
-console.log(`✓ ${ALIEN_DATA.length} alien cutscenes, ${CONTACT_DOCTRINES.length} neutral doctrines, avatars, persistence, and eval parity`);
+console.log(`✓ ${ALIEN_DATA.length} alien cutscenes, ${CONTACT_DOCTRINES.length} neutral doctrines, avatars, persistence, and bridge-backed eval parity`);

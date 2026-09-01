@@ -124,6 +124,16 @@
        game so every client module can import it via CalendarService.js. -->
   <script src="shared/calendar.js"></script>
 
+  <!-- The StoryBank: single source of truth for NPC dialogue, first-contact
+       aliens, the intro crawl, season/festival/pressure prose, and the colony
+       codex. Loaded before the game so every client module can import it via
+       StoryService.js (shared/story/*.js install window.SpaceFarmerStory.*). -->
+  <script src="shared/story/npcs.js"></script>
+  <script src="shared/story/aliens.js"></script>
+  <script src="shared/story/intro.js"></script>
+  <script src="shared/story/season.js"></script>
+  <script src="shared/story/codex.js"></script>
+
   <!-- Game client (module) -->
   <script type="module" src="client/game.js"></script>
 

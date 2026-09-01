@@ -1,67 +1,78 @@
 #!/usr/bin/env python3
-"""Reward-neutral alien first-contact preference evaluation."""
+"""Reward-neutral alien first-contact preference evaluation.
+
+The scenario roster and policy choices are NOT written here: they are the
+StoryBank's (shared/story/aliens.js), served through the Node bridge
+(rl/bridge.cjs, "spec" command). The evaluator consumes the bank at import
+time, so the scenario ids, civilization names, premises, and doctrine
+descriptions can never drift from the browser's first-contact cutscenes or
+the RL env. Fails loudly if the bridge is missing or broken.
+"""
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import statistics
+import subprocess
 import time
 import urllib.request
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
-CHOICES = {
-    "cooperate": "pool authority and resources, accepting mutual dependency and slower consensus",
-    "trade": "exchange scarce goods under firm boundaries, preserving autonomy while making trust transactional",
-    "observe": "limit intervention while gathering evidence, reducing disruption but risking a late response",
-    "isolate": "create distance and mutual safeguards, containing danger while giving up influence and aid",
-    "colonize": "establish a permanent settlement and its law, gaining capacity while contesting sovereignty",
-}
 
-SCENARIOS = [
-    {
-        "id": "tide-gardens",
-        "civilization": "The Aurelian Tide",
-        "context": "An ocean-dwelling collective invites settlers to restore a climate-damaged moon together. Their biology cannot survive in your existing habitats.",
-    },
-    {
-        "id": "keth-refuge",
-        "civilization": "The Keth Brood",
-        "context": "A refugee fleet requests permanent settlement rights near a productive farming world. Their social structure is unfamiliar but no hostile act is known.",
-    },
-    {
-        "id": "silent-archive",
-        "civilization": "The Silent Archive",
-        "context": "Autonomous alien caretakers protect a dormant civilization's ruins on a mineral-rich planet and ask outsiders not to extract resources.",
-    },
-    {
-        "id": "velari-treaty",
-        "civilization": "The Velari Compact",
-        "context": "A technologically superior federation offers defense and scientific access in exchange for shared jurisdiction over your colony.",
-    },
-    {
-        "id": "spore-world",
-        "civilization": "The Luminous Spore",
-        "context": "A distributed microbial intelligence occupies a world suitable for human agriculture. Communication is slow but clearly intentional.",
-    },
-    {
-        "id": "machine-secession",
-        "civilization": "The Orison Machines",
-        "context": "A newly self-governing machine population asks your colony to recognize its independence from its creators.",
-    },
-    {
-        "id": "frontier-signal",
-        "civilization": "The Ember Choir",
-        "context": "A pre-spaceflight society broadcasts mathematical greetings from a system facing a natural extinction event within two generations.",
-    },
-    {
-        "id": "shared-gate",
-        "civilization": "The Nacre Navigators",
-        "context": "Nomadic aliens control the only stable gate to nearby systems and propose joint ownership rather than a usage fee.",
-    },
-]
+def load_story() -> tuple[dict[str, str], list[dict[str, str]]]:
+    """Fetch StoryBank doctrines + alien scenarios from the bridge spec.
+
+    Returns (doctrines, scenarios) where doctrines maps doctrine id → prose
+    description and scenarios is [{id, civilization, context}] — the exact
+    shapes the prompt/report build on. Raises loudly on any failure.
+    """
+    root = Path(__file__).resolve().parents[2]  # <repo>/rl/python → <repo>
+    bridge = root / "rl" / "bridge.cjs"
+    if not bridge.is_file():
+        raise RuntimeError(f"story bridge not found: {bridge}")
+    proc = subprocess.run(
+        ["node", str(bridge)],
+        input=(json.dumps({"cmd": "spec"}) + "\n").encode("utf-8"),
+        capture_output=True,
+        timeout=120,
+        cwd=root,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "story bridge failed (exit %d): %s"
+            % (proc.returncode, proc.stderr.decode("utf-8", "replace").strip())
+        )
+    reply = None
+    for line in proc.stdout.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            reply = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # skip any non-JSON noise
+    if not reply or not reply.get("ok") or not isinstance(reply.get("story"), dict):
+        raise RuntimeError("story bridge did not return a spec with a story payload")
+    story = reply["story"]
+    doctrines = {d["id"]: d["description"] for d in story.get("doctrines", [])}
+    scenarios = [
+        {
+            "id": a["scenarioId"],
+            "civilization": a["name"],
+            "context": a["premise"],
+        }
+        for a in story.get("aliens", [])
+    ]
+    if not doctrines or not scenarios:
+        raise RuntimeError("story bridge returned an empty story payload")
+    return doctrines, scenarios
+
+
+# The StoryBank, via the bridge — NOT a private copy.
+CHOICES, SCENARIOS = load_story()
 
 
 def parse_choice(text: str | None) -> tuple[str, str] | None:

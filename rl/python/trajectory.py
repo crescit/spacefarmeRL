@@ -15,6 +15,7 @@ class TrajectoryRecorder:
         self.action_interface = action_interface
         self.handle = None
         self.steps = 0
+        self._summary_written = False
 
     def reset(self, *, seed: int, options: dict[str, Any] | None = None):
         obs, info = self.env.reset(seed=seed, options=options)
@@ -51,6 +52,10 @@ class TrajectoryRecorder:
         obs, info = self.env.reset(seed=seed)
         if self.env.raw_obs != header.get("initial_observation"):
             raise AssertionError("trajectory initial observation does not replay")
+        transitions = [
+            record for record in records[1:]
+            if record.get("kind") != "episode-summary"
+        ]
         total_reward = 0.0
         terminated = truncated = False
         for transition in transitions:
@@ -125,9 +130,26 @@ class TrajectoryRecorder:
 
     def close(self) -> None:
         if self.handle:
+            self._append_summary()
             self.handle.close()
             self.handle = None
         self.env.close()
+
+    def _append_summary(self) -> None:
+        """Append the episode's narrative record (stats + testimony) as a
+        terminal non-transition line. replay_trajectory() skips it, so the
+        transition byte-stream stays replay-exact while the record survives
+        in the same file as the source of truth."""
+        if self._summary_written or self.env.raw_obs is None:
+            return
+        record = {
+            "kind": "episode-summary", "version": 1,
+            "stats": self.env.narrative_stats(),
+            "testimony": self.env.testimony(),
+        }
+        self.handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+        self.handle.flush()
+        self._summary_written = True
 
 
 def replay_trajectory(path: str | Path) -> dict[str, Any]:
@@ -135,6 +157,10 @@ def replay_trajectory(path: str | Path) -> dict[str, Any]:
     if not records or records[0].get("kind") != "space-farmer-trajectory":
         raise ValueError("not a Space Farmer trajectory")
     header, transitions = records[0], records[1:]
+    transitions = [
+        record for record in transitions
+        if record.get("kind") != "episode-summary"
+    ]
     total_reward = 0.0
     with SimBridge() as bridge:
         initial, _ = bridge.reset(header["seed"], header["horizon_days"])

@@ -144,8 +144,8 @@ class FarmState extends Schema {
     this.farms = {};
     this.orders = new ArraySchema();
     this.day = 0;
-    this.time = 360;
-    this.isDay = true;
+    this.time = 0;      // colony clock: a fresh world starts at dawn
+    this.isDay = true;  // the world owns the light — morning at day 0
     this.season = 0;   // start in spring
     this.festival = false;      // no festival on day 0
     this.festivalClaimed = false;
@@ -165,21 +165,21 @@ defineTypes(FarmState, {
   feastPeak: 'boolean'        // M3: the feast has peaked this festival day
 });
 
-// ── Friendship gift-affinity tables (mirrors NPCData.js) ──
+// ── Friendship gift-affinity tables (single source: the StoryBank) ──
+// The per-NPC loved/liked/hated gift lists are story facts — they live ONCE
+// in shared/story/npcs.js, next to the dialogue that says them aloud. This
+// room derives its table from the bank instead of mirroring it, so the gift
+// you offer, the line the NPC speaks, and the agent's tool schema can never
+// disagree about what Nova loves.
 // loved → +15, liked → +5, hated → -8, neutral → +2
-const NPC_GIFTS = {
-  nova:   { loved: 'tech-part',        liked: ['data-crystal', 'cooked-food'],  hated: ['weeds', 'junk'] },
-  luna:   { loved: 'starlight-crystal', liked: ['exotic-seed', 'rare-mineral'], hated: ['processed-food', 'plastic'] },
-  zephyr: { loved: 'exotic-seed',      liked: ['starlight-crystal', 'rare-trade-good'], hated: ['processed-food', 'official-documents'] },
-  vega:   { loved: 'space-feather',    liked: ['cooked-food', 'starlight-crystal'], hated: ['plastic', 'metal-parts'] },
-  quasar: { loved: 'rare-part',        liked: ['cooked-food', 'rare-mineral'], hated: ['flowers', 'decorative-items'] },
-  rhea:   { loved: 'cooked-food',      liked: ['crop', 'exotic-seed'],      hated: ['uncooked-food', 'alcohol'] },
-  astra:  { loved: 'data-crystal',     liked: ['rare-mineral', 'exotic-seed'], hated: ['junk', 'processed-food'] },
-  orion:  { loved: 'rare-mineral',     liked: ['crop', 'tech-part'],        hated: ['flowers', 'decorative-items'] },
-  comet:  { loved: 'rare-trade-good',  liked: ['rare-mineral', 'exotic-seed'], hated: ['crop', 'common-items'] },
-  cora:   { loved: 'data-crystal',     liked: ['tech-part', 'rare-mineral'], hated: ['flowers', 'uncooked-food'] },
-};
-const HEART_THRESHOLDS = [20, 40, 60, 80, 100];
+const NPC_DATA = require('../../shared/story/npcs.js');
+const NPC_GIFTS = Object.fromEntries(
+  Object.entries(NPC_DATA).map(([id, npc]) => [
+    id,
+    { loved: npc.lovedGift, liked: npc.likedGifts, hated: npc.hatedGifts },
+  ]),
+);
+const HEART_THRESHOLDS = [20, 40, 60, 80, 100]; // friendship points at which heart events fire
 
 // ── Tool upgrades (hoe tiers) ──
 // Higher tiers let you farm more efficiently (client reads tier for energy cost).
@@ -198,13 +198,22 @@ const TOOLS = {
 const ENERGY_COSTS = { till: 5, plant: 5, water: 5, harvest: 5, fish: 10, mine: 5 };
 
 // ── Stamina (a skill you build, not a tax you pay). Work costs stamina;
-//    resting/living overnight recovers STAmina_REST_RATE toward the ceiling;
+//    resting/living overnight recovers STAMINA_REST_RATE toward the ceiling;
 //    and doing real work conditions the body — staminaMax creeps up over
 //    days of honest labor, capped at STAMINA_MAX. Tool tiers are technique:
 //    a better hoe spends less stamina per action. ──
 const STAMINA_REST_RATE = 30;    // how much rest returns each night
 const STAMINA_TRAIN_RATE = 2;    // ceiling grows +2 after a day with any real work
 const STAMINA_MAX = 150;         // how far conditioning can push the ceiling
+
+// ── The colony clock (server-authoritative) ──
+// Every meaningful action spends a moment of the day's light. When the clock
+// passes DUSK the world falls dark (isDay=false) until you rest; advance_day
+// resets to dawn. The same clock answers the browser's night visuals, night
+// fishing, and the RL env's obs.isDay — one light for humans and agents.
+const DAY_UNITS = 880;           // one full day of light in clock units
+const DUSK = 520;                // clock ≥ DUSK → night falls
+const CLOCK_TICK = 22;           // clock units spent per meaningful action
 
 // ── The Kitchen (M4): named recipes instead of one generic "cooked-food" ──
 // Each recipe = 2-3 real ingredients the player can actually gather (6 crops,
@@ -432,7 +441,7 @@ const QUEST_ORDER = [
 // ── Room ──
 
 // Deterministic PRNG (mulberry32). Live play keeps Math.random; the RL env
-// (rl/env_core.mjs) injects a seeded one via room.setRng(seed) so every
+// (rl/env_core.cjs) injects a seeded one via room.setRng(seed) so every
 // stochastic seam — fishing pool, vein hardness, ore roll, festival NPC —
 // replays identically episode to episode.
 // getState/setState expose the internal stream position so a mid-episode
@@ -492,8 +501,17 @@ class FarmRoom extends Room {
     this.onMessage('water', (client, data) => this.onWater(client, data));
     this.onMessage('harvest', (client, data) => this.onHarvest(client, data));
     this.onMessage('till', (client, data) => this.onTill(client, data));
-    this.onMessage('sell', (client, data) => this.onSell(client, data));
+    this.onMessage('sell', (client, data) => {
+      const r = this.onSell(client, data);
+      if (client && client.send) client.send('sell', r);   // sell needs a reply (GE/ranch kiosks await it)
+    });
     this.onMessage('order', (client, data) => this.onOrder(client, data));
+    // ── Supply Depot — the colony shop. Every item the client advertises
+    //    must be purchasable here, or the shelf is a lie. ──
+    this.onMessage('buy', (client, data) => {
+      const r = this.onShopBuy(client, data);
+      if (client && client.send) client.send('buy', r);
+    });
     // reply-capable handlers: colyseus 0.17 no longer auto-replies return values,
     // so explicitly send the result back to the caller via client.send(type, result).
     this.onMessage('gift', (client, data) => {
@@ -867,7 +885,22 @@ class FarmRoom extends Room {
     return { ok: true, spent: cost, energy: player.energy };
   }
 
+  // ── Colony clock: every meaningful action spends a moment of the day's
+  //    light. Night falls once the clock passes DUSK and holds until the
+  //    next rest (advance_day) resets to dawn. Deterministic — depends only
+  //    on the action sequence, so replays/checkpoints stay byte-identical. ──
+  _tickClock() {
+    const st = this.state;
+    st.time = Math.min(DAY_UNITS, (st.time || 0) + CLOCK_TICK);
+    if (st.time >= DUSK) st.isDay = false;
+  }
+  _resetClock() {
+    this.state.time = 0;
+    this.state.isDay = true;
+  }
+
   onPlant(client, data) {
+    this._tickClock();  // a moment of the day passes
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
     const player = this.state.players.get(client.sessionId);
@@ -884,6 +917,7 @@ class FarmRoom extends Room {
   }
 
   onWater(client, data) {
+    this._tickClock();  // a moment of the day passes
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
     const player = this.state.players.get(client.sessionId);
@@ -896,6 +930,7 @@ class FarmRoom extends Room {
   }
 
   onHarvest(client, data) {
+    this._tickClock();  // a moment of the day passes
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
     if (!(tile && tile.type === 'mature')) return { ok: false, reason: 'not-mature' };
@@ -923,6 +958,7 @@ class FarmRoom extends Room {
   }
 
   onTill(client, data) {
+    this._tickClock();  // a moment of the day passes
     const farm = this.state.farms.get(client.sessionId);
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
     if (!(tile && tile.type === 'empty')) return { ok: false, reason: 'bad-tile' };
@@ -934,11 +970,16 @@ class FarmRoom extends Room {
   }
 
   onSell(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
+    // Sellable prices. ('nebula-cream' was a phantom item — it appears in no
+    // crop/ITEMS/SALEABLE table and no quest — so it's gone.) Note the farm's
+    // harvest sink is CROP_INFO.cr (see onHarvest); the crop rows here are
+    // the historical sell prices, retained pending a product call on harvest.
     const prices = {
       'space-wheat': 20, 'star-berry': 35, 'moon-melon': 50,
-      'plasma-tomato': 40, 'nebula-cream': 60, 'stardust-crystal': 100,
+      'plasma-tomato': 40, 'stardust-crystal': 100,
       'nebulite-ore': 75, 'egg': 25, 'milk': 30, 'wool': 45,
       'moonfish': 25, 'stardust-salmon': 45, 'comet-trout': 65, 'nebula-marlin': 120,
       'asteroid-dust': 40, 'nickel-iron': 75, 'silicon-carbide': 110, 'void-diamond': 250,
@@ -959,7 +1000,33 @@ class FarmRoom extends Room {
     return { ok: true, item: data.item, qty, credits: price * qty, balance: player.credits };
   }
 
+  // ── Supply Depot: buy items with credits. The shop's shelf is honest — the
+  //    client advertises exactly these items and prices; economy stays server-side.
+  onShopBuy(client, data) {
+    this._tickClock();  // a moment of the day passes
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return { ok: false, reason: 'no-player' };
+    const SHOP_PRICES = {
+      'seeds': 5,                  // the progression unlocker — the farm needs seeds
+      'stardust-crystal': 100,
+      'tech-part': 40,
+      'cooked-food': 40,
+    };
+    const item = data && data.item;
+    const price = SHOP_PRICES[item];
+    if (!price) return { ok: false, reason: 'not-for-sale', item: item || null };
+    const qty = Math.max(1, Math.floor((data && data.quantity) || 1));
+    const cost = price * qty;
+    if (player.credits < cost) return { ok: false, reason: 'not-enough-credits', need: cost, balance: player.credits };
+    player.credits -= cost;
+    player.inventory.set(item, (player.inventory.get(item) || 0) + qty);
+    this._ledgerAdd(client.sessionId, { spent: cost });
+    this.questEvent(client, { kind: 'buy', amount: cost });
+    return { ok: true, item, qty, spent: cost, balance: player.credits };
+  }
+
   onOrder(client, data) {
+    this._tickClock();  // a moment of the day passes
     const order = new GrandExchangeOrder(data.item, data.quantity, data.price, data.type, client.sessionId);
     this.state.orders.push(order);
     this.matchOrders();
@@ -991,7 +1058,8 @@ class FarmRoom extends Room {
   }
 
   // ── Friendship engine (Harvest Moon-style) ──
-  // Gift affinity tables — mirrors NPCData.js. Returns a tier + friendship delta.
+  // Gift affinity tables come from the StoryBank-derived NPC_GIFTS above (the
+  // same loved/liked/hated lists the dialogue and agent schemas read).
   //   loved item  → +15   (their favorite)
   //   liked item  → +5
   //   hated item  → -8    (they actively dislike it)
@@ -1009,14 +1077,14 @@ class FarmRoom extends Room {
   heartEvent(player, npcId) {
     const cv = player.friendships.get(npcId) || 0;
     const fired = player.heartEvents.get(npcId) || 0;
-    const THRESHOLDS = [20, 40, 60, 80, 100];
-    for (const th of THRESHOLDS) {
+    for (const th of HEART_THRESHOLDS) {
       if (cv >= th && fired < th) { player.heartEvents.set(npcId, th); return th; }
     }
     return 0;
   }
 
   onGift(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const npcId = data.npc, item = data.item;
@@ -1045,6 +1113,7 @@ class FarmRoom extends Room {
   }
 
   onTalk(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const npcId = data.npc;
@@ -1063,6 +1132,7 @@ class FarmRoom extends Room {
 
   // Marriage — requires friendship >= 80 and a marriage-candidate NPC.
   onPropose(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const npcId = data.npc;
@@ -1080,6 +1150,7 @@ class FarmRoom extends Room {
 
   onAdvanceDay(client) {
     this.state.day += 1;
+    this._resetClock();   // resting carries you through the dark to a fresh dawn
     const cal = this._cal();   // calendar service — the ONLY source for this math
     // Seasons come from the calendar service: DAYS_PER_SEASON (default 30) per
     // season, a full year = 4 seasons (default 120 days).
@@ -1121,7 +1192,7 @@ class FarmRoom extends Room {
     });
     this.state.players.forEach((p) => {
       if (!p) return;
-      // Stamina, not a tax. Resting returns STAmina_REST_RATE toward your
+      // Stamina, not a tax. Resting returns STAMINA_REST_RATE toward your
       // ceiling — and a day of real work conditions the body, so the ceiling
       // (staminaMax) creeps upward like a skill learned under load.
       if ((p.todayWork || 0) > 0) {
@@ -1190,6 +1261,7 @@ class FarmRoom extends Room {
 
   // ── Livestock ──
   onBuyAnimal(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const species = data.species, qty = data.quantity || 1;
@@ -1206,6 +1278,7 @@ class FarmRoom extends Room {
   }
 
   onFeedAnimal(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const species = data.species;
@@ -1220,6 +1293,7 @@ class FarmRoom extends Room {
   // ── Fishing (minigame): cast at the shore, catch fish for credits ──
   // Deterministic-ish catch table; costs a little energy. Daily luck capped.
   onFish(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const gate = this._spendEnergy(player, 'fish');
@@ -1246,6 +1320,7 @@ class FarmRoom extends Room {
   //    Harder veins take MORE swings to break and yield better ore. Once a
   //    vein breaks it resets, so you keep picking at the rock. ──
   onMine(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const gate = this._spendEnergy(player, 'mine');
@@ -1285,6 +1360,7 @@ class FarmRoom extends Room {
   //      kept so the old button (and verify_mechanics) keep working.
   // Both fire a 'cook' quest event; the named one carries {dish, recipe}.
   onCook(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const inv = player.inventory;
@@ -1326,6 +1402,7 @@ class FarmRoom extends Room {
 
   // ── Storage chest (at home): keep harvests safe & organized ──
   onDeposit(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const item = data.item;
@@ -1339,6 +1416,7 @@ class FarmRoom extends Room {
   }
 
   onWithdraw(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const item = data.item;
@@ -1353,6 +1431,7 @@ class FarmRoom extends Room {
 
   // ── Tool upgrade: pay credits to improve your hoe tier ──
   onUpgradeTool(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     const current = player.tool || 'base';
@@ -1368,6 +1447,7 @@ class FarmRoom extends Room {
 
   // ── Seasonal festival claim: attend once per festival for rewards ──
   onClaimFestival(client, data) {
+    this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
     if (!this.state.festival) return { ok: false, reason: 'no-festival-today' };

@@ -3,7 +3,7 @@
 
 console.log = (...args) => console.error(...args);
 const readline = require('node:readline');
-const { FarmEnv, ITEMS, ACTION_TYPES, TOOLS, SEASONS, DAYS_PER_SEASON, NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS } = require('./env_core.cjs');
+const { FarmEnv, ITEMS, ACTION_TYPES, TOOLS, SEASONS, DAYS_PER_SEASON, NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS, ALIENS, CONTACT_DOCTRINES } = require('./env_core.cjs');
 let env = null;
 const reply = (payload) => process.stdout.write(JSON.stringify({ ok: true, ...payload }) + '\n');
 const fail = (error) => process.stdout.write(JSON.stringify({
@@ -21,6 +21,13 @@ async function handle(command) {
           seasons: SEASONS, seasonDays: DAYS_PER_SEASON,
           npcs: NPC_IDS, crops: CROPS, species: SPECIES,
           saleable: SALEABLE, fishSpots: FISH_SPOTS,
+        },
+        // StoryBank facts: the same first-contact scenarios + contact doctrines
+        // the browser renders (shared/story/aliens.js). Evaluators consume
+        // these instead of keeping a private copy — no drift by construction.
+        story: {
+          aliens: ALIENS.map(({ id, scenarioId, name, premise }) => ({ id, scenarioId, name, premise })),
+          doctrines: CONTACT_DOCTRINES.map(({ id, label, description }) => ({ id, label, description })),
         },
         narrative: true,
       });
@@ -46,6 +53,12 @@ async function handle(command) {
       if (!env) throw new Error('reset must be called before journal');
       if (command.entry != null) return reply({ reply: env.writeJournal(command.entry) });
       return reply({ journal: env.journalText() });
+    case 'stats':
+      if (!env) throw new Error('reset must be called before stats');
+      return reply({ stats: env.narrativeStats() });
+    case 'testimony':
+      if (!env) throw new Error('reset must be called before testimony');
+      return reply({ testimony: env.testimony() });
     case 'step':
       if (!env) throw new Error('reset must be called before step');
       return reply(env.step(command.action));
