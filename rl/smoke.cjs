@@ -31,19 +31,25 @@ const EPISODES = Number(process.argv[2] || 4);
 const HORIZON = 12;
 const fail = (msg) => { console.error(`FAIL: ${msg}`); process.exit(1); };
 
-// ── 1. scripted oracle: plant → water ×maturity → harvest actually pays ──
+// ── 1. scripted oracle: equip → plant → water ×maturity → harvest pays ──
 {
   const env = new FarmEnv({ horizonDays: HORIZON });
   env.reset({ seed: 1 });
   const cash0 = env.player().credits;
   const MATURITY = env.calendar.maturityDays();   // one source of truth (shared/calendar.js)
+  env.step({ type: 'equip', tool: 'hoe' });
   env.step({ type: 'till', tileX: 0, tileY: 0 });
   env.step({ type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' });
+  env.step({ type: 'equip', tool: 'watering' });
   env.step({ type: 'water', tileX: 0, tileY: 0 });
   for (let d = 0; d < MATURITY; d++) {
     env.step({ type: 'advance_day' });
-    if (env.farm().tiles[0].type !== 'mature') env.step({ type: 'water', tileX: 0, tileY: 0 });
+    if (env.farm().tiles[0].type !== 'mature') {
+      if ((env.player().waterLevel || 0) < 20) env.step({ type: 'fill_water' });
+      env.step({ type: 'water', tileX: 0, tileY: 0 });
+    }
   }
+  env.step({ type: 'equip', tool: '' });          // hands for the harvest
   const h = env.step({ type: 'harvest', tileX: 0, tileY: 0 });
   if (!h.info.ok) { env.close(); fail('scripted harvest failed — env contract changed?'); }
   // the engine pays crops at harvest time (verify_rl_env's hand-computed
@@ -68,6 +74,8 @@ for (let ep = 0; ep < EPISODES; ep++) {
     if (a.type === 'gift') Object.assign(a, { npc: 'rhea', item: 'weeds' });
     if (a.type === 'talk') Object.assign(a, { npc: 'rhea' });
     if (a.type === 'buy_animal') Object.assign(a, { species: 'chicken' });
+    if (a.type === 'equip') Object.assign(a, { tool: ['', 'hoe', 'watering', 'pickaxe', 'rod'][Math.floor(rng() * 5)] });
+    if (a.type === 'fill_water') Object.assign(a, {});
     if (['till', 'plant', 'water', 'harvest'].includes(a.type)) Object.assign(a, { tileX: Math.floor(rng() * 8), tileY: Math.floor(rng() * 8), crop: 'space-wheat' });
     if (a.type === 'fish') Object.assign(a, { spot: 'stardust' });
     seen.add(a.type);
@@ -86,11 +94,16 @@ console.log('coverage: all', ACTION_TYPES.length, 'action types exercised ✓');
 
 // ── 4. determinism: identical seed + actions → identical trajectory ──
 const script = [
+  { type: 'equip', tool: 'hoe' },
   { type: 'till', tileX: 2, tileY: 3 },
   { type: 'plant', tileX: 2, tileY: 3, crop: 'star-berry' },
+  { type: 'equip', tool: 'watering' },
   { type: 'water', tileX: 2, tileY: 3 },
   { type: 'advance_day' }, { type: 'water', tileX: 2, tileY: 3 },
+  { type: 'fill_water' },
+  { type: 'equip', tool: 'pickaxe' },
   { type: 'mine' }, { type: 'mine' }, { type: 'mine' },
+  { type: 'equip', tool: 'rod' },
   { type: 'fish', spot: 'stardust' }, { type: 'fish', spot: 'copper' },
   { type: 'advance_day' },
 ];

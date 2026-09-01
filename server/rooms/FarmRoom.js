@@ -699,7 +699,9 @@ class FarmRoom extends Room {
     fill(player.animalsFedDay, data.animalsFedDay);
     fill(player.tools, data.tools);
     player.waterLevel = (typeof data.waterLevel === 'number') ? data.waterLevel : WATER_TANK_MAX;
-    this._grantStarterTools(player);   // old saves: migrate to own the basic kit
+    // old saves: migrate to own the basic kit (backfill only — keep the
+    // restored equipped tool and tank level exactly as they were saved)
+    this._grantStarterTools(player, { fresh: false });
     player.mineHp = data.mineHp || 0; player.mineMax = data.mineMax || 0;
     player.staminaMax = data.staminaMax || 100;
     player.todayWork = data.todayWork || 0;
@@ -952,11 +954,15 @@ class FarmRoom extends Room {
 
   // Every new farmer (and NG+ cycle) owns the basic kit; old saves get it
   // migrated in _applySave. Tools are upgrades, not purchases.
-  _grantStarterTools(p) {
+  // opts.fresh=false (save-restore path) only backfills missing tools and never
+  // stomps the restored equipped tool or tank level.
+  _grantStarterTools(p, opts = {}) {
     if (!p.tools) return;
     for (const t of TOOL_ORDER) if (!p.tools.get(t)) p.tools.set(t, 'base');
-    p.equipped = '';
-    p.waterLevel = WATER_TANK_MAX;
+    if (opts.fresh !== false) {
+      p.equipped = '';
+      p.waterLevel = WATER_TANK_MAX;
+    }
   }
 
   // ── Equip: put a tool in hand ('' = bare hands → harvest/interact). ──

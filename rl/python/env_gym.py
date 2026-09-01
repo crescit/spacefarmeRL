@@ -21,9 +21,13 @@ BRIDGE_ENTRY = REPO_ROOT / "rl" / "bridge.cjs"
 ACTION_LABELS = (
     "till", "plant", "water", "harvest", "sell", "fish", "mine", "feed",
     "buy_animal", "upgrade_tool", "gift", "talk", "claim_festival",
-    "advance_day",
+    "advance_day", "equip", "fill_water",
 )
 ANIMALS = ("chicken", "cow", "sheep")
+TOOLS_ORDER = ("", "hoe", "watering", "pickaxe", "rod")
+TIER_VALUE = {"base": 0, "iron": 1, "gold": 2}
+TOOL_IDS = ("hoe", "watering", "pickaxe", "rod")
+WATER_USE_COST = 20
 FRIENDS = ("luna", "zephyr", "vega", "quasar", "rhea", "astra", "orion", "comet")
 SALEABLE = (
     "space-wheat", "star-berry", "moon-melon", "plasma-tomato",
@@ -137,6 +141,14 @@ def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
     ]
     goal = obs.get("goalProgress")
     values.append(-1.0 if goal is None else float(goal))
+    # tool kit: equipped one-hot + per-tool tier + can tank
+    equipped = obs.get("equipped", "") or ""
+    values.extend(1.0 if equipped == tool_name else 0.0 for tool_name in TOOLS_ORDER)
+    tool_tiers = obs.get("toolTiers") or {}
+    for tool_name in TOOL_IDS:
+        tier = TIER_VALUE.get(str(tool_tiers.get(tool_name, "base")), 0)
+        values.append(float(tier) / 2.0)
+    values.append(float(obs.get("waterLevel", 100)) / 100.0)
     values.extend(float(v) / 99.0 for v in list(obs.get("inventory") or [])[:item_count])
     values.extend(float(v) / 4.0 for v in list(obs.get("farmState") or [])[:64])
     values.extend(float(v) / 6.0 for v in list(obs.get("farmCrop") or [])[:64])
@@ -174,6 +186,8 @@ class MacroActionCodec:
 
     def decode(self, label: int, obs: dict[str, Any]) -> dict[str, Any]:
         action = ACTION_LABELS[int(label)]
+        if action == "equip":
+            return {"type": action, "tool": self._pick_tool(obs)}
         if action in {"till", "plant", "water", "harvest"}:
             required = {"till": {0}, "plant": {1}, "water": {2, 3}, "harvest": {4}}[action]
             x, y = self._tile(obs, required, require_unwatered=action == "water")
@@ -204,19 +218,50 @@ class MacroActionCodec:
             return {"type": action, "npc": "rhea"}
         return {"type": action}
 
+    @staticmethod
+    def _pick_tool(obs: dict[str, Any]) -> str:
+        """Deterministic tool choice the macro layer uses for the equip action.
+
+        Mirrors the field logic: harvest with hands when crops are ripe, water
+        with the can when young crops are thirsty, till with the hoe when soil
+        is empty, otherwise mine with the pickaxe.
+        """
+        equipped = obs.get("equipped", "") or ""
+        states = [int(v) for v in (obs.get("farmState") or [])]
+        watered = list(obs.get("farmWatered") or [0] * len(states))
+        grid = set(states)
+        if 4 in grid and equipped != "":
+            return ""                                   # ripe crops → bare hands to harvest
+        thirsty = any(int(s) in {2, 3} and not bool(w) for s, w in zip(states, watered))
+        if thirsty and float(obs.get("waterLevel", 100)) >= WATER_USE_COST and equipped != "watering":
+            return "watering"
+        if 0 in grid and equipped != "hoe":
+            return "hoe"
+        if int(obs.get("mineHp", 0)) > 0 and equipped != "pickaxe":
+            return "pickaxe"
+        if equipped == "":
+            return "pickaxe"
+        return equipped                                # already holding the right tool
+
     def mask(self, obs: dict[str, Any]) -> np.ndarray:
         states = [int(v) for v in (obs.get("farmState") or [])]
         watered = list(obs.get("farmWatered") or [0] * len(states))
         grid = set(states)
         energy = float(obs.get("energy", 0))
+        equipped = str(obs.get("equipped", "") or "")
+        tank = float(obs.get("waterLevel", 100))
         mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
-        mask[0] = int(0 in grid and energy > 0)
+        # farm work is tool-gated: mask each craft off until its tool is in hand
+        mask[0] = int(0 in grid and energy > 0 and equipped == "hoe")
         mask[1] = int(1 in grid and self._count(obs, "seeds") > 0 and energy > 0)
-        mask[2] = int(any(s in {2, 3} and not bool(watered[i]) for i, s in enumerate(states)) and energy > 0)
-        mask[3] = int(4 in grid)
+        mask[2] = int(
+            any(s in {2, 3} and not bool(watered[i]) for i, s in enumerate(states))
+            and energy > 0 and equipped == "watering" and tank >= WATER_USE_COST
+        )
+        mask[3] = int(4 in grid and equipped == "")
         mask[4] = int(any(self._count(obs, name) > 0 for name in SALEABLE))
-        mask[5] = int(energy >= 10)
-        mask[6] = int(energy >= 5)
+        mask[5] = int(energy >= 10 and equipped == "rod")
+        mask[6] = int(energy >= 5 and equipped == "pickaxe")
         counts = list(obs.get("animals") or [0] * len(ANIMALS))
         fed = list(obs.get("animalsFedToday") or [0] * len(ANIMALS))
         mask[7] = int(any(
@@ -230,6 +275,8 @@ class MacroActionCodec:
         mask[11] = int(not bool(obs.get("talkedRheaToday", 0)))
         mask[12] = int(bool(obs.get("festival")) and not bool(obs.get("festivalClaimed")))
         mask[13] = 1
+        mask[14] = 1   # equip is always legal (re-tooling is never wasteful)
+        mask[15] = 1   # fill_water is always legal (it only no-ops when full)
         return mask
 
 
@@ -255,7 +302,8 @@ class FarmGymEnv(gym.Env):
         self.horizon_days = int(horizon_days)
         self.codec = MacroActionCodec(self.bridge.spec["items"])
         self.action_space = spaces.Discrete(len(ACTION_LABELS))
-        size = len(SCALARS) + 1 + len(self.bridge.spec["items"]) + 64 + 64 + 64 + 3 + 3 + len(FRIENDS)
+        size = (len(SCALARS) + 1 + len(TOOLS_ORDER) + len(TOOL_IDS) + 1
+                + len(self.bridge.spec["items"]) + 64 + 64 + 64 + 3 + 3 + len(FRIENDS))
         self.observation_space = spaces.Box(low=-1.0, high=100.0, shape=(size,), dtype=np.float32)
         self.raw_obs: dict[str, Any] | None = None
 

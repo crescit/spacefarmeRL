@@ -11,7 +11,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-const { FarmRoom, QUESTS } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
+const { FarmRoom, QUESTS, ENERGY_COSTS, TOOL_DEFS, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
 // The calendar is a SERVICE with ONE implementation (shared/calendar.js). This
 // env never re-implements season math, crop maturity, growth pacing, or
@@ -44,7 +44,9 @@ const CROP_ID = { '': 0, 'space-wheat': 1, 'star-berry': 2, 'moon-melon': 3, 'pl
 const TOOL_ID = { base: 0, iron: 1, silver: 2, gold: 3, stardust: 4 };
 const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 
-const ACTION_TYPES = ['till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
+const ACTION_TYPES = ['equip', 'fill_water', 'till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
+const TOOL_IDS = ['', 'hoe', 'watering', 'pickaxe', 'rod'];
+const TIER_NUM = { base: 0, iron: 1, gold: 2 };
 
 // ── Story clock: the calendar is the story's heartbeat. Season/festival math
 // lives in shared/calendar.js and the world's VOICE — the prose this env
@@ -76,6 +78,25 @@ const FISH_SPOTS = ['stardust'];
 
 // ── Single-source tool schema (world-voice; consumed by OpenAI tools, MCP, and eval) ──
 const TOOLS = [
+  {
+    name: 'equip',
+    description: 'Put a tool in hand before its craft: hoe (till), watering can (water), pickaxe (mine), fishing rod (fish), or empty hands (harvest crops and talk to townsfolk). Farm work is tool-gated — equip first, then use the action.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        tool: { type: 'string', enum: TOOL_IDS, description: "Tool id to equip. Empty string '' is bare hands." },
+      },
+      required: ['tool'],
+    },
+  },
+  {
+    name: 'fill_water',
+    description: 'Refill the watering can at a station (the stardust shore tap, or the ship greenhouse tap). The can is a real container — it drains as you water and must be refilled before further watering.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {},
+    },
+  },
   {
     name: 'till',
     description: 'Break open the ground on an empty farm tile so it can hold a seed. The soil here remembers Grandpa\u2019s plow.',
@@ -378,6 +399,9 @@ class FarmEnv {
     const animalsFedToday = ANIMAL_TYPES.map(
       (species) => p.animalsFedDay.get(species) === st.day ? 1 : 0);
     const goal = this.task && this.task.goal ? this.task.goal.progress(p, st) : null;
+    // tool kit (server-authoritative): equipped tool, tier per tool, tank
+    const toolTiers = {};
+    if (p.tools) p.tools.forEach((v, k) => { toolTiers[k] = v; });
     return {
       credits: p.credits, energy: p.energy, staminaMax: p.staminaMax || 100,
       day: st.day, season: st.season,
@@ -386,6 +410,7 @@ class FarmEnv {
       talkedRheaToday: p.lastTalkDay.get('rhea') === st.day ? 1 : 0,
       isDay: st.isDay ? 1 : 0, festival: st.festival ? 1 : 0, festivalClaimed: st.festivalClaimed ? 1 : 0,
       tool: TOOL_ID[p.tool] ?? 0, married: p.marriedTo ? 1 : 0,
+      equipped: p.equipped || '', toolTiers, waterLevel: p.waterLevel ?? WATER_TANK_MAX,
       questsCurrent: p.quests.current, questsCompleted: p.quests.completed.length, arcDone: p.quests.arcDone ? 1 : 0,
       inventory: inv, farmState: grid, farmCrop: crops, farmWatered: watered,
       friendships: Object.fromEntries(p.friendships),
@@ -404,10 +429,21 @@ class FarmEnv {
 
     const type = action && action.type;
     switch (type) {
+      case 'equip': {
+        // tool-gated world: agents must put the right tool in hand first.
+        const res = room.onEquip(client, action);
+        ok = !!(res && res.ok);
+        break;
+      }
+      case 'fill_water': {
+        const res = room.onFillWater(client);
+        ok = !!(res && res.ok);
+        break;
+      }
       case 'till': {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
-        ok = !!(t && t.type === 'empty') && p0.energy >= room._energyCost('till', p0.tool);
+        ok = !!(t && t.type === 'empty') && p0.equipped === 'hoe' && p0.energy >= room._energyCost('till', p0);
         if (ok) room.onTill(client, action);
         break;
       }
@@ -415,7 +451,7 @@ class FarmEnv {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
         const seeds = p0.inventory.get('seeds') || 0;
-        ok = !!(t && t.type === 'tilled' && seeds > 0) && p0.energy >= room._energyCost('plant', p0.tool);
+        ok = !!(t && t.type === 'tilled' && seeds > 0) && p0.energy >= room._energyCost('plant', p0);
         if (ok) room.onPlant(client, action);   // onPlant itself deducts the seed + energy
         break;
       }
@@ -423,7 +459,8 @@ class FarmEnv {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
         const wasWaterable = t && !t.watered && (t.type === 'seeded' || t.type === 'growing');
-        ok = !!wasWaterable && p0.energy >= room._energyCost('water', p0.tool);
+        ok = !!wasWaterable && p0.equipped === 'watering' && (p0.waterLevel || 0) >= WATER_USE_COST
+          && p0.energy >= room._energyCost('water', p0);
         if (ok) { room.onWater(client, action); r += this.w.watered; }
         break;
       }
@@ -431,13 +468,23 @@ class FarmEnv {
         const f = this.farm();
         const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
         const wasMature = t && t.type === 'mature';
-        ok = !!wasMature && p0.energy >= room._energyCost('harvest', p0.tool);
+        ok = !!wasMature && p0.equipped === '' && p0.energy >= room._energyCost('harvest', p0);
         if (ok) { room.onHarvest(client, action); r += this.w.harvest; }
         break;
       }
       case 'sell':         { const res = room.onSell(client, action); ok = !!(res && res.ok); break; }
-      case 'fish':         { const res = room.onFish(client, action); ok = !!(res && res.ok); break; }
-      case 'mine':         { const res = room.onMine(client, action); ok = !!(res && res.ok); break; }
+      case 'fish': {
+        // fishing requires the rod equipped
+        const res = p0.equipped === 'rod' ? room.onFish(client, action) : { ok: false, reason: 'need-tool' };
+        ok = !!(res && res.ok);
+        break;
+      }
+      case 'mine': {
+        // mining requires the pickaxe equipped
+        const res = p0.equipped === 'pickaxe' ? room.onMine(client, action) : { ok: false, reason: 'need-tool' };
+        ok = !!(res && res.ok);
+        break;
+      }
       case 'feed':         { const res = room.onFeedAnimal(client, action); ok = !!(res && res.ok); break; }
       case 'buy_animal':   { const res = room.onBuyAnimal(client, action); ok = !!(res && res.ok); break; }
       case 'upgrade_tool': { const res = room.onUpgradeTool(client, action); ok = !!(res && res.ok); break; }
@@ -523,6 +570,19 @@ class FarmEnv {
     const place = x != null && y != null ? ` at (${x},${y})` : '';
     const cr = Math.round((after.credits - before.credits) * 100) / 100;
     switch (t) {
+      case 'equip': {
+        const tool = (action && action.tool) ? action.tool : '';
+        const label = tool ? ((TOOL_DEFS[tool] || {}).label || tool) : 'bare hands';
+        return ok
+          ? (tool
+            ? `You take up the ${label}${tool === 'watering' ? '; the can hangs cool at your hip, tank and all' : ''}.`
+            : `You set your tool down — your hands are free for harvesting and talk.`)
+          : 'Your hand stays as it is — that is not in your kit.';
+      }
+      case 'fill_water':
+        return ok
+          ? 'The tap glugs — the can is full of stardust dew again.'
+          : 'The can is already full — the tap will not take more.';
       case 'till':
         return ok
           ? `You turn the ground${place}; the soil sighs open.`
