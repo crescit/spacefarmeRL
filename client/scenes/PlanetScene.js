@@ -1643,6 +1643,33 @@ rations, and your name on the manifest.
   moveDir(dir) { this.touchDir = dir; }
   stopMove() { this.touchDir = null; }
 
+  // unified action path — the touchbar A-button mirrors SPACE/E on desktop:
+  // advance/close dialogue and cutscenes, dismiss panels, or interact with the
+  // world. Sharing one method keeps mobile and keyboard play identical.
+  _pressAction() {
+    if (this.inAlienContact) {
+      if (this.contactPhase === 'choice') return;   // pick with the 1-5 keys / future bar
+      if (!this._diaDone) this._finishTyping();
+      else this.advanceAlienCutscene();
+      return;
+    }
+    if (this.eventQueue) {
+      if (!this._diaDone) this._finishTyping();
+      else this.advanceEvent();
+      return;
+    }
+    if (this.inDialogue) {
+      if (!this._diaDone) this._finishTyping();
+      else this.closeAllPanels();
+      return;
+    }
+    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes) {
+      this.closeAllPanels();
+      return;
+    }
+    this.handleInteract();
+  }
+
   update(time) {
     const { width, height } = this.game.config;   // viewport in world coords (meteor/cloud spawn)
     // Task 4: lamp/door light-pool flicker — each pool wobbles on its own

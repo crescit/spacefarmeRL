@@ -10,6 +10,7 @@ import { AudioSystem } from '../systems/AudioSystem.js';
 const TILE_SIZE = 32;  // painterly colony scale (matches world)
 const MAP_W = 60;
 const MAP_H = 40;
+const INTERACT_RANGE = 2.1;  // how close you must be for SPACE to act on a thing
 
 // Ship layout as tile map
 const SHIP_MAP = [
@@ -406,13 +407,12 @@ class SpaceshipScene extends Phaser.Scene {
       if (this.mapData[tryYidx * MAP_W + tileX] !== 1) this.playerSpr.y = tryY;
     }
 
-    // ── Interact / dialogue advance ──
-    // SPACE/E dismisses an open dialogue first; a second press interacts.
-    const pressed = Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey);
-    if (pressed && this.dialog.visible) {
-      this.dismissDialogue();
-    } else if (pressed) {
-      this.handleInteract();
+    // ── Interact / dialogue advance (shared with the touchbar A-button) ──
+    // SPACE acts first on whatever you're next to; otherwise it dismisses an
+    // open dialogue; otherwise it coaches you to walk closer. The action never
+    // gets swallowed by an open dialogue box.
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
+      this._pressAction();
     }
 
     // ── Send player position to server ──
@@ -492,7 +492,7 @@ class SpaceshipScene extends Phaser.Scene {
   handleInteract() {
     const px = this.playerSpr.x / TILE_SIZE;
     const py = this.playerSpr.y / TILE_SIZE;
-    const range = 1.5;
+    const range = INTERACT_RANGE;
 
     // Check proximity to interactables
     if (this.dist(px, py, this.cryoPod.x, this.cryoPod.y) < range && !this.cryoPod.used) {
@@ -506,7 +506,7 @@ class SpaceshipScene extends Phaser.Scene {
     }
 
     // Cryo pod / bunk — "go to bed" to sleep and advance the day (Harvest Moon style)
-    if (this.dist(px, py, 22, 4) < 1.8) {
+    if (this.dist(px, py, 22, 4) < range) {
       this.goToBed();
       return;
     }
@@ -545,15 +545,68 @@ class SpaceshipScene extends Phaser.Scene {
       }
       return;
     }
+  }
 
-    // Generic NPC dialogue — doubled coords for 60x40 map
-    if (py < 10 && !this.cryoPod.used) {
-      this.showDialogue(NPC_DIALOGUES.cora_intro.text);
-    } else if (px > 36 && py < 16) {
-      this.showDialogue(NPC_DIALOGUES.bridge_console.text);
-    } else if (py > 20 && px > 24 && px < 36) {
-      this.showDialogue(NPC_DIALOGUES.greenhouse_tutorial.text);
+  // one shared action path for SPACE/E (desktop) and the touchbar A-button
+  // (mobile): act on a nearby thing first, else dismiss dialogue, else coach
+  _pressAction() {
+    if (this._nearInteractable()) {
+      this.handleInteract();
+    } else if (this.dialog.visible) {
+      this.dismissDialogue();
+    } else {
+      this._cueStandCloser();
     }
+  }
+
+  // true when the player stands close enough to act on any interactable —
+  // the same single range the GO HERE marker uses before it flashes "PRESS SPACE"
+  _nearInteractable() {
+    const px = this.playerSpr.x / TILE_SIZE;
+    const py = this.playerSpr.y / TILE_SIZE;
+    if (this.dist(px, py, this.cryoPod.x, this.cryoPod.y) < INTERACT_RANGE && !this.cryoPod.used) return true;
+    if (this.dist(px, py, 22, 4) < INTERACT_RANGE) return true;
+    if (this.dist(px, py, this.bridgeConsole.x, this.bridgeConsole.y) < INTERACT_RANGE) return true;
+    for (const p of this.planters) {
+      if (this.dist(px, py, p.x, p.y) < INTERACT_RANGE) return true;
+    }
+    if (this.dist(px, py, this.airlock.x, this.airlock.y) < INTERACT_RANGE) return true;
+    return false;
+  }
+
+  // pressed SPACE with nothing in range: coach the player toward the nearest
+  // interactable instead of silently doing nothing (or worse, looping dialogue)
+  _cueStandCloser() {
+    if (!this.droidCue) return;
+    const px = this.playerSpr.x / TILE_SIZE;
+    const py = this.playerSpr.y / TILE_SIZE;
+    const spots = [
+      { x: this.cryoPod.x, y: this.cryoPod.y, label: 'cryo-pod' },
+      { x: 22, y: 4, label: 'bunk' },
+      { x: this.bridgeConsole.x, y: this.bridgeConsole.y, label: 'bridge console' },
+      ...this.planters.map(p => ({ x: p.x, y: p.y, label: 'planter' })),
+      { x: this.airlock.x, y: this.airlock.y, label: 'airlock' },
+    ];
+    let best = null, bestD = Infinity;
+    for (const s of spots) {
+      const d = this.dist(px, py, s.x, s.y);
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (best && bestD < 4.5) {
+      this._cueText(`Walk closer to the ${best.label}, then press SPACE.`);
+    }
+  }
+
+  // one-shot droid hint bubble that fades (does not clobber the guidance marker)
+  _cueText(msg) {
+    this.droidCue.setText(msg).setPosition(this.playerSpr.x + 4, this.playerSpr.y - 40).setVisible(true);
+    this.droidCue.alpha = 1;
+    const cue = this.droidCue;
+    this.time.delayedCall(3600, () => {
+      if (this.droidCue && this.droidCue === cue) {
+        this.tweens.add({ targets: this.droidCue, alpha: 0, duration: 300, onComplete: () => this.droidCue.setVisible(false) });
+      }
+    });
   }
 
   dist(x1, y1, x2, y2) {
@@ -615,7 +668,7 @@ class SpaceshipScene extends Phaser.Scene {
     const wyBase = this.objective.y * TILE_SIZE;
     // gentle bob above the objective + SPACE hint once you're close enough
     this.objMarker.y = wyBase - 20 + Math.sin(time * 0.005) * 5;
-    const near = this.dist(this.playerSpr.x / TILE_SIZE, this.playerSpr.y / TILE_SIZE, this.objective.x, this.objective.y) < 2.2;
+    const near = this.dist(this.playerSpr.x / TILE_SIZE, this.playerSpr.y / TILE_SIZE, this.objective.x, this.objective.y) < INTERACT_RANGE;
     const hint = (near && Math.floor(time / 320) % 2 === 0) ? 'PRESS SPACE' : 'GO HERE';
     if (this.objMarker.list[1]) this.objMarker.list[1].setText(hint);
     if (!this.objMarker.visible) this.objMarker.setVisible(true);

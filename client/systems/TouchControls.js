@@ -135,10 +135,15 @@ function _buttonPress(id) {
   if (!scene) return;
   switch (id) {
     case 'a':
-      if (typeof scene.handleInteract === 'function') scene.handleInteract();
+      // A mirrors SPACE/E: scenes expose _pressAction for exactly that (act on
+      // the world, advance/close dialogue, dismiss panels). Older scenes fall
+      // back to handleInteract.
+      if (typeof scene._pressAction === 'function') scene._pressAction();
+      else if (typeof scene.handleInteract === 'function') scene.handleInteract();
       break;
     case 'b':
       if (typeof scene.closeAllPanels === 'function') scene.closeAllPanels();
+      else if (typeof scene._pressAction === 'function') scene._pressAction();
       else if (typeof scene.handleInteract === 'function') scene.handleInteract();
       break;
     case 'menu':

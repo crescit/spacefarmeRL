@@ -113,6 +113,7 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   const introSrc = read('client/scenes/IntroScene.js');
   const shipSrc = read('client/scenes/SpaceshipScene.js');
   const planetSrc = read('client/scenes/PlanetScene.js');
+  const touchSrc = read('client/systems/TouchControls.js');
   const gameSrc = read('client/game.js');
 
   check('scene classes export', !!IS.IntroScene && !!SPS.SpaceshipScene && !!PS.PlanetScene);
@@ -156,6 +157,26 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
     /setObjective\('fuel'/.test(shipSrc) &&
     /setObjective\('descend'/.test(shipSrc));
   check('ship dialogue advertises the continue key', /Press SPACE to continue/.test(shipSrc));
+
+  // ── cross-device controls: SPACE/E (desktop) and the touchbar A-button
+  //    (mobile) drive the SAME _pressAction on ship + planet; one interact
+  //    range is shared by the marker hint, handleInteract and _nearInteractable
+  check('ship defines ONE shared interact range', /const INTERACT_RANGE = 2\.1/.test(shipSrc));
+  check('ship handleInteract uses the shared range', /const range = INTERACT_RANGE/.test(shipSrc));
+  check('ship _nearInteractable uses the shared range', (shipSrc.match(/INTERACT_RANGE/g) || []).length >= 4);
+  check('ship marker hint flashes at the SAME range it acts', /objective\.x, this\.objective\.y\) < INTERACT_RANGE/.test(shipSrc));
+  check('ship exposes a unified SPACE/A action path', /_pressAction\(\) \{/.test(shipSrc) && /this\._pressAction\(\)/.test(shipSrc));
+  check('ship coaches you to walk closer when too far', /_cueStandCloser\(\)/.test(shipSrc));
+  check('planet exposes a unified SPACE/A action path', /_pressAction\(\) \{/.test(planetSrc) && /this\.handleInteract\(\)/.test(planetSrc));
+  check('touchbar A-button drives _pressAction when present', /typeof scene\._pressAction === 'function'/.test(touchSrc));
+}
+
+// ── 5. Shared touch bar routes each scene's controls on mobile ──
+{
+  const touchSrc = read('client/systems/TouchControls.js');
+  check('touch bar ships a D-pad for movement', /data-dir/.test(touchSrc) || /moveDir\(dir\)/.test(touchSrc));
+  check('touch bar ships a menu button (GE / shop)', /'menu'/.test(touchSrc) && /openGrandExchange/.test(touchSrc));
+  check('touch bar B dismisses panels', /closeAllPanels/.test(touchSrc));
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
