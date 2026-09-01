@@ -495,9 +495,9 @@ class PlanetScene extends Phaser.Scene {
       W: this.input.keyboard.addKey('W'), A: this.input.keyboard.addKey('A'),
       S: this.input.keyboard.addKey('S'), D: this.input.keyboard.addKey('D'),
     };
-    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.SPACE);
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.eKey = this.input.keyboard.addKey('E');
-    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.ESC);
+    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.tabKey = this.input.keyboard.addKey('TAB');
     this.iKey = this.input.keyboard.addKey('I');
     this.gKey = this.input.keyboard.addKey('G');

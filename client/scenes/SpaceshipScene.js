@@ -381,10 +381,10 @@ class SpaceshipScene extends Phaser.Scene {
       S: this.input.keyboard.addKey('S'),
       D: this.input.keyboard.addKey('D'),
     };
-    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.SPACE);
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.eKey = this.input.keyboard.addKey('E');
-    this.tabKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.TAB);
-    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.ESC);
+    this.tabKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
+    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.oneKey = this.input.keyboard.addKey('ONE');
     this.twoKey = this.input.keyboard.addKey('TWO');
     this.threeKey = this.input.keyboard.addKey('THREE');
