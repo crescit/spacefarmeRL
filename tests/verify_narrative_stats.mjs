@@ -20,9 +20,11 @@ console.log('== narrative ledger ==');
 {
   const env = new FarmEnv({ horizonDays: 12, narrative: true });
   env.reset({ seed: 42 });
+  env.step({ type: 'equip', tool: 'hoe' });
   env.step({ type: 'till', tileX: 0, tileY: 0 });
-  env.step({ type: 'till', tileX: 0, tileY: 0 });          // illegal — must not count
+  env.step({ type: 'till', tileX: 0, tileY: 0 });          // illegal (already tilled) — must not count
   env.step({ type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' });
+  env.step({ type: 'equip', tool: 'watering' });
   env.step({ type: 'water', tileX: 0, tileY: 0 });
   env.writeJournal('the sky is big here');
   env.writeJournal('second verse');
@@ -32,8 +34,8 @@ console.log('== narrative ledger ==');
   const s = env.narrativeStats();
   check('seedsPlanted tallied', s.seedsPlanted === 1, JSON.stringify(s));
   check('illegal step not counted', s.cropsHarvested === 0 && s.tools.indexOf('harvest') < 0);
-  check('unique tools recorded (till, plant, water, talk, gift, advance_day)',
-    s.tools.length === 6 && s.tools.indexOf('till') >= 0 && s.tools.indexOf('advance_day') >= 0,
+  check('unique tools recorded (equip, till, plant, water, talk, gift, advance_day)',
+    s.tools.length === 7 && s.tools.indexOf('till') >= 0 && s.tools.indexOf('equip') >= 0 && s.tools.indexOf('advance_day') >= 0,
     JSON.stringify(s.tools));
   check('journal entries tallied via writeJournal', s.journalEntries === 2, String(s.journalEntries));
   check('friendships recorded', s.friendshipsTotal > 0 && s.friendsMade === 1, JSON.stringify(s.friendshipsTotal));
@@ -66,15 +68,25 @@ console.log('== testimony: deterministic, seed-fixed; faithful to the record =='
     return out;
   };
   const gentle = [
+    { type: 'equip', tool: 'hoe' },
     { type: 'till', tileX: 1, tileY: 1 },
     { type: 'plant', tileX: 1, tileY: 1, crop: 'space-wheat' },
+    { type: 'equip', tool: 'watering' },
     { type: 'water', tileX: 1, tileY: 1 },
     { type: 'talk', npc: 'rhea' },
   ];
-  const miner = gentle.concat(
-    Array.from({ length: 12 }, () => ({ type: 'mine' })),
-    [{ type: 'fish', spot: 'stardust', night: true }],
-  );
+  const miner = [
+    { type: 'equip', tool: 'hoe' },
+    { type: 'till', tileX: 1, tileY: 1 },
+    { type: 'plant', tileX: 1, tileY: 1, crop: 'space-wheat' },
+    { type: 'equip', tool: 'watering' },
+    { type: 'water', tileX: 1, tileY: 1 },
+    { type: 'equip', tool: 'pickaxe' },
+    ...Array.from({ length: 12 }, () => ({ type: 'mine' })),
+    { type: 'equip', tool: 'rod' },
+    { type: 'fish', spot: 'stardust', night: true },
+    { type: 'talk', npc: 'rhea' },
+  ];
   const a = run(7, gentle), a2 = run(7, gentle), b = run(7, miner);
   check('testimony identical for same seed + same life', a === a2);
   check('different lives leave different reckonings', a !== b, a.slice(0, 160) + ' || ' + b.slice(0, 160));

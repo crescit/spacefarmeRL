@@ -35,12 +35,20 @@ class StubPolicy:
 
 class NarrativeStatsTests(unittest.TestCase):
     def test_stats_and_testimony_through_bridge(self):
+        script = [
+            {"type": "equip", "tool": "pickaxe"},
+            {"type": "mine"},
+            {"type": "equip", "tool": "hoe"},
+            {"type": "till", "tileX": 0, "tileY": 0},
+            {"type": "plant", "tileX": 0, "tileY": 0, "crop": "space-wheat"},
+            {"type": "equip", "tool": "watering"},
+            {"type": "water", "tileX": 0, "tileY": 0},
+        ]
         env = FarmGymEnv(horizon_days=5)
         try:
             env.reset(seed=1)
-            env.step(6)   # mine
-            env.step(1)   # plant
-            env.step(2)   # water
+            for native in script:
+                env.native_step(native)
             env.write_journal("first light")
             stats = env.narrative_stats()
             self.assertIn("daysSurvived", stats)
@@ -53,9 +61,8 @@ class NarrativeStatsTests(unittest.TestCase):
             env2 = FarmGymEnv(horizon_days=5)
             try:
                 env2.reset(seed=1)
-                env2.step(6)
-                env2.step(1)
-                env2.step(2)
+                for native in script:
+                    env2.native_step(native)
                 env2.write_journal("first light")
                 self.assertEqual(env.testimony(), env2.testimony())
             finally:

@@ -35,8 +35,11 @@ class RolloutTests(unittest.TestCase):
             self.assertEqual(result["seed"], 55)
 
     def test_action_labels_cover_engine_surface(self):
-        self.assertEqual(len(ACTION_LABELS), 14)
+        # 14 original macro actions + equip + fill_water (tool-gated world)
+        self.assertEqual(len(ACTION_LABELS), 16)
         self.assertIn("advance_day", ACTION_LABELS)
+        self.assertIn("equip", ACTION_LABELS)
+        self.assertIn("fill_water", ACTION_LABELS)
 
 
 if __name__ == "__main__":

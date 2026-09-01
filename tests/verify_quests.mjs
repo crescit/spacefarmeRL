@@ -76,6 +76,7 @@ giveMatureTiles(room, 3);
 check('harvesting 3 completes q1_first_harvest', p.quests.current === 'q1_learn_fish');
 
 // q1_learn_fish: catch 1 fish → complete (spring, stardust spot)
+p.equipped = 'rod';   // casting is tool-gated — equip the rod first
 room.onFish(client, { spot: 'stardust' });
 check('catching a fish completes q1_learn_fish', p.quests.current === 'q1_debt_installment');
 
@@ -92,6 +93,7 @@ room.onTalk(client, { npc: 'nova' });
 check('talk-to-nova completes q2_meet_nova', p.quests.current === 'q2_mine_crystal');
 
 // q2_mine_crystal: mine 3 broken veins (force single-swing veins for determinism)
+p.equipped = 'pickaxe';   // mining needs the pickaxe in hand
 let mined = 0;
 while (mined < 3) {
   p.mineMax = 1; p.mineHp = 1; p.energy = 50;
@@ -137,6 +139,7 @@ check('owning 2 + feed completes q3_animal_farm', p.quests.current === 'q3_festi
 // q3_festival_stock: earn 300cr selling + catch 1 fish
 p.inventory.set('void-diamond', (p.inventory.get('void-diamond') || 0) + 2);
 room.onSell(client, { item: 'void-diamond', quantity: 2 });  // 250*2=500 >=300
+p.equipped = 'rod';   // tool-gated casting again
 room.onFish(client, { spot: 'stardust' });
 check('sell 300 + fish completes q3_festival_stock', p.quests.current === 'q3_earth_feast');
 
@@ -163,6 +166,7 @@ check('generic/wrong dish on festival day does NOT advance', notAdvancedWrongDis
 check('3 Earth Feast Plates on festival day complete q3_earth_feast', p.quests.current === 'q3_heart_of_stardust');
 
 // q3_heart_of_stardust: mine 5 + attend festival + talk nova → complete
+p.equipped = 'pickaxe';   // back to the pick for the final vein
 let m2 = 0;
 while (m2 < 5) {
   p.mineMax = 1; p.mineHp = 1; p.energy = 50;

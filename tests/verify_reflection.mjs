@@ -115,6 +115,7 @@ console.log('== B. Milestones ==');
   check('hydrated set suppresses old milestones on rejoin',
     !ms2.some((m) => m.data.id === 'first-harvest' || m.data.id === 'first-sale'), JSON.stringify(ms2.map((m) => m.data.id)));
   // …but a NEW one still fires (first catch)
+  r2.p.equipped = 'rod';   // casting is tool-gated
   r2.room.onFish(r2.client, { spot: 'stardust' });
   const ms3 = r2.client.sent.filter((m) => m.type === 'milestone');
   check('new milestone still fires after rejoin', ms3.some((m) => m.data.id === 'first-catch'), JSON.stringify(ms3.map((m) => m.data.id)));

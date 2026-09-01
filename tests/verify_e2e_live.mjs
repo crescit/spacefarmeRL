@@ -26,34 +26,51 @@ async function main() {
   // capture server replies — server calls client.send(type, result)
   const pending = {};
   const awaitReply = t => new Promise(res => { pending[t] = res; });
-  ['fish', 'mine', 'sell', 'buyAnimal', 'feedAnimal', 'harvest', 'claimFestival', 'upgradeTool', 'cook', 'deposit', 'withdraw'].forEach(t =>
+  ['equip', 'fillWater', 'fish', 'mine', 'sell', 'buyAnimal', 'feedAnimal', 'harvest', 'claimFestival', 'upgradeTool', 'cook', 'deposit', 'withdraw'].forEach(t =>
     room.onMessage(t, d => pending[t] && pending[t](d)));
+  // equip a tool over the wire (the same message the web backpack panel sends)
+  const equip = async (tool) => {
+    const t = awaitReply('equip');
+    room.send('equip', { tool });
+    return await Promise.race([t, sleep(1500).then(() => null)]);
+  };
 
-  console.log('== 1. Farming loop (till->plant->water->grow->harvest) ==');
+  console.log('== 1. Farming loop (equip→till→plant→water→grow→harvest) ==');
+  await equip('hoe');
   room.send('till', { tileX: 0, tileY: 0 }); await sleep(150);
   room.send('plant', { tileX: 0, tileY: 0, crop: 'space-wheat' }); await sleep(150);
   ok('plant sets tile seeded', tileOf(0, 0).type === 'seeded' && tileOf(0, 0).crop === 'space-wheat', 'type=' + tileOf(0, 0).type);
   const c0 = me.credits;
-  for (let i = 0; i < MATURITY; i++) { room.send('water', { tileX: 0, tileY: 0 }); await sleep(60); room.send('advance'); await sleep(120); }
+  await equip('watering');
+  for (let i = 0; i < MATURITY; i++) {
+    // the can is a real container: top it at the tap when it runs low
+    if ((me.waterLevel || 0) < 20) { const t = awaitReply('fillWater'); room.send('fillWater', {}); await Promise.race([t, sleep(1500).then(() => null)]); }
+    room.send('water', { tileX: 0, tileY: 0 }); await sleep(60); room.send('advance'); await sleep(120);
+  }
   ok(`wheat matures after watering ${MATURITY} days (spring, in-season)`, tileOf(0, 0).type === 'mature', 'type=' + tileOf(0, 0).type);
+  await equip('');                 // harvest is bare-handed
   room.send('harvest', { tileX: 0, tileY: 0 }); await sleep(200);
   ok('harvest wheat awards credits', me.credits === c0 + 20, `credits ${c0}->${me.credits}`);
   ok('wheat REGROW -> tile stays growing (not empty)', tileOf(0, 0).type === 'growing' && tileOf(0, 0).crop === 'space-wheat', 'type=' + tileOf(0, 0).type + ' crop=' + tileOf(0, 0).crop);
 
   console.log('== 2. Season gating: star-berry is summer-only ==');
+  await equip('hoe');
   room.send('till', { tileX: 1, tileY: 0 }); await sleep(120);
   room.send('plant', { tileX: 1, tileY: 0, crop: 'star-berry' }); await sleep(120);
+  await equip('watering');
   for (let i = 0; i < 4; i++) { room.send('water', { tileX: 1, tileY: 0 }); await sleep(50); room.send('advance'); await sleep(120); }
   ok('star-berry stalls in spring (does not mature)', tileOf(1, 0).type !== 'mature', 'type=' + tileOf(1, 0).type);
 
-  console.log('== 3. Fishing (live gating) ==');
+  console.log('== 3. Fishing (live gating, rod-equipped) ==');
+  await equip('rod');
   room.send('fish', { spot: 'stardust', night: false });
   const fr = await Promise.race([awaitReply('fish'), sleep(1500).then(() => 'TIMEOUT')]);
   ok('fish ok at spring/stardust/day', fr && fr.ok === true, JSON.stringify(fr));
   await sleep(250);
   ok('catch in inventory', fr && !!room.state.players.get(sid).inventory.get(fr.item), fr && fr.item);
 
-  console.log('== 4. Mining swing loop ==');
+  console.log('== 4. Mining swing loop (pickaxe) ==');
+  await equip('pickaxe');
   let swings = 0, mr;
   do { room.send('mine', {}); mr = await Promise.race([awaitReply('mine'), sleep(1500).then(() => 'TIMEOUT')]); swings++; } while (mr && mr.ok && !mr.broken && swings < 12);
   ok('vein breaks after 3-7 swings', mr && mr.broken && swings >= 3 && swings <= 7, `swings=${swings} ` + JSON.stringify(mr));

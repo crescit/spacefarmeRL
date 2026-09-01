@@ -19,7 +19,7 @@ check('day 91 turns to winter', seasonName(91) === 'winter');
 check('day 121 is spring again (new 120-day year)', seasonName(121) === 'spring');
 
 // ── Tool schema (single source: Python + MCP will consume exactly this) ──
-check('18 tools defined', TOOLS.length === 18, `${TOOLS.length}`);
+check('20 tools defined (incl. equip + fill_water)', TOOLS.length === 20, `${TOOLS.length}`);
 for (const tool of TOOLS) {
   check(`schema for ${tool.name}`, tool.parameters && Array.isArray(tool.parameters.properties) === false, '');
 }

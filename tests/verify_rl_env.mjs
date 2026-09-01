@@ -42,9 +42,13 @@ function hashState(room) {
 }
 
 // A stochastic-heavy script: mine to vein breaks, fish, claim festival.
+// Farm work is tool-gated — equip the pickaxe and rod for their crafts.
 function script(room, client) {
   const out = [];
+  const p = room.state.players.get(client.sessionId);
+  if (p) p.equipped = 'pickaxe';
   for (let i = 0; i < 12; i++) out.push(room.onMine(client, {}));          // several vein cycles
+  if (p) p.equipped = 'rod';
   for (let i = 0; i < 6; i++) { room.state.isDay = i % 2 === 0; out.push(room.onFish(client, { spot: 'stardust', night: i % 2 === 1 })); }
   room.state.festival = true; room.state.festivalClaimed = false;
   out.push(room.onClaimFestival ? room.onClaimFestival(client) : { skipped: true });
@@ -91,6 +95,7 @@ console.log('== Determinism ==');
 {
   const { room, client } = makeRoom(undefined);
   room.state.players.get('f').energy = 100;
+  room.state.players.get('f').equipped = 'pickaxe';   // mining needs the pick
   const r = room.onMine(client, {});
   check('live fallback works (no rng injected)', r.ok === true && typeof room.mineRndProbe !== 'function', JSON.stringify(r && { ok: r.ok }));
 }
@@ -140,18 +145,22 @@ console.log('== env_core ==');
   // calendar service the server uses — the env has NO copy of that number.
   const MD = env.calendar.maturityDays();
   let R = 0;
+  R += env.step({ type: 'equip', tool: 'hoe' }).reward;
   R += env.step({ type: 'till', tileX: 0, tileY: 0 }).reward;             // 0 (no Δcr)
   R += env.step({ type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' }).reward;
+  R += env.step({ type: 'equip', tool: 'watering' }).reward;
   R += env.step({ type: 'water', tileX: 0, tileY: 0 }).reward;            // day-1 water
   for (let d = 0; d < MD; d++) {
     R += env.step({ type: 'advance_day' }).reward;                        // dayCost
     // Re-water for the next day's growth, but NOT once the tile is mature —
     // watering a mature tile is refused (illegal penalty), which would skew
-    // the hand-computed total.
+    // the hand-computed total. Refill the can at the tap when it runs low.
     if (env.farm().tiles.find((t) => t.x === 0 && t.y === 0).type !== 'mature') {
+      if ((env.player().waterLevel || 0) < 20) R += env.step({ type: 'fill_water' }).reward;
       R += env.step({ type: 'water', tileX: 0, tileY: 0 }).reward;        // watered=0 shaping
     }
   }
+  R += env.step({ type: 'equip', tool: '' }).reward;                      // hands for the harvest
   const h = env.step({ type: 'harvest', tileX: 0, tileY: 0 });
   R += h.reward;
   const dayCost = env.w.dayCost;
@@ -161,6 +170,7 @@ console.log('== env_core ==');
 
   // illegal action: till a tilled tile → refused, illegal penalty, credits unchanged
   env.reset({ seed: 3 });
+  env.step({ type: 'equip', tool: 'hoe' });
   env.step({ type: 'till', tileX: 1, tileY: 1 });
   const bad = env.step({ type: 'till', tileX: 1, tileY: 1 });
   check('illegal action flagged + penalized', bad.info.ok === false && Math.abs(bad.reward - env.w.illegal) < 1e-9);
@@ -182,12 +192,19 @@ console.log('== env_core ==');
     const MD = e.calendar.maturityDays();
     const rs = [];
     const grow = [
+      { type: 'equip', tool: 'hoe' },
       { type: 'till', tileX: 0, tileY: 0 },
       { type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' },
+      { type: 'equip', tool: 'watering' },
       { type: 'water', tileX: 0, tileY: 0 },
-      ...Array.from({ length: MD }, () => ({ type: 'advance_day' })),
+      ...Array.from({ length: MD }, () => [
+        { type: 'advance_day' }, { type: 'fill_water' }, { type: 'water', tileX: 0, tileY: 0 },
+      ]).flat(),
+      { type: 'equip', tool: '' },
       { type: 'harvest', tileX: 0, tileY: 0 },
+      { type: 'equip', tool: 'pickaxe' },
       { type: 'mine' }, { type: 'mine' }, { type: 'mine' },
+      { type: 'equip', tool: 'rod' },
       { type: 'fish', spot: 'stardust' },
     ];
     for (const a of grow) rs.push(e.step(a).reward.toFixed(6));

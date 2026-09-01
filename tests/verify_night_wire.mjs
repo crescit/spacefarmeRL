@@ -26,8 +26,13 @@ async function main() {
   ok('night falls after a long day (isDay false)', st().isDay === false, JSON.stringify(st()));
 
   // night fishing actually bites while the world is dark (moonfish is any-time
-  // in spring; the point is the night gate lets the pool open at all)
+  // in spring; the point is the night gate lets the pool open at all).
+  // Casting is tool-gated: equip the FISHING ROD first (the same equip message
+  // the backpack panel sends).
   const pending = {};
+  room.onMessage('equip', d => { if (pending.e) { const r = pending.e; pending.e = null; r(d); } });
+  room.send('equip', { tool: 'rod' });
+  await Promise.race([new Promise(res => { pending.e = res; }), sleep(2500).then(() => null)]);
   room.onMessage('fish', d => { if (pending.f) { const r = pending.f; pending.f = null; r(d); } });
   room.send('fish', { spot: 'stardust', night: true });
   const caught = await Promise.race([new Promise(res => { pending.f = res; }), sleep(2500).then(() => null)]);

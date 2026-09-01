@@ -97,9 +97,13 @@ class ToolDialogTests(unittest.TestCase):
 
     def test_dialog_round_trip(self):
         with StubServer() as srv:
-            # Scripted keeper: till → plant+water (parallel) → journal → rest → goodnight.
+            # Scripted keeper: equip hoe → till → equip can → plant+water
+            # (parallel) → journal → rest → goodnight. Farm work is tool-gated,
+            # so the keeper equips the crafts before using them.
             _StubHandler.queue = [
+                response(call("equip", {"tool": "hoe"})),
                 response(call("till", {"x": 0, "y": 0})),
+                response(call("equip", {"tool": "watering"})),
                 response(call("plant", {"x": 0, "y": 0, "crop": "space-wheat"}), call("water", {"x": 0, "y": 0})),
                 response(call("write_journal", {"entry": "Day one. The ridge bell stayed silent."})),
                 response(call("rest", {})),
@@ -114,32 +118,49 @@ class ToolDialogTests(unittest.TestCase):
             )
             policy.begin_day(env.briefing())
 
-            # 1. till
+            # 1. equip the hoe
+            native = policy.choose_native(env)
+            self.assertEqual(native, {"type": "equip", "tool": "hoe"})
+            _, _r, _t, _tr, info = env.native_step(native)
+            self.assertTrue(info.get("ok"))
+            policy.observe(native, info)
+
+            # 2. till
             native = policy.choose_native(env)
             self.assertEqual(native, {"type": "till", "tileX": 0, "tileY": 0})
             _, _r, _t, _tr, info = env.native_step(native)
             self.assertTrue(info.get("ok"))
             policy.observe(native, info)
 
-            # 2. plant (first of a parallel pair)
+            # 3. equip the watering can (next field craft)
+            native = policy.choose_native(env)
+            self.assertEqual(native, {"type": "equip", "tool": "watering"})
+            _, _r, _t, _tr, info = env.native_step(native)
+            self.assertTrue(info.get("ok"))
+            policy.observe(native, info)
+
+            # 4. plant (first of a parallel pair)
             native = policy.choose_native(env)
             self.assertEqual(native["type"], "plant")
             _, _r, _t, _tr, info = env.native_step(native)
             policy.observe(native, info)
 
-            # 3. water comes from the pending second call — no new model request
+            # 5. water comes from the pending second call — no new model request
             before = len(_StubHandler.received)
             native = policy.choose_native(env)
             self.assertEqual(native, {"type": "water", "tileX": 0, "tileY": 0})
             self.assertEqual(len(_StubHandler.received), before)
+            _, _r, _t, _tr, info = env.native_step(native)
+            self.assertTrue(info.get("ok"))   # can is equipped, so this waters
+            policy.observe(native, info)
 
-            # 4. journal is answered in-loop (no env step); then rest() ends the day
+            # 6. journal is answered in-loop (no env step); then rest() ends the day
             native = policy.choose_native(env)
             self.assertEqual(native, {"type": "advance_day"})
             _, _r, _t, _tr, info = env.native_step(native)
             policy.observe(native, info)
 
-            # 5. model says goodnight — a text-only turn → the keeper has spoken
+            # 7. model says goodnight — a text-only turn → the keeper has spoken
             self.assertIsNone(policy.choose_native(env))
             self.assertEqual(policy.text_only_turns, 1)
 
@@ -153,8 +174,10 @@ class ToolDialogTests(unittest.TestCase):
 
         with StubServer() as srv:
             _StubHandler.cycle = [
+                response(call("equip", {"tool": "hoe"})),
                 response(call("till", {"x": 0, "y": 0})),
                 response(call("plant", {"x": 0, "y": 0, "crop": "space-wheat"})),
+                response(call("equip", {"tool": "watering"})),
                 response(call("water", {"x": 0, "y": 0})),
                 response(call("talk", {"npc": "quasar"})),
                 response(call("rest", {})),

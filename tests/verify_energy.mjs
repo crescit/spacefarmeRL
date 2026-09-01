@@ -15,6 +15,9 @@ const env = new FarmEnv({ horizonDays: 28 });
 env.reset({ seed: 1 });
 
 // 1. A till costs exactly 5 stamina in the env (same handler the browser calls).
+//    Farm work is tool-gated: equip the hoe first (the same rule the server,
+//    the client backpack, and the RL env share).
+env.step({ type: 'equip', tool: 'hoe' });
 env.step({ type: 'till', tileX: 0, tileY: 0 });
 check('till spends exactly 5 stamina (base hoe)', env.player().energy === 95, `100 -> ${env.player().energy}`);
 
@@ -22,12 +25,14 @@ check('till spends exactly 5 stamina (base hoe)', env.player().energy === 95, `1
 const seedsBefore = env.player().inventory.get('seeds') || 0;
 env.step({ type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' });
 check('plant consumes one seed server-side', (env.player().inventory.get('seeds') || 0) === seedsBefore - 1);
+env.step({ type: 'equip', tool: 'watering' });
 env.step({ type: 'water', tileX: 0, tileY: 0 });
 check('till+plant+water spend 15 total', env.player().energy === 85, `100 -> ${env.player().energy}`);
 
 // 3. Exhaustion is real and shared: drain the remaining stamina across the
 //    8x8 farm grid. 85/5 = 17 more tills (row 0 col 1-7 = 7, row 1 all 8,
-//    row 2 col 0-1 = 2 → 17).
+//    row 2 col 0-1 = 2 → 17). Re-equip the hoe first — the can is still in hand.
+env.step({ type: 'equip', tool: 'hoe' });
 for (const [x, y] of [
   ...[1, 2, 3, 4, 5, 6, 7].map((x) => [x, 0]),
   ...[0, 1, 2, 3, 4, 5, 6, 7].map((x) => [x, 1]),

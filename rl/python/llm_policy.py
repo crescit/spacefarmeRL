@@ -221,6 +221,10 @@ def native_from_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     a = args or {}
     if name == "rest" or name == "advance_day":
         return {"type": "advance_day"}
+    if name == "equip":
+        return {"type": "equip", "tool": str(a.get("tool") or "")}
+    if name == "fill_water":
+        return {"type": "fill_water"}
     if name in ("till", "plant", "water", "harvest"):
         native: dict[str, Any] = {"type": name, "tileX": int(a.get("x", 0)), "tileY": int(a.get("y", 0))}
         if name == "plant":
@@ -232,7 +236,9 @@ def native_from_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"type": "buy_animal", "species": str(a.get("species")), "quantity": int(a.get("quantity", 1))}
     if name == "feed":
         return {"type": "feed", "species": str(a.get("species"))}
-    if name in ("upgrade_tool", "mine", "claim_festival"):
+    if name == "upgrade_tool":
+        return {"type": "upgrade_tool", "tool": str(a.get("tool") or "hoe")}
+    if name in ("mine", "claim_festival"):
         return {"type": name}
     if name == "fish":
         return {"type": "fish", "spot": str(a.get("spot") or "stardust"), "night": bool(a.get("night", False))}

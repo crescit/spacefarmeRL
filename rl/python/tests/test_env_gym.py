@@ -58,8 +58,12 @@ class GymTests(unittest.TestCase):
         env = FarmGymEnv(horizon_days=4)
         try:
             env.reset(seed=42)
+            # farm work is tool-gated: the macro codec's equip action picks the
+            # hoe (empty tiles), then the can (a young crop is thirsty)
+            env.step(ACTION_LABELS.index("equip"))
             env.step(ACTION_LABELS.index("till"))
             env.step(ACTION_LABELS.index("plant"))
+            env.step(ACTION_LABELS.index("equip"))
             water = ACTION_LABELS.index("water")
             self.assertEqual(env.action_masks()[water], 1)
             _obs, _reward, _terminated, _truncated, info = env.step(water)

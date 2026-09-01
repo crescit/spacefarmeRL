@@ -93,6 +93,7 @@ console.log('== Fishing ==');
   room3.state.players.set('f1', new Player('f1', 'Fisher'));
   const pf = room3.state.players.get('f1');
   pf.energy = 100;
+  pf.equipped = 'rod';   // farm work is tool-gated: casting needs the rod
   const r = room3.onFish(cli, {});
   check('fish ok, costs energy', r.ok === true, JSON.stringify(r));
   check('energy reduced by 10', pf.energy === 90, `got ${pf.energy}`);
@@ -110,7 +111,7 @@ console.log('== Mining ==');
   roomM.state.players.set('m1', new Player('m1', 'Miner'));
   const pm = roomM.state.players.get('m1');
   pm.energy = 50;
-  pm.energy = 50;
+  pm.equipped = 'pickaxe';   // mining needs the pickaxe in hand
   let rm, swings = 0;
   do { rm = roomM.onMine(cli, {}); swings++; } while (rm.ok && !rm.broken && swings < 20);
   check('mining swings chipped 5 EP each', pm.energy === 50 - 5 * swings, `energy ${pm.energy}, swings ${swings}`);
@@ -174,11 +175,11 @@ console.log('== Tool upgrades ==');
   check('not enough credits guarded', poor.ok === false && poor.reason === 'not-enough-credits', JSON.stringify(poor));
   pt.credits = 500;
   const u1 = roomT.onUpgradeTool(cli, {});
-  check('upgrade base→iron ok', u1.ok === true && u1.tool === 'iron', JSON.stringify(u1));
+  check('upgrade base→iron ok', u1.ok === true && u1.tier === 'iron', JSON.stringify(u1));
   check('credits deducted', pt.credits === 500 - 150, `got ${pt.credits}`);
   pt.credits = 2000;   // fund the gold upgrade
   const u2 = roomT.onUpgradeTool(cli, {});
-  check('upgrade iron→gold ok', u2.ok === true && u2.tool === 'gold', JSON.stringify(u2));
+  check('upgrade iron→gold ok', u2.ok === true && u2.tier === 'gold', JSON.stringify(u2));
   const u3 = roomT.onUpgradeTool(cli, {});
   check('gold is max tier', u3.ok === false && u3.reason === 'max-tier', JSON.stringify(u3));
 }
@@ -214,6 +215,7 @@ console.log('== Seasonal depth (fishing gating) ==');
   rF.state.players.set('sd1', new Player('sd1', 'Deep'));
   const pf = rF.state.players.get('sd1');
   pf.energy = 100; rF.state.season = 0;                             // spring
+  pf.equipped = 'rod';   // casting is tool-gated (same as every room)
   const spr = rF.onFish(cli, { spot: 'stardust', night: false });
   check('spring/stardust/day \u2192 moonfish only', spr.ok && spr.item === 'moonfish', JSON.stringify(spr));
   pf.energy = 100; rF.state.season = 3;                             // winter

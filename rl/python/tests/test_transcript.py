@@ -16,8 +16,10 @@ def _make_trajectory(seed: int = 7) -> Path:
     rec = TrajectoryRecorder(env, tmp, action_interface="native-tools-v1")
     rec.reset(seed=seed, options={"narrative": True, "horizon_days": 12})
     script = [
+        {"type": "equip", "tool": "hoe"},
         {"type": "till", "tileX": 0, "tileY": 0},
         {"type": "plant", "tileX": 0, "tileY": 0, "crop": "space-wheat"},
+        {"type": "equip", "tool": "watering"},
         {"type": "water", "tileX": 0, "tileY": 0},
         {"type": "talk", "npc": "quasar"},
         {"type": "advance_day"},
