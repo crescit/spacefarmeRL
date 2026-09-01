@@ -4,6 +4,7 @@
 
 import { SHIP_SPRITES } from '../systems/SpriteSystem.js';
 import { TouchControls } from '../systems/TouchControls.js';
+import { ColonyHub } from '../systems/ColonyHub.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 
@@ -11,6 +12,20 @@ const TILE_SIZE = 32;  // painterly colony scale (matches world)
 const MAP_W = 60;
 const MAP_H = 40;
 const INTERACT_RANGE = 2.1;  // how close you must be for SPACE to act on a thing
+
+// ── Ship tutorial tool kit (local only — the ship has no live room economy).
+//    The planet's server grants the same starter kit on landing; here the kits
+//    teach equip-water-fill-harvest with local state. ──
+const SHIP_KIT = {
+  hoe:      { label: 'Hoe' },
+  watering: { label: 'Watering Can' },
+  pickaxe:  { label: 'Pickaxe' },
+  rod:      { label: 'Fishing Rod' },
+};
+const SHIP_TANK_MAX = 100;   // watering-can capacity (mirror of planet/server)
+const SHIP_WATER_COST = 20;  // units drained per water action
+// greenhouse tap — where the can refills (planet's shore tap has the same job)
+const SHIP_TAP = { x: 34, y: 21 };
 
 // Ship layout as tile map
 const SHIP_MAP = [
@@ -82,6 +97,7 @@ const NPC_DIALOGUES = {
       '[C.O.R.A.]: You have been in cryo-sleep for 47 years. The ship is functional.',
       '[C.O.R.A.]: Your grandfather\u2019s farm on Asteroid B-612 awaits. But first — training.',
       '[C.O.R.A.]: Move with WASD or arrow keys. Press SPACE or E to interact.',
+      '[C.O.R.A.]: Your starter kit: HOE, WATERING CAN, PICKAXE, FISHING ROD. Open MENU (TAB) → BACKPACK to equip them.',
     ],
     x: 10, y: 4,
   },
@@ -96,21 +112,29 @@ const NPC_DIALOGUES = {
     text: [
       '[C.O.R.A.]: Welcome to the bridge. Here you can see our trajectory.',
       '[C.O.R.A.]: Asteroid B-612 is 2.4 million kilometers ahead.',
-      '[C.O.R.A.]: But the ship needs power. Use the console to start mining nearby asteroids.',
-      '[C.O.R.A.]: Press SPACE to mine. Each asteroid yields 50-100 credits worth of ore.',
+      '[C.O.R.A.]: The power crystal needs a PICKAXE. Open MENU (TAB) → BACKPACK and equip it.',
+      '[C.O.R.A.]: Then press SPACE to swing. Each asteroid yields 50-100 credits worth of ore.',
     ],
     x: 40, y: 4,
   },
   greenhouse_tutorial: {
     text: [
       '[C.O.R.A.]: This is the greenhouse module. Practice farming here.',
-      '[C.O.R.A.]: Step 1: Press SPACE to till soil on an empty planter.',
+      '[C.O.R.A.]: Step 1: Equip the HOE and press SPACE on an empty planter to till it.',
       '[C.O.R.A.]: Step 2: Press SPACE again to plant a seed.',
-      '[C.O.R.A.]: Water the planter (press SPACE while holding watering can).',
-      '[C.O.R.A.]: Crops grow overnight. Go to bed in your bunk to sleep and end the day.',
-      '[C.O.R.A.]: Harvest mature crops for credits. Earn 500 credits total to qualify for planetary landing.',
+      '[C.O.R.A.]: Step 3: Equip the WATERING CAN and press SPACE to water the seedling.',
+      '[C.O.R.A.]: The can drains as you water — refill it at the GREENHOUSE TAP.',
+      '[C.O.R.A.]: Crops grow overnight. Sleep in the bunk, then harvest with bare hands.',
+      '[C.O.R.A.]: Earn 500 credits total to qualify for planetary landing.',
     ],
     x: 30, y: 22,
+  },
+  greenhouse_tap: {
+    text: [
+      '[C.O.R.A.]: The greenhouse tap. Gasket-gleaming, gravity-fed stardust dew.',
+      '[C.O.R.A.]: Equip the WATERING CAN and press SPACE to fill it back to 100.',
+    ],
+    x: 34, y: 22,
   },
   airlock: {
     text: [
@@ -125,8 +149,9 @@ const NPC_DIALOGUES = {
 //    ship reads as a map of buildings instead of anonymous dark pixels ──
 const POI_SPECS = [
   { id: 'cryo',       x: 12,   y: 8.6, label: 'CRYO POD',       tone: '0x9fffd8', c: '#9fffd8', sub: 'Wake here' },
-  { id: 'bridge',     x: 40,   y: 4.4, label: 'BRIDGE CONSOLE', tone: '0xffe9a0', c: '#ffe9a0', sub: 'Mine → credits' },
-  { id: 'greenhouse', x: 31,   y: 20.8,label: 'GREENHOUSE',     tone: '0xb6ff9a', c: '#b6ff9a', sub: 'Grow crops' },
+  { id: 'bridge',     x: 40,   y: 4.4, label: 'BRIDGE CONSOLE', tone: '0xffe9a0', c: '#ffe9a0', sub: 'Pickaxe → credits' },
+  { id: 'greenhouse', x: 31,   y: 20.8,label: 'GREENHOUSE',     tone: '0xb6ff9a', c: '#b6ff9a', sub: 'Hoe · plant · water' },
+  { id: 'tap',        x: 34,   y: 21,  label: 'GREENHOUSE TAP', tone: '0x67e1cd', c: '#a8eeff', sub: 'Refill the can' },
   { id: 'bunk',       x: 21.5, y: 4.2, label: 'BUNK',            tone: '0xd9b8ff', c: '#d9b8ff', sub: 'Sleep → next day', noLabel: true },
   { id: 'airlock',    x: 46,   y: 13.2,label: 'AIRLOCK',         tone: '0x9adcff', c: '#9adcff', sub: '500 cr → descend' },
 ];
@@ -301,8 +326,47 @@ class SpaceshipScene extends Phaser.Scene {
     this.advanceButton = null;
     this.miningActive = false;
 
+    // ── Tool kit (local tutorial economy; the planet's server grants the same
+    //    starter kit on landing) ──
+    this.tools = { hoe: 'base', watering: 'base', pickaxe: 'base', rod: 'base' };
+    this.equipped = '';                 // '' = hands | 'hoe' | 'watering' | 'pickaxe' | 'rod'
+    this.waterLevel = SHIP_TANK_MAX;    // watering-can tank (drains as you water)
+
+    // ── The Colony Hub — same one-menu-one-path interface the planet uses:
+    //    desktop TAB and the mobile MENU button both land here. ──
+    this.showingHub = false;
+    this.hub = new ColonyHub(this).build();
+    this.hub.setSections([
+      { id: 'backpack', label: 'BACKPACK', hint: 'equip tools · can tank', run: () => this.openBackpack() },
+      { id: 'greenhouse', label: 'GREENHOUSE', hint: 'practice farming · refill the can', run: () => this._guideToGreenhouse() },
+    ]);
+
+    // ── Backpack panel (ship-local): equip Hands/Hoe/Can/Pickaxe/Rod. Rows are
+    //    tap targets (mobile) AND 1-5 keys (desktop) — the planet teaches the
+    //    same screen, so nothing new to learn after landing. ──
+    this.showingBackpack = false;
+    this.backpackPanel = this.add.container(width / 2, height / 2).setDepth(1015).setVisible(false);
+    this.backpackPanel.add(this.add.rectangle(0, 0, 460, 340, 0x0a0f1a, 0.95).setStrokeStyle(3, 0x67e1cd));
+    this.backpackPanel.add(this.add.text(0, -146, 'BACKPACK - EQUIP TOOLS', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9dffec',
+    }).setOrigin(0.5));
+    this.backpackPanel.add(this.add.text(0, 156, '[1-5] EQUIP    [SPACE/B] CLOSE', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+    }).setOrigin(0.5));
+    this._backpackDynamic = [];
+
+    // ── Greenhouse tap — a small teal faucet where the can refills ──
+    this.tapGfx = this.add.graphics().setDepth(205);
+    const tapX = SHIP_TAP.x * TILE_SIZE, tapY = SHIP_TAP.y * TILE_SIZE;
+    this.tapGfx.fillStyle(0x0d4a50, 0.9).fillCircle(tapX, tapY, 7);
+    this.tapGfx.fillStyle(0x67e1cd, 0.95).fillCircle(tapX, tapY, 4);
+    this.tapGfx.lineStyle(1.2, 0x9dffec, 0.6).strokeCircle(tapX, tapY, 7);
+    this.tapLabel = this.add.text(tapX, tapY + 14, 'WATER TAP', {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#a8eeff', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(206);
+
     // rework: persistent guidance state (checklist + active objective)
-    this.checks = { wake: false, power: false, plant: false, sleep: false, descend: false };
+    this.checks = { wake: false, equip: false, power: false, plant: false, sleep: false, descend: false };
     this.objective = null;      // { id, x, y, label }
     this._fuelTarget = null;    // 'greenhouse' | 'bridge' — where the money lives
 
@@ -319,6 +383,13 @@ class SpaceshipScene extends Phaser.Scene {
     };
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.SPACE);
     this.eKey = this.input.keyboard.addKey('E');
+    this.tabKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.TAB);
+    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.ESC);
+    this.oneKey = this.input.keyboard.addKey('ONE');
+    this.twoKey = this.input.keyboard.addKey('TWO');
+    this.threeKey = this.input.keyboard.addKey('THREE');
+    this.fourKey = this.input.keyboard.addKey('FOUR');
+    this.fiveKey = this.input.keyboard.addKey('FIVE');
 
     // Touch controls — on-screen virtual controller for iPhone
     this.touchCtrl = new TouchControls(this);
@@ -365,6 +436,28 @@ class SpaceshipScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    // ── Panel lock: while the hub or backpack is open the ship holds still.
+    //    TAB/menu toggles the hub, ESC/B closes panels, and the number keys
+    //    drive equip rows (the same interaction the planet uses). ──
+    if (this.showingBackpack || (this.showingHub && this.hub)) {
+      if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.toggleHub();
+      if (Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
+      if (this.showingBackpack) {
+        const rowTools = ['', 'hoe', 'watering', 'pickaxe', 'rod'];
+        const rowKeys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey, this.fiveKey];
+        rowKeys.forEach((k, i) => { if (k && Phaser.Input.Keyboard.JustDown(k)) this.equipTool(rowTools[i]); });
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.closeAllPanels();
+      }
+      if (this.showingHub && this.hub) {
+        const numKeys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey, this.fiveKey];
+        numKeys.forEach((k, i) => { if (k && Phaser.Input.Keyboard.JustDown(k)) this.hub.confirm(i); });
+        if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) this.hub.move(-1);
+        else if (Phaser.Input.Keyboard.JustDown(this.cursors.down)) this.hub.move(1);
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) this.hub.confirm(this.hub.sel);
+      }
+      return;
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.toggleHub();
     // ── Movement ──
     let dx = 0, dy = 0;
 
@@ -427,8 +520,10 @@ class SpaceshipScene extends Phaser.Scene {
     }
 
     // ── Update HUD ──
+    const inHand = this.equipped ? SHIP_KIT[this.equipped].label : 'HANDS';
+    const tankPart = this.equipped === 'watering' ? ` 💧${this.waterLevel}/${SHIP_TANK_MAX}` : '';
     this.hudText.setText(
-      `💰 ${this.credits} cr  ⚡ ${this.energy}  🛠️ ${this.tool}  📅 Day ${this.dayCount}`
+      `💰 ${this.credits} cr  ⚡ ${this.energy}  🛠️ ${inHand}${tankPart}  📅 Day ${this.dayCount}`
     );
 
     // ── Update planter visuals + render sprites ──
@@ -501,7 +596,7 @@ class SpaceshipScene extends Phaser.Scene {
       this.checks.wake = true;
       this.tutorialStep = 1;
       this.tool = 'none';
-      this.setObjective('power', 'Awake! Follow me — mine the BRIDGE CONSOLE to restore power.', this.bridgeConsole.x, this.bridgeConsole.y);
+      this.setObjective('power', 'Awake! Equip the PICKAXE (MENU → BACKPACK), then mine the BRIDGE CONSOLE to restore power.', this.bridgeConsole.x, this.bridgeConsole.y);
       return;
     }
 
@@ -511,13 +606,35 @@ class SpaceshipScene extends Phaser.Scene {
       return;
     }
 
-    // Bridge console
+    // Bridge console — needs the PICKAXE equipped (same rule as the planet:
+    //    tools gate their craft; the console teaches you to switch tools).
     if (this.dist(px, py, this.bridgeConsole.x, this.bridgeConsole.y) < range) {
+      if (this.equipped !== 'pickaxe') {
+        this._cueText('The crystal needs a PICKAXE — open MENU (TAB) → BACKPACK and equip it.');
+        return;
+      }
       if (!this.bridgeConsole.mined) {
         this.mineAsteroid();
       } else {
         this.showDialogue(['[Console]: Mining complete. Power levels nominal.']);
       }
+      return;
+    }
+
+    // Greenhouse tap — equip the can and press SPACE to refill it.
+    if (this.dist(px, py, SHIP_TAP.x, SHIP_TAP.y) < range) {
+      if (this.equipped !== 'watering') {
+        this._cueText('Equip the WATERING CAN (MENU → BACKPACK) to use the tap.');
+        return;
+      }
+      this.waterLevel = SHIP_TANK_MAX;
+      this.showDialogue(NPC_DIALOGUES.greenhouse_tap.text);
+      // if we were told to refill mid-watering, point back at the plants
+      if (this.objective && this.objective.id === 'tap') {
+        const seeded = this.planters.find(p => p.state === 'seeded');
+        this.setObjective('plant', 'Can is full! Walk to a seeded planter and water it.', seeded ? seeded.x : 31, seeded ? seeded.y : 23);
+      }
+      this._refreshTracker();
       return;
     }
 
@@ -538,9 +655,9 @@ class SpaceshipScene extends Phaser.Scene {
         this.setObjective('descend', 'You did it! Stay by the AIRLOCK — descent starting.', this.airlock.x, this.airlock.y);
         this.time.delayedCall(3000, () => this.landOnPlanet());
       } else {
-        this.showDialogue([`[Airlock]: Need 500 cr to descend (you have ${this.credits} cr). Mine the bridge or harvest crops.`]);
+        this.showDialogue([`[Airlock]: Need 500 cr to descend (you have ${this.credits} cr). Equip the PICKAXE and mine, or harvest with HANDS.`]);
         if (this.objective && this.objective.id !== 'fuel') {
-          this.setObjective('fuel', 'Earn 500 cr — mine the BRIDGE CONSOLE and harvest crops.', this.bridgeConsole.x, this.bridgeConsole.y);
+          this.setObjective('fuel', 'Earn 500 cr — mine with the PICKAXE, harvest with HANDS.', this.bridgeConsole.x, this.bridgeConsole.y);
         }
       }
       return;
@@ -548,8 +665,11 @@ class SpaceshipScene extends Phaser.Scene {
   }
 
   // one shared action path for SPACE/E (desktop) and the touchbar A-button
-  // (mobile): act on a nearby thing first, else dismiss dialogue, else coach
+  // (mobile): act on a nearby thing first, else dismiss dialogue, else coach.
+  // The hub/backpack are first-class panels here too (same as the planet).
   _pressAction() {
+    if (this.showingHub && this.hub) { this.hub.confirm(this.hub.sel); return; }
+    if (this.showingBackpack) { this.closeAllPanels(); return; }
     if (this._nearInteractable()) {
       this.handleInteract();
     } else if (this.dialog.visible) {
@@ -557,6 +677,86 @@ class SpaceshipScene extends Phaser.Scene {
     } else {
       this._cueStandCloser();
     }
+  }
+
+  closeAllPanels() {
+    if (this.backpackPanel) this.backpackPanel.setVisible(false);
+    if (this.hub) this.hub.close();
+    this.showingBackpack = false;
+    this.showingHub = false;
+  }
+
+  // ── Colony Hub — TAB (desktop) and MENU (mobile) both land here, the same
+  //    one-menu path the planet uses. ──
+  toggleHub() {
+    if (this.hub) this.hub.toggle();
+    this.showingHub = this.hub ? this.hub.open : !this.showingHub;
+  }
+
+  // ── Backpack (ship tutorial): equip tools from the starter kit. Purely
+  //    local — the kit travels with you; the planet server re-grants it. ──
+  openBackpack() {
+    this.showingBackpack = true;
+    this.backpackPanel.setVisible(true);
+    this._renderBackpack();
+  }
+
+  equipTool(toolId) {
+    const tool = toolId || '';
+    if (tool && !this.tools[tool]) { this._cueText(`You don't own that tool yet.`); return; }
+    this.equipped = tool;
+    if (tool === '') { this._cueText('Hands free — harvest & interact.'); }
+    else { this._cueText(`Equipped ${SHIP_KIT[tool].label}.`); }
+    if (!this.checks.equip) {
+      this.checks.equip = true;   // tracker line flips once you've used the menu
+    }
+    this._renderBackpack();
+    this._refreshTracker();
+  }
+
+  _renderBackpack() {
+    if (!this.backpackPanel) return;
+    for (const d of this._backpackDynamic) d.destroy();
+    this._backpackDynamic = [];
+    const equipped = this.equipped || '';
+    const rowH = 50, rowGap = 4, topY = -110;
+    const defs = [
+      { id: '',      label: 'HANDS',       sub: 'harvest · interact' },
+      { id: 'hoe',     label: 'HOE',            sub: 'till soil' },
+      { id: 'watering',label: 'WATERING CAN',    sub: `water crops · tank 💧 ${this.waterLevel}/${SHIP_TANK_MAX}` },
+      { id: 'pickaxe', label: 'PICKAXE',         sub: 'mine the bridge crystal' },
+      { id: 'rod',     label: 'FISHING ROD',     sub: 'cast at the planet shore' },
+    ];
+    const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", stroke: '#04080c', strokeThickness: 2 };
+    defs.forEach((d, i) => {
+      const cur = equipped === d.id;
+      const y = topY + i * (rowH + rowGap);
+      const rect = this.add.rectangle(0, y, 400, rowH - 6, cur ? 0x1a3344 : 0x101a26, 0.96)
+        .setStrokeStyle(cur ? 2 : 1, cur ? 0x67e1cd : 0x2c3c50)
+        .setInteractive({ useHandCursor: true });
+      rect.on('pointerdown', () => this.equipTool(d.id));
+      const name = this.add.text(-186, y, `[${i + 1}] ${d.label}${cur ? '   ◀ IN HAND' : ''}`, {
+        ...f, fontSize: '12px', color: cur ? '#9dffec' : '#e8ecff', fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      const sub = this.add.text(-186, y + 16, d.sub, {
+        ...f, fontSize: '9px', color: '#8fb8ae',
+      }).setOrigin(0, 0.5);
+      this._backpackDynamic.push(rect, name, sub);
+      this.backpackPanel.add([rect, name, sub]);
+    });
+    const foot = this.add.text(0, 150, 'Starter kit — tools are yours. The planet smithy can upgrade them for credits.', {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae', align: 'center',
+      wordWrap: { width: 420 },
+    }).setOrigin(0.5);
+    this.backpackPanel.add(foot);
+    this._backpackDynamic.push(foot);
+  }
+
+  // hub row: point the guidance at the greenhouse (teaching the tap/farm loop)
+  _guideToGreenhouse() {
+    this.closeAllPanels();
+    this._moveMarkerTo(31, 23);
+    this._cueText('Walk to the GREENHOUSE — till, plant, water, harvest.');
   }
 
   // true when the player stands close enough to act on any interactable —
@@ -567,6 +767,7 @@ class SpaceshipScene extends Phaser.Scene {
     if (this.dist(px, py, this.cryoPod.x, this.cryoPod.y) < INTERACT_RANGE && !this.cryoPod.used) return true;
     if (this.dist(px, py, 22, 4) < INTERACT_RANGE) return true;
     if (this.dist(px, py, this.bridgeConsole.x, this.bridgeConsole.y) < INTERACT_RANGE) return true;
+    if (this.dist(px, py, SHIP_TAP.x, SHIP_TAP.y) < INTERACT_RANGE) return true;
     for (const p of this.planters) {
       if (this.dist(px, py, p.x, p.y) < INTERACT_RANGE) return true;
     }
@@ -584,6 +785,7 @@ class SpaceshipScene extends Phaser.Scene {
       { x: this.cryoPod.x, y: this.cryoPod.y, label: 'cryo-pod' },
       { x: 22, y: 4, label: 'bunk' },
       { x: this.bridgeConsole.x, y: this.bridgeConsole.y, label: 'bridge console' },
+      { x: SHIP_TAP.x, y: SHIP_TAP.y, label: 'greenhouse tap' },
       ...this.planters.map(p => ({ x: p.x, y: p.y, label: 'planter' })),
       { x: this.airlock.x, y: this.airlock.y, label: 'airlock' },
     ];
@@ -712,8 +914,9 @@ class SpaceshipScene extends Phaser.Scene {
     };
     this.trackerText.setText([
       line('wake', 'Wake up'),
-      line('power', 'Restore power'),
-      line('plant', 'Plant & water a crop'),
+      line('equip', 'Equip a tool'),
+      line('power', 'Mine w/ pickaxe'),
+      line('plant', 'Plant, water, harvest'),
       line('sleep', 'Sleep so it grows'),
       line('fuel', 'Reach 500 cr & descend'),
     ].join('\n'));
@@ -750,19 +953,32 @@ class SpaceshipScene extends Phaser.Scene {
   handlePlanter(planter) {
     switch (planter.state) {
       case 'empty':
-        this.tool = 'hoe';
+        // tilling needs the HOE (same rule as the planet)
+        if (this.equipped !== 'hoe') {
+          this._cueText('Equip the HOE (MENU → BACKPACK) to till soil.');
+          return;
+        }
         planter.state = 'tilled';
         this.showDialogue(['[C.O.R.A.]: Tilled the soil. Press SPACE again to plant a seed.']);
         break;
       case 'tilled':
-        this.tool = 'seeds';
         planter.crop = 'space-wheat';
         planter.state = 'seeded';
         this.cropsPlanted++;
-        this.showDialogue(['[C.O.R.A.]: Seed planted. Now water it with the watering can.']);
+        this.showDialogue(['[C.O.R.A.]: Seed planted. Now equip the WATERING CAN and press SPACE to water it.']);
         break;
       case 'seeded':
-        this.tool = 'watering-can';
+        // watering needs the can, and the can needs water in the tank
+        if (this.equipped !== 'watering') {
+          this._cueText('Equip the WATERING CAN (MENU → BACKPACK) to water the seedling.');
+          return;
+        }
+        if (this.waterLevel < SHIP_WATER_COST) {
+          this._cueText('The can is low — refill it at the GREENHOUSE TAP.');
+          this.setObjective('tap', 'Refill the can at the GREENHOUSE TAP.', SHIP_TAP.x, SHIP_TAP.y);
+          return;
+        }
+        this.waterLevel = Math.max(0, this.waterLevel - SHIP_WATER_COST);
         planter.watered = true;
         planter.state = 'growing';
         this.showDialogue(['[C.O.R.A.]: Watered! The crop will grow overnight. Sleep to advance the day.']);
@@ -787,7 +1003,12 @@ class SpaceshipScene extends Phaser.Scene {
     }
   }
 
+  // harvest is bare-handed — equip EMPTY HANDS first (planet rule)
   handleHarvest(planter) {
+    if (this.equipped !== '') {
+      this._cueText('Empty your hands (MENU → BACKPACK) to harvest.');
+      return;
+    }
     const reward = 50;
     this.credits += reward;
     planter.state = 'empty';
@@ -796,8 +1017,8 @@ class SpaceshipScene extends Phaser.Scene {
     planter.watered = false;
     this.cropsHarvested++;
     this.showDialogue([`[C.O.R.A.]: Harvested! +${reward} credits. Total: ${this.credits} cr.`]);
-    if (this.objective && (this.objective.id === 'sleep' || this.objective.id === 'plant')) {
-      this.setObjective('fuel', 'Earn 500 cr — mine the BRIDGE CONSOLE and harvest crops.', this.bridgeConsole.x, this.bridgeConsole.y);
+    if (this.objective && (this.objective.id === 'sleep' || this.objective.id === 'plant' || this.objective.id === 'tap')) {
+      this.setObjective('fuel', 'Earn 500 cr — mine with the PICKAXE and harvest with HANDS.', this.bridgeConsole.x, this.bridgeConsole.y);
     } else {
       this._refreshTracker();
     }
@@ -807,11 +1028,11 @@ class SpaceshipScene extends Phaser.Scene {
     const reward = Math.floor(Math.random() * 50) + 50;
     this.credits += reward;
     this.bridgeConsole.mined = true;
-    this.showDialogue([`[Console]: Asteroid mined! +${reward} credits. Total: ${this.credits} cr.`]);
+    this.showDialogue([`[Console]: Asteroid mined with the pickaxe! +${reward} credits. Total: ${this.credits} cr.`]);
     if (!this.checks.power) {
       this.checks.power = true;
       this.tutorialStep = 2;
-      this.setObjective('plant', "Power is back! Now practice farming — go to the GREENHOUSE and press SPACE to till soil.", 31, 23);
+      this.setObjective('plant', 'Power is back! Now practice farming — go to the GREENHOUSE. Equip the HOE from the BACKPACK to till, plant a seed, water with the CAN.', 31, 23);
     } else {
       this._refreshTracker();
     }
@@ -881,7 +1102,7 @@ class SpaceshipScene extends Phaser.Scene {
     if (!this.checks.sleep) {
       this.checks.sleep = true;
       if (this.objective && (this.objective.id === 'sleep' || this.objective.id === 'plant')) {
-        this.setObjective('fuel', 'Earn 500 cr — mine the BRIDGE CONSOLE and harvest crops.', this.bridgeConsole.x, this.bridgeConsole.y);
+        this.setObjective('fuel', 'Earn 500 cr — mine with the PICKAXE, harvest with HANDS.', this.bridgeConsole.x, this.bridgeConsole.y);
       }
     }
     const net = window.SpaceFarmer.net;
