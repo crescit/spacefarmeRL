@@ -31,6 +31,20 @@ const VH = MAP_H * T; // 512
 const FENCE_Y = FENCE_Y_EXPORT;
 const ZOOM = 1;
 
+// ── The colony tool kit (client mirror of the server's TOOL_DEFS) ──
+// The server owns the economy (equip/upgrade tiers/tank); the browser only
+// names tools and shows the tier the server granted.
+const CLIENT_TOOLS = {
+  hoe:      { label: 'Hoe' },
+  watering: { label: 'Watering Can' },
+  pickaxe:  { label: 'Pickaxe' },
+  rod:      { label: 'Fishing Rod' },
+};
+const TOOL_TIER_NAME = { base: 'Basic', iron: 'Iron', gold: 'Gold' };
+const WATER_TANK_MAX = 100;          // mirror of server WATER_TANK_MAX
+const WATER_USE_COST = 20;           // mirror of server WATER_USE_COST (per water action)
+const FILL_SPOT = { x: 27, y: 22 }; // the shore tap — refill the can here
+
 // crops the planet grows — mirrors the server's seasonal rules so the UI can
 // tell the player which seasons a crop grows in and whether it re-grows.
 const CROP_SEASONS = {
@@ -127,7 +141,10 @@ class PlanetScene extends Phaser.Scene {
     this.credits = data.credits || 100;
     this.energy = 100;
     this.staminaMax = 100;   // stamina ceiling — grows as you condition yourself
-    this.tool = 'base';
+    this.tool = 'base';      // hoe tier (legacy alias for toolTiers.hoe)
+    this.equipped = '';      // '' (hands) | 'hoe' | 'watering' | 'pickaxe' | 'rod'
+    this.toolTiers = {};     // toolId → tier ('base'|'iron'|'gold')
+    this.waterLevel = WATER_TANK_MAX;  // watering-can tank (server-authoritative)
     this.dayCount = 0;
     this.isNight = false;
     this.inventory = { seeds: 5 };
@@ -147,6 +164,7 @@ class PlanetScene extends Phaser.Scene {
     this.showingRecipes = false;
     this._recipeSel = 0;
     this.showingQuests = false;
+    this.showingBackpack = false;
     this._prevQuestId = null;    // last-seen current quest → drives the "quest complete" banner
     this._arcDoneFired = false;  // ending banner fires once
     this.playerDir = 'front';
@@ -520,6 +538,14 @@ class PlanetScene extends Phaser.Scene {
     this.deepDrop.fillStyle(0x39c5bb, 0.8).fillCircle(ddx, ddy, 5);
     this.deepDrop.lineStyle(1.5, 0x9ddd72, 0.7).strokeCircle(ddx, ddy, 9);
     this.deepDropLabel = this.add.text(ddx, ddy + 16, 'DEEP DROP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(95);
+    // the shore tap — where the watering can refills. Equip the can and press
+    // A/SPACE on the pond's edge; a small teal faucet makes the spot visible.
+    this.shoreTap = this.add.graphics().setDepth(94);
+    const stx = FILL_SPOT.x * T, sty = FILL_SPOT.y * T;
+    this.shoreTap.fillStyle(0x0d4a50, 0.9).fillCircle(stx, sty, 7);
+    this.shoreTap.fillStyle(0x39c5bb, 0.95).fillCircle(stx, sty, 4);
+    this.shoreTap.lineStyle(1.2, 0x9ddd72, 0.6).strokeCircle(stx, sty, 7);
+    this.shoreTapLabel = this.add.text(stx, sty + 15, 'SHORE TAP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#a8eeff', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(95);
     this.uKey = this.input.keyboard.addKey('U');
     this.vKey = this.input.keyboard.addKey('V');
     this.qKey = this.input.keyboard.addKey('Q'); // The Stardust Story — quest log
@@ -756,6 +782,21 @@ class PlanetScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.questPanel.add([qBg, qTitle, qContent, qClose]);
     this.questContent = qContent;
+
+    // ── Backpack (Slice 3) — equip tools, read the tank, see your cargo. Rows
+    //    are tap targets (mobile) AND 1-5 keys (desktop); _renderBackpack() fills
+    //    the dynamic rows below the static title/close. ──
+    this.backpackPanel = this.add.container(width / 2, height / 2).setDepth(1012).setVisible(false);
+    const bkBg = this.add.rectangle(0, 0, 480, 420, 0x070714, 0.96).setStrokeStyle(3, 0x67e1cd);
+    const bkTitle = this.add.text(0, -178, 'BACKPACK - TOOLS & CARGO', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9dffec',
+    }).setOrigin(0.5);
+    const bkClose = this.add.text(0, 196, '[1-5] EQUIP    [SPACE/B] CLOSE', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+    }).setOrigin(0.5);
+    this.backpackPanel.add([bkBg, bkTitle, bkClose]);
+    this.backpackTitle = bkTitle;
+    this._backpackDynamic = [];
   }
 
   // ── Persistence blip — the server pings 'saved' after flushing a save ──
@@ -1246,6 +1287,9 @@ rations, and your name on the manifest.
   //    confirms the catch, and the result pops up on screen — no hidden timing,
   //    no guessing whether it worked. ──
   fish() {
+    // tool gate: casting needs the FISHING ROD equipped (share the rule with
+    // the server + RL env); J / hub / A-with-rod all land here.
+    if (this.equipped !== 'rod') { this.showToast('Equip the FISHING ROD (backpack) to cast.'); return; }
     const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
     const net = window.SpaceFarmer.net;
     // two fishing spots: stardust shore (common) and the deep drop (rare)
@@ -1347,6 +1391,8 @@ rations, and your name on the manifest.
     g.fillStyle(0x9ddd72, 0.9).fillCircle(x + 10, y - 16, 2);
   }
   mine() {
+    // tool gate: swinging needs the PICKAXE equipped (server + RL env rule).
+    if (this.equipped !== 'pickaxe') { this.showToast('Equip the PICKAXE (backpack) to mine.'); return; }
     const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
     const d = Math.hypot(px - this.mineX, py - this.mineY);
     const net = window.SpaceFarmer.net;
@@ -1686,11 +1732,36 @@ rations, and your name on the manifest.
       this.hub.confirm(this.hub.sel);
       return;
     }
-    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes) {
+    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingBackpack) {
       this.closeAllPanels();
       return;
     }
+    // Tool-aware action: an equipped rod/pickaxe turns A/SPACE into its craft
+    // at the right spot; otherwise the hand does what hands do (interact).
+    if (this._useEquippedTool()) return;
     this.handleInteract();
+  }
+
+  // ── Equipped-tool action: only when the tool has a target in range, so a
+  //    rod never hijacks talking to an NPC. Field work (hoe/can/harvest) is
+  //    handled inside handleTileAction; the shore tap refill lives in
+  //    handleInteract. ──
+  _useEquippedTool() {
+    const e = this.equipped;
+    if (!e) return false;
+    const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
+    if (e === 'rod') {
+      const atShore = Math.hypot(px - 27, py - 22) <= 3.5 || Math.hypot(px - 38, py - 21) <= 3.5;
+      if (!atShore) return false;
+      this.fish();
+      return true;
+    }
+    if (e === 'pickaxe') {
+      if (Math.hypot(px - this.mineX, py - this.mineY) > 4) return false;
+      this.mine();
+      return true;
+    }
+    return false;
   }
 
   update(time) {
@@ -1794,7 +1865,7 @@ rations, and your name on the manifest.
       this.tickNpc(b, dt, time);
     }
 
-    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub) {
+    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack) {
       if (this.inAlienContact) {
         if (this._diaNPC && !this._diaDone) this.dialoguePortrait.setTexture("port." + this._diaNPC + "_" + (Math.floor(time / 70) % 3));
         if (this.contactPhase === "choice") {
@@ -1886,6 +1957,14 @@ rations, and your name on the manifest.
       // non-dialogue panels close on space/esc
       if (this.lKey && Phaser.Input.Keyboard.JustDown(this.lKey)) this._toggleCodex();
       if (this.showingQuests && this.qKey && Phaser.Input.Keyboard.JustDown(this.qKey)) this.toggleQuestLog();
+      // ── Backpack: keys 1-5 equip Hands/Hoe/Can/Pickaxe/Rod; tap rows work on
+      //    touch (each row is an interactive rect), and SPACE/ESC/B close. ──
+      if (this.showingBackpack) {
+        const rowTools = ['', 'hoe', 'watering', 'pickaxe', 'rod'];
+        const rowKeys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey, this.fiveKey];
+        rowKeys.forEach((k, i) => { if (k && Phaser.Input.Keyboard.JustDown(k)) this.equipTool(rowTools[i]); });
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
+      }
       if (!this.inDialogue && !this.showingHub && (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey))) {
         this.closeAllPanels();
       }
@@ -1963,9 +2042,11 @@ rations, and your name on the manifest.
     // camera target follows player (world-local → scene coords)
     this.camTarget.setPosition(this.playerSpr.x + this.worldX, this.playerSpr.y + this.worldY);
 
-    // ── interact ──
+    // ── interact ── SPACE/E route through the SAME action path the touch-bar A
+    //    button uses, so an equipped rod/pickaxe/hoe/can drives its craft exactly
+    //    like on mobile (one code path for both inputs).
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
-      this.handleInteract();
+      this._pressAction();
     }
     // TAB opens the Colony Hub — the one menu both inputs share (touch bar:
     // MENU). The Grand Exchange is now a PLACE: walk to its building (or pick
@@ -2270,6 +2351,11 @@ rations, and your name on the manifest.
         this.storage = this.storage || {};
         for (const [k, v] of schemaEntries(ps.storage)) this.storage[k] = v;
         if (ps.tool) this.tool = ps.tool;
+        if (ps.equipped !== undefined) this.equipped = ps.equipped;
+        if (typeof ps.waterLevel === 'number') this.waterLevel = ps.waterLevel;
+        this.toolTiers = this.toolTiers || {};
+        for (const [k, v] of schemaEntries(ps.tools)) this.toolTiers[k] = v;
+        if (this.toolTiers.hoe) this.tool = this.toolTiers.hoe;   // keep the legacy alias honest
         // The browser is a camera: reconcile each farm tile from the server's
         // authoritative grid so rejected moves (e.g. low-energy till) and
         // multiplayer contention can never leave the field lying about what it is.
@@ -2307,7 +2393,11 @@ rations, and your name on the manifest.
       const fest = calendar.festivalForDay(this.roomState.day || 0);
       hudFest = fest ? `   ·   ${fest.short}` : '   ·   FESTIVAL';
     }
-    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${this.tool.toUpperCase()}   ·   ${sName}${hudFest}`);
+    const equipLabel = this.equipped
+      ? `${TOOL_TIER_NAME[this.toolTiers[this.equipped] || 'base']} ${(CLIENT_TOOLS[this.equipped] || {}).label || this.equipped}`
+      : 'HANDS';
+    const tankPart = this.equipped === 'watering' ? `   💧 ${this.waterLevel}/${WATER_TANK_MAX}` : '';
+    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${equipLabel}${tankPart}   ·   ${sName}${hudFest}`);
     if (this.energyFill) {
       const energyRatio = Math.max(0, Math.min(1, this.energy / (this.staminaMax || 100)));
       this.energyFill.width = 170 * energyRatio;
@@ -2381,6 +2471,11 @@ rations, and your name on the manifest.
 
     const ptx = Math.floor(this.playerSpr.x / T);
     const pty = Math.floor(this.playerSpr.y / T);
+
+    // Shore tap: watering can in hand, the pond's edge refills the tank.
+    if (this.equipped === 'watering' && this.waterLevel < WATER_TANK_MAX) {
+      if (Math.hypot(ptx - FILL_SPOT.x, pty - FILL_SPOT.y) <= 3.5) { this.fillWater(); return; }
+    }
 
     for (const alien of ALIEN_DATA) {
       const d = Math.hypot(alien.x - ptx, alien.y - pty);
@@ -2509,6 +2604,7 @@ rations, and your name on the manifest.
     const s = ft.state;
     switch (s.type) {
       case 'empty':
+        if (this.equipped !== 'hoe') { this.showToast('Equip the HOE (backpack) to till the soil.'); break; }
         s.type = 'tilled';
         this._burnEnergy(this._energyCost(5));
         ft.img.setTexture('tile.tilled');
@@ -2527,6 +2623,14 @@ rations, and your name on the manifest.
         break;
       case 'seeded':
       case 'growing':
+        if (this.equipped !== 'watering') {
+          this.showToast('Equip the WATERING CAN (backpack) to water crops.');
+          break;
+        }
+        if (this.waterLevel < WATER_USE_COST) {
+          this.showToast('The can is low — fill it at the shore tap.');
+          break;
+        }
         if (!s.watered) {
           s.watered = true;
           this._burnEnergy(this._energyCost(5));
@@ -2540,6 +2644,10 @@ rations, and your name on the manifest.
         }
         break;
       case 'mature': {
+        if (this.equipped !== '') {
+          this.showToast('Empty your hands (backpack) to harvest.');
+          break;
+        }
         const info = CROPS[s.crop] || { sellPrice: 20, label: 'crop' };
         const cs = CROP_SEASONS[s.crop] || { regrow: false };
         this.credits += info.sellPrice;
@@ -2946,8 +3054,10 @@ rations, and your name on the manifest.
     this.chestPanel.setVisible(false);
     if (this.recipePanel) this.recipePanel.setVisible(false);
     if (this.questPanel) this.questPanel.setVisible(false);
+    if (this.backpackPanel) this.backpackPanel.setVisible(false);
     if (this.hub) this.hub.close();
     this.showingHub = false;
+    this.showingBackpack = false;
     this.showingGE = false;
     this.showingShop = false;
     this.showingRanch = false;
@@ -3034,15 +3144,142 @@ rations, and your name on the manifest.
   // ── The Colony Hub — one menu, one path. Desktop TAB and the mobile MENU
   //    button both land here; the hub's rows route to this scene's methods. ──
   toggleHub() {
-    this.showingHub = !this.showingHub;
     if (this.hub) this.hub.toggle();
+    // the hub's own open/close is authoritative — mirror it AFTER the toggle
+    // so openPanel's internal closeAllPanels() can't desync this flag.
+    this.showingHub = this.hub ? this.hub.open : !this.showingHub;
   }
 
   // ── Backpack: the colony's TRUE inventory (Slice 3 — equip tools, view
-  //    holdings, read the watering-can tank). ──
+  //    holdings, read the watering-can tank). Rows are tap-friendly (mobile)
+  //    and 1-5 driven (desktop); the same screen both inputs share. ──
   openBackpack() {
-    if (typeof this._openBackpackPanel === 'function') this._openBackpackPanel();
-    else this.showToast('Your backpack is being unpacked…');
+    this._openBackpackPanel();
+  }
+
+  // human-friendly tier label for a tool, e.g. "Iron Hoe"
+  _tierName(toolId) {
+    const tier = this.toolTiers[toolId] || 'base';
+    return `${TOOL_TIER_NAME[tier] || tier} ${(CLIENT_TOOLS[toolId] || {}).label || toolId}`;
+  }
+
+  _openBackpackPanel() {
+    this.showingBackpack = true;
+    this.backpackPanel.setVisible(true);
+    this._renderBackpack();
+    if (this.audio) this.audio.sfx('menu', { volume: 0.3 });
+  }
+
+  // ── Equip a tool ('' = hands). Server-authoritative: we ask, the server
+  //    says yes, then we mirror equipped + tank + HUD. Offline sandbox keeps a
+  //    local ledger so the preview still teaches the mechanic. ──
+  equipTool(toolId) {
+    const tool = toolId || '';
+    const net = window.SpaceFarmer.net;
+    if (!net || !net.connected) {
+      this.equipped = tool;
+      this.showToast(tool ? `Equipped ${CLIENT_TOOLS[tool].label}.` : 'Hands free — harvest & talk.');
+      if (this.showingBackpack) this._renderBackpack();
+      this.updateHUD();
+      return;
+    }
+    net.request('equip', { tool }).then(r => {
+      if (r && r.ok) {
+        this.equipped = r.equipped || '';
+        if (this.audio) this.audio.sfx('confirm');
+        this.showToast(this.equipped
+          ? `Equipped ${(CLIENT_TOOLS[this.equipped] || {}).label}.`
+          : 'Hands free — harvest & talk.');
+      } else if (r) {
+        this.showToast(({
+          'unknown-tool': 'Unknown tool.',
+          'dont-own': `You don't own that tool yet — upgrade it at the smithy, not here.`,
+        })[r.reason] || 'Could not equip.');
+      }
+      if (this.showingBackpack) this._renderBackpack();
+      this.updateHUD();
+    });
+  }
+
+  // ── Refill the watering can at a station (planet: the shore tap; ship:
+  //    greenhouse tap). Server sets the tank — the can is a real container. ──
+  fillWater() {
+    if (this._fillBusy) return;
+    const net = window.SpaceFarmer.net;
+    if (!net || !net.connected) {
+      this.waterLevel = WATER_TANK_MAX;
+      this.showToast('The can glugs full of stardust dew.');
+      if (this.showingBackpack) this._renderBackpack();
+      this.updateHUD();
+      return;
+    }
+    this._fillBusy = true;
+    net.request('fillWater', {}).then(r => {
+      this._fillBusy = false;
+      if (r && r.ok) {
+        this.waterLevel = r.waterLevel ?? WATER_TANK_MAX;
+        if (this.audio) this.audio.sfx('water', { volume: 0.4 });
+        this.showToast('The can glugs full of stardust dew.');
+      } else if (r && r.reason === 'already-full') {
+        this.showToast('The can is already full.');
+      } else {
+        this.showToast('No tap here.');
+      }
+      if (this.showingBackpack) this._renderBackpack();
+      this.updateHUD();
+    });
+  }
+
+  // ── Rebuild the backpack's dynamic rows (equip list + cargo). Called on open
+  //    and after every equip/fill so the screen always tells the truth. ──
+  _renderBackpack() {
+    if (!this.backpackPanel) return;
+    for (const d of this._backpackDynamic) d.destroy();
+    this._backpackDynamic = [];
+    const equipped = this.equipped || '';
+    const rowH = 54, rowGap = 6, topY = -120;
+    const defs = [
+      { id: '',      label: 'HANDS',       sub: 'harvest ripe crops · talk to townsfolk' },
+      { id: 'hoe',     label: 'HOE',            sub: 'till soil · ' + this._tierName('hoe') },
+      { id: 'watering',label: 'WATERING CAN',    sub: `water crops · ${this._tierName('watering')} · tank 💧 ${this.waterLevel}/${WATER_TANK_MAX}` },
+      { id: 'pickaxe', label: 'PICKAXE',         sub: 'mine the asteroid vein · ' + this._tierName('pickaxe') },
+      { id: 'rod',     label: 'FISHING ROD',     sub: 'cast the stardust shore · ' + this._tierName('rod') },
+    ];
+    const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", stroke: '#04080c', strokeThickness: 2 };
+    defs.forEach((d, i) => {
+      const cur = equipped === d.id;
+      const y = topY + i * (rowH + rowGap);
+      const rect = this.add.rectangle(0, y, 440, rowH - 8, cur ? 0x1a3344 : 0x0d1624, 0.96)
+        .setStrokeStyle(cur ? 2 : 1, cur ? 0x67e1cd : 0x2c3c50)
+        .setInteractive({ useHandCursor: true });
+      rect.on('pointerdown', () => this.equipTool(d.id));
+      const name = this.add.text(-206, y - 8, `[${i + 1}] ${d.label}${cur ? '   ◀ IN HAND' : ''}`, {
+        ...f, fontSize: '13px', color: cur ? '#9dffec' : '#e8ecff', fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      const hint = this.add.text(-206, y + 12, d.sub, {
+        ...f, fontSize: '10px', color: '#8fb8ae',
+      }).setOrigin(0, 0.5);
+      this.backpackPanel.add([rect, name, hint]);
+      this._backpackDynamic.push(rect, name, hint);
+    });
+    // cargo readout — everything you carry, from the authoritative inventory
+    const inv = this.inventory || {};
+    const ITEM_LABEL = {
+      'space-wheat': 'wheat', 'star-berry': 'star-berry', 'moon-melon': 'melon',
+      'plasma-tomato': 'plasma tomato', 'nebula-pepper': 'nebula pepper', 'glow-kelp': 'glow kelp',
+      'moonfish': 'moonfish', 'stardust-salmon': 'salmon', 'comet-trout': 'trout', 'nebula-marlin': 'marlin',
+      'egg': 'egg', 'milk': 'milk', 'wool': 'wool',
+      'asteroid-dust': 'asteroid dust', 'nickel-iron': 'nickel-iron', 'silicon-carbide': 'silicon carbide',
+      'void-diamond': 'void diamond', 'stardust-crystal': 'stardust crystal',
+      'tech-part': 'tech part', 'cooked-food': 'cooked food', 'seeds': 'seeds',
+    };
+    const parts = Object.keys(inv).filter(k => (inv[k] || 0) > 0).map(k => `${ITEM_LABEL[k] || k} ×${inv[k]}`);
+    const cargo = this.add.text(0, 152, 'CARGO  ·  ' + (parts.length ? parts.join('   ') : 'empty — plant a field!'), {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae',
+      align: 'center', wordWrap: { width: 440 },
+    }).setOrigin(0.5, 0);
+    this.backpackPanel.add(cargo);
+    this._backpackDynamic.push(cargo);
   }
 
   // ── Smithy: tool upgrades for credits (Slice 4). ──
