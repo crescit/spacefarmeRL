@@ -49,7 +49,10 @@ class Player extends Schema {
     this.giftsGiven = {};    // npcId → count of gifts given (for event pacing)
     this.inventory = {};     // item → count (starter items granted in onJoin for new farmers)
     this.storage = {};           // chest contents (safe-kept harvests)
-    this.tool = 'base';          // hoe tier: base → iron → gold
+    this.tool = 'base';          // hoe tier: base → iron → gold (legacy alias for tools.hoe)
+    this.equipped = '';          // '' (hands) | 'hoe' | 'watering' | 'pickaxe' | 'rod'
+    this.tools = {};            // toolId → tier ('base'|'iron'|'gold') — your four tools
+    this.waterLevel = WATER_TANK_MAX; // watering-can tank units (server-authoritative)
     this.animals = {};           // species → count owned (auto-wraps to MapSchema)
     this.animalsFedDay = {};     // species → last day fed
     this.mineHp = 0;             // current vein's remaining swings (0 = idle)
@@ -73,7 +76,10 @@ defineTypes(Player, {
   giftsGiven: { map: 'number' },
   inventory: { map: 'number' },
   storage: { map: 'number' },  // chest storage at home (safe-kept items)
-  tool: 'string',         // hoe tier: 'base' | 'iron' | 'gold'
+  tool: 'string',         // hoe tier: 'base' | 'iron' | 'gold' (legacy alias for tools.hoe)
+  equipped: 'string',     // '' (hands) | 'hoe' | 'watering' | 'pickaxe' | 'rod'
+  tools: { map: 'string' }, // toolId → tier ('base'|'iron'|'gold') — your four tools
+  waterLevel: 'number',  // watering-can tank units (server-authoritative)
   animals: { map: 'number' },    // species → count owned (chicken, cow, sheep…)
   animalsFedDay: { map: 'number' }, // species → last day fed
   mineHp: 'number',                 // mining vein progress (swings remaining)
@@ -181,13 +187,40 @@ const NPC_GIFTS = Object.fromEntries(
 );
 const HEART_THRESHOLDS = [20, 40, 60, 80, 100]; // friendship points at which heart events fire
 
-// ── Tool upgrades (hoe tiers) ──
-// Higher tiers let you farm more efficiently (client reads tier for energy cost).
+// ── Tools & the smithy (Harvest Moon-style) ──────────────────────────────
+// Four working tools; each is tied to one activity. Tiers (base→iron→gold)
+// are bought with credits at the supply depot smithy and reduce the energy
+// every action costs. ONE table shared by server, browser, RL env and MCP —
+// so a human and an agent pay the same price for the same work.
+const TOOL_TIERS = {
+  base: { name: 'Basic', energyMult: 1.0 },
+  iron: { name: 'Iron',  energyMult: 0.8 },
+  gold: { name: 'Gold',  energyMult: 0.6 },
+};
+const TIER_NEXT = { base: 'iron', iron: 'gold', gold: null };   // null = max tier
+const TOOL_DEFS = {
+  hoe:      { id: 'hoe',      label: 'Hoe',          verb: 'till',  upgradeCost: { base: 150, iron: 400 } },
+  watering: { id: 'watering', label: 'Watering Can', verb: 'water', upgradeCost: { base: 200, iron: 500 } },
+  pickaxe:  { id: 'pickaxe',  label: 'Pickaxe',       verb: 'mine',  upgradeCost: { base: 180, iron: 450 } },
+  rod:      { id: 'rod',      label: 'Fishing Rod',   verb: 'fish',  upgradeCost: { base: 120, iron: 350 } },
+};
+const TOOL_ORDER = ['hoe', 'watering', 'pickaxe', 'rod'];
+// which tool powers which energy-costing activity ('' = hands; no tool scales it)
+const TOOL_FOR_ACTION = { till: 'hoe', water: 'watering', mine: 'pickaxe', fish: 'rod' };
+
+// Legacy alias kept for old save/tests: the original HOE ladder only.
 const TOOLS = {
   base: { name: 'Basic Hoe',  next: 'iron',  cost: 150, energyMult: 1.0 },
   iron: { name: 'Iron Hoe',   next: 'gold',  cost: 400, energyMult: 0.8 },
   gold: { name: 'Gold Hoe',   next: null,   cost: 0,    energyMult: 0.6 },
 };
+
+// ── Watering-can tank ─────────────────────────────────────────────────────
+// The can is a real container: watering drains it (WATER_USE_COST per action),
+// and you refill it at a station (the ship's greenhouse tap, the planet's
+// stardust shore). Server-authoritative so agents learn the same chore.
+const WATER_TANK_MAX = 100;   // can capacity, in water units
+const WATER_USE_COST = 20;    // units drained per water action
 
 // ── Energy: one table, one gate. Every action that spends energy goes
 //    through _energyCost()/_spendEnergy() on the room — nothing else mutates
@@ -372,7 +405,7 @@ const QUESTS = {
     act: 2, giver: 'quasar', title: 'Worth His Wrench',
     brief: 'The generator work needs clean cuts, not Grandpa\u2019s basic hoe. Quasar finally parts with the iron one. "It was never really mine," he says.',
     objectives: [
-      { type: 'tool', n: 1, tool: 'iron', label: 'Upgrade to the Iron Hoe' },
+      { type: 'tool', n: 1, toolId: 'hoe', tool: 'iron', label: 'Upgrade to the Iron Hoe' },
     ],
     reward: { credits: 100 }, next: 'q2_cook_feast',
   },
@@ -562,6 +595,14 @@ class FarmRoom extends Room {
       const r = this.onUpgradeTool(client, data);
       if (client && client.send) client.send('upgradeTool', r);
     });
+    this.onMessage('equip', (client, data) => {
+      const r = this.onEquip(client, data);
+      if (client && client.send) client.send('equip', r);
+    });
+    this.onMessage('fillWater', (client, data) => {
+      const r = this.onFillWater(client);
+      if (client && client.send) client.send('fillWater', r);
+    });
     this.onMessage('claimFestival', (client, data) => {
       const r = this.onClaimFestival(client, data);
       if (client && client.send) client.send('claimFestival', r);
@@ -578,6 +619,9 @@ class FarmRoom extends Room {
       tutorialComplete: player.tutorialComplete,
       marriedTo: player.marriedTo,
       tool: player.tool,
+      equipped: player.equipped || '',
+      tools: map(player.tools),
+      waterLevel: player.waterLevel ?? WATER_TANK_MAX,
       friendships: map(player.friendships),
       lastTalkDay: map(player.lastTalkDay),
       heartEvents: map(player.heartEvents),
@@ -640,6 +684,7 @@ class FarmRoom extends Room {
     player.tutorialComplete = !!data.tutorialComplete;
     player.marriedTo = data.marriedTo || '';
     player.tool = data.tool || 'base';
+    player.equipped = data.equipped || '';
     // The save is the source of truth for these collections: clear before
     // fill so a restore can't leave residue from the object being restored
     // into (fresh maps on live join; reset-granted starters on env load).
@@ -652,6 +697,9 @@ class FarmRoom extends Room {
     fill(player.storage, data.storage);
     fill(player.animals, data.animals);
     fill(player.animalsFedDay, data.animalsFedDay);
+    fill(player.tools, data.tools);
+    player.waterLevel = (typeof data.waterLevel === 'number') ? data.waterLevel : WATER_TANK_MAX;
+    this._grantStarterTools(player);   // old saves: migrate to own the basic kit
     player.mineHp = data.mineHp || 0; player.mineMax = data.mineMax || 0;
     player.staminaMax = data.staminaMax || 100;
     player.todayWork = data.todayWork || 0;
@@ -731,6 +779,8 @@ class FarmRoom extends Room {
       freshPlayer.inventory.set('cooked-food', 1);
       freshPlayer.inventory.set('weeds', 1);
       freshPlayer.inventory.set('flowers', 1);
+      // starter tool kit: every new farmer owns the four basic tools.
+      this._grantStarterTools(freshPlayer);
       // 'The Stardust Story' begins for every new farmer — the intro crawl
       // hands them the farm, and Quasar's first quest is waiting in town.
       freshPlayer.quests.current = QUEST_ORDER[0];
@@ -843,7 +893,8 @@ class FarmRoom extends Room {
     p.storage.clear();
     p.animals.clear();
     p.animalsFedDay.clear();
-    // starter gift, same as a brand-new farmer
+    p.tools.clear();
+    // starter gift + starter kit, same as a brand-new farmer
     p.inventory.set('seeds', 5);
     p.inventory.set('tech-part', 2);
     p.inventory.set('starlight-crystal', 1);
@@ -852,6 +903,7 @@ class FarmRoom extends Room {
     p.inventory.set('data-crystal', 1);
     p.inventory.set('rare-mineral', 1);
     p.inventory.set('cooked-food', 1);
+    this._grantStarterTools(p);
     // story restarts (a new cycle of The Stardust Story)
     p.quests.current = '';
     p.quests.completed.clear();
@@ -871,18 +923,63 @@ class FarmRoom extends Room {
   }
 
   // ── Energy authority (single gate) ──
-  _energyCost(action, tool) {
+  // Cost scales with the tier of the tool that powers the activity (a better
+  // hoe/fishing rod/pickaxe/watering can spends less energy per action).
+  _energyCost(action, player) {
     const base = ENERGY_COSTS[action] || 0;
-    const mult = (TOOLS[tool] || TOOLS.base).energyMult || 1.0;
+    const tool = TOOL_FOR_ACTION[action];
+    const tier = (tool && player && player.tools && player.tools.get(tool)) || 'base';
+    const mult = (TOOL_TIERS[tier] || TOOL_TIERS.base).energyMult || 1.0;
     return Math.max(1, Math.round(base * mult));
   }
   _spendEnergy(player, action) {
     if (!player) return { ok: false, reason: 'no-player' };
-    const cost = this._energyCost(action, player.tool);
+    const cost = this._energyCost(action, player);
     if (player.energy < cost) return { ok: false, reason: 'low-energy', need: cost, energy: player.energy };
     player.energy = Math.max(0, player.energy - cost);
     player.todayWork = (player.todayWork || 0) + cost;   // the body keeps the tally
     return { ok: true, spent: cost, energy: player.energy };
+  }
+
+  // ── Tool authority: you must own and EQUIP the right tool for each activity. ──
+  // Hands (equipped '') are also a real state: harvest and social interaction
+  // happen bare-handed; planting a seed into tilled soil needs only hands too.
+  _requireTool(player, toolId, reason) {
+    if (!player) return { ok: false, reason: 'no-player' };
+    if (player.equipped !== toolId) return { ok: false, reason, equipped: player.equipped };
+    return { ok: true };
+  }
+
+  // Every new farmer (and NG+ cycle) owns the basic kit; old saves get it
+  // migrated in _applySave. Tools are upgrades, not purchases.
+  _grantStarterTools(p) {
+    if (!p.tools) return;
+    for (const t of TOOL_ORDER) if (!p.tools.get(t)) p.tools.set(t, 'base');
+    p.equipped = '';
+    p.waterLevel = WATER_TANK_MAX;
+  }
+
+  // ── Equip: put a tool in hand ('' = bare hands → harvest/interact). ──
+  onEquip(client, data) {
+    this._tickClock();  // swapping tools takes a moment of the day
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return { ok: false, reason: 'no-player' };
+    const tool = (data && data.tool) || '';
+    if (tool === '') { player.equipped = ''; return { ok: true, equipped: '' }; }
+    if (!TOOL_DEFS[tool]) return { ok: false, reason: 'unknown-tool', tool };
+    if (!player.tools.get(tool)) return { ok: false, reason: 'dont-own', tool };
+    player.equipped = tool;
+    return { ok: true, equipped: tool };
+  }
+
+  // ── Refill the watering can at a station (ship greenhouse tap / planet shore). ──
+  onFillWater(client) {
+    this._tickClock();  // filling the can takes a moment of the day
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return { ok: false, reason: 'no-player' };
+    if (player.waterLevel >= WATER_TANK_MAX) return { ok: false, reason: 'already-full', level: player.waterLevel };
+    player.waterLevel = WATER_TANK_MAX;
+    return { ok: true, waterLevel: WATER_TANK_MAX };
   }
 
   // ── Colony clock: every meaningful action spends a moment of the day's
@@ -923,10 +1020,16 @@ class FarmRoom extends Room {
     const player = this.state.players.get(client.sessionId);
     if (!(tile && (tile.type === 'seeded' || tile.type === 'growing'))) return { ok: false, reason: 'bad-tile' };
     if (tile.watered) return { ok: false, reason: 'already-watered' };
+    const tool = this._requireTool(player, 'watering', 'need-watering-can');
+    if (!tool.ok) return tool;
+    if (player.waterLevel < WATER_USE_COST) {
+      return { ok: false, reason: 'no-water', level: player.waterLevel, need: WATER_USE_COST };
+    }
     const gate = this._spendEnergy(player, 'water');
     if (!gate.ok) return gate;
+    player.waterLevel = Math.max(0, player.waterLevel - WATER_USE_COST);
     tile.watered = true;
-    return { ok: true, energy: player.energy };
+    return { ok: true, energy: player.energy, waterLevel: player.waterLevel };
   }
 
   onHarvest(client, data) {
@@ -935,6 +1038,8 @@ class FarmRoom extends Room {
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
     if (!(tile && tile.type === 'mature')) return { ok: false, reason: 'not-mature' };
     const player = this.state.players.get(client.sessionId);
+    const hands = this._requireTool(player, '', 'need-hands');
+    if (!hands.ok) return hands;   // harvesting is bare-handed work
     const gate = this._spendEnergy(player, 'harvest');
     if (!gate.ok) return gate;
     const info = CROP_INFO[tile.crop] || { cr: 50, regrow: false };
@@ -963,6 +1068,8 @@ class FarmRoom extends Room {
     const tile = farm?.tiles.find(t => t.x === data.tileX && t.y === data.tileY);
     if (!(tile && tile.type === 'empty')) return { ok: false, reason: 'bad-tile' };
     const player = this.state.players.get(client.sessionId);
+    const tool = this._requireTool(player, 'hoe', 'need-hoe');
+    if (!tool.ok) return tool;
     const gate = this._spendEnergy(player, 'till');
     if (!gate.ok) return gate;
     tile.type = 'tilled';
@@ -1296,6 +1403,8 @@ class FarmRoom extends Room {
     this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
+    const rod = this._requireTool(player, 'rod', 'need-rod');
+    if (!rod.ok) return rod;
     const gate = this._spendEnergy(player, 'fish');
     if (!gate.ok) return gate;
     // location + season + time gating: only eligible fish bite here & now
@@ -1323,6 +1432,8 @@ class FarmRoom extends Room {
     this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
+    const pick = this._requireTool(player, 'pickaxe', 'need-pickaxe');
+    if (!pick.ok) return pick;
     const gate = this._spendEnergy(player, 'mine');
     if (!gate.ok) return gate;
     // start a fresh vein if none is active (some veins are quick, some deep)
@@ -1429,20 +1540,28 @@ class FarmRoom extends Room {
     return { ok: true, item, qty, inventory: cur + qty };
   }
 
-  // ── Tool upgrade: pay credits to improve your hoe tier ──
+  // ── Tool upgrade (the smithy): pay credits to improve a tool's tier. ──
+  // data.tool chooses which tool ('.hoe' default keeps old callers/tests alive).
   onUpgradeTool(client, data) {
     this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
-    const current = player.tool || 'base';
-    const cfg = TOOLS[current];
-    if (!cfg || !cfg.next) return { ok: false, reason: 'max-tier', tool: current };
-    if (player.credits < cfg.cost) return { ok: false, reason: 'not-enough-credits', need: cfg.cost };
-    player.credits -= cfg.cost;
-    this._ledgerAdd(client.sessionId, { spent: cfg.cost });
-    player.tool = cfg.next;
+    const tool = (data && data.tool) || 'hoe';
+    const def = TOOL_DEFS[tool];
+    if (!def) return { ok: false, reason: 'unknown-tool', tool };
+    const current = player.tools.get(tool) || 'base';
+    const next = TIER_NEXT[current];
+    if (!next) return { ok: false, reason: 'max-tier', tool, tier: current };
+    const cost = def.upgradeCost[current];
+    if (cost == null) return { ok: false, reason: 'no-upgrade', tool, tier: current };
+    if (player.credits < cost) return { ok: false, reason: 'not-enough-credits', need: cost, tool };
+    player.credits -= cost;
+    this._ledgerAdd(client.sessionId, { spent: cost });
+    player.tools.set(tool, next);
+    if (tool === 'hoe') player.tool = next;   // keep the legacy alias honest
+    const name = `${TOOL_TIERS[next].name} ${def.label}`;
     this.checkQuestComplete(client);   // 'tool' objective is level-based
-    return { ok: true, tool: cfg.next, name: TOOLS[cfg.next].name, credits: player.credits };
+    return { ok: true, tool, tier: next, name, credits: player.credits };
   }
 
   // ── Seasonal festival claim: attend once per festival for rewards ──
@@ -1494,7 +1613,8 @@ class FarmRoom extends Room {
   objectiveMet(qid, player, obj, i) {
     if (obj.type === 'tool') {
       const rank = { base: 0, iron: 1, gold: 2 };
-      return (rank[player.tool] || 0) >= (rank[obj.tool] || 0);
+      const tier = (player.tools && player.tools.get(obj.toolId || 'hoe')) || 'base';
+      return (rank[tier] || 0) >= (rank[obj.tool] || 0);
     }
     if (obj.type === 'friendship') {
       let c = 0;
@@ -1566,4 +1686,4 @@ class FarmRoom extends Room {
   }
 }
 
-module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS };
+module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST };
