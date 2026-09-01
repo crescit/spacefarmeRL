@@ -41,6 +41,16 @@ const CLIENT_TOOLS = {
   rod:      { label: 'Fishing Rod' },
 };
 const TOOL_TIER_NAME = { base: 'Basic', iron: 'Iron', gold: 'Gold' };
+// smithy upgrade ladder (mirror of server TOOL_DEFS.upgradeCost): next[i] is the
+// CR cost to go base→iron, iron→gold. The server owns the credits; this table
+// only lets the smithy screen show prices without a round-trip.
+const SMITHY_TOOLS = {
+  hoe:      { label: 'Hoe',          next: [150, 400] },
+  watering: { label: 'Watering Can', next: [200, 500] },
+  pickaxe:  { label: 'Pickaxe',       next: [180, 450] },
+  rod:      { label: 'Fishing Rod',   next: [120, 350] },
+};
+const TIER_TO_NEXT = { base: 'iron', iron: 'gold', gold: null };
 const WATER_TANK_MAX = 100;          // mirror of server WATER_TANK_MAX
 const WATER_USE_COST = 20;           // mirror of server WATER_USE_COST (per water action)
 const FILL_SPOT = { x: 27, y: 22 }; // the shore tap — refill the can here
@@ -165,6 +175,7 @@ class PlanetScene extends Phaser.Scene {
     this._recipeSel = 0;
     this.showingQuests = false;
     this.showingBackpack = false;
+    this.showingSmithy = false;
     this._prevQuestId = null;    // last-seen current quest → drives the "quest complete" banner
     this._arcDoneFired = false;  // ending banner fires once
     this.playerDir = 'front';
@@ -797,6 +808,21 @@ class PlanetScene extends Phaser.Scene {
     this.backpackPanel.add([bkBg, bkTitle, bkClose]);
     this.backpackTitle = bkTitle;
     this._backpackDynamic = [];
+
+    // ── Smithy (Slice 4) — spend credits to upgrade each tool's tier. Rows are
+    //    tap targets (mobile) AND 1-4 keys (desktop); _renderSmithy() fills the
+    //    dynamic rows. U and the hub's SMITHY row both land here. ──
+    this.smithyPanel = this.add.container(width / 2, height / 2).setDepth(1012).setVisible(false);
+    const smBg = this.add.rectangle(0, 0, 480, 420, 0x070714, 0.96).setStrokeStyle(3, 0xd8a05a);
+    const smTitle = this.add.text(0, -178, 'SMITHY - UPGRADE TOOLS', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#ffe9a0',
+    }).setOrigin(0.5);
+    const smClose = this.add.text(0, 196, '[1-4] UPGRADE    [SPACE/B] CLOSE', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+    }).setOrigin(0.5);
+    this.smithyPanel.add([smBg, smTitle, smClose]);
+    this.smithyTitle = smTitle;
+    this._smithyDynamic = [];
   }
 
   // ── Persistence blip — the server pings 'saved' after flushing a save ──
@@ -1173,15 +1199,33 @@ rations, and your name on the manifest.
     });
   }
 
-  // ── Tool upgrade: spend credits to improve your hoe (U key) ──
-  upgradeTool() {
+  // ── Tool upgrade: spend credits at the smithy to raise a tool's tier.
+  //    Server-authoritative (onUpgradeTool). `tool` defaults to 'hoe' for
+  //    legacy callers (the old single-hoe upgrade path). ──
+  upgradeTool(tool) {
     const net = window.SpaceFarmer.net;
-    if (!net || !net.connected) { this.showToast('Offline — no upgrades.'); return; }
-    net.request('upgradeTool', {}).then(r => {
-      if (r && r.ok) { this.tool = r.tool; if (this.audio) this.audio.sfx('confirm'); this.showToast(`Upgraded to the ${r.name}! ${r.credits} CR left.`); }
-      else if (r && r.reason === 'not-enough-credits') this.showToast(`Need ${r.need} CR for the next hoe.`);
-      else if (r && r.reason === 'max-tier') this.showToast('Your Gold Hoe is the finest in the colony.');
-      else this.showToast('Could not upgrade.');
+    if (!net || !net.connected) { this.showToast('Offline — the smithy is closed.'); return; }
+    if (this._smithyBusy) return;
+    this._smithyBusy = true;
+    net.request('upgradeTool', { tool: tool || 'hoe' }).then(r => {
+      this._smithyBusy = false;
+      if (r && r.ok) {
+        this.toolTiers = this.toolTiers || {};
+        this.toolTiers[r.tool] = r.tier;
+        if (r.tool === 'hoe') this.tool = r.tier;    // keep the legacy alias honest
+        if (this.audio) this.audio.sfx('confirm');
+        this.showToast(`Upgraded to the ${r.name}! ${r.credits} CR left.`);
+      } else if (r && r.reason === 'not-enough-credits') {
+        const def = SMITHY_TOOLS[r.tool];
+        this.showToast(`Need ${r.need} CR to upgrade the ${def ? def.label : 'tool'}.`);
+      } else if (r && r.reason === 'max-tier') {
+        this.showToast('This tool is already the finest in the colony.');
+      } else if (r && r.reason === 'no-upgrade') {
+        this.showToast('There is no further upgrade for that tool.');
+      } else {
+        this.showToast('Could not upgrade.');
+      }
+      if (this.showingSmithy) this._renderSmithy();
       this.updateHUD();
     });
   }
@@ -1732,7 +1776,7 @@ rations, and your name on the manifest.
       this.hub.confirm(this.hub.sel);
       return;
     }
-    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingBackpack) {
+    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingBackpack || this.showingSmithy) {
       this.closeAllPanels();
       return;
     }
@@ -1865,7 +1909,7 @@ rations, and your name on the manifest.
       this.tickNpc(b, dt, time);
     }
 
-    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack) {
+    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack || this.showingSmithy) {
       if (this.inAlienContact) {
         if (this._diaNPC && !this._diaDone) this.dialoguePortrait.setTexture("port." + this._diaNPC + "_" + (Math.floor(time / 70) % 3));
         if (this.contactPhase === "choice") {
@@ -1965,6 +2009,13 @@ rations, and your name on the manifest.
         rowKeys.forEach((k, i) => { if (k && Phaser.Input.Keyboard.JustDown(k)) this.equipTool(rowTools[i]); });
         if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
       }
+      // ── Smithy: keys 1-4 upgrade a tool (same ladder the tap rows use). ──
+      if (this.showingSmithy) {
+        const smTools = ['hoe', 'watering', 'pickaxe', 'rod'];
+        const smKeys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey];
+        smKeys.forEach((k, i) => { if (k && Phaser.Input.Keyboard.JustDown(k)) this.upgradeTool(smTools[i]); });
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
+      }
       if (!this.inDialogue && !this.showingHub && (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey))) {
         this.closeAllPanels();
       }
@@ -2053,7 +2104,7 @@ rations, and your name on the manifest.
     // the row in the hub) rather than a global hotkey.
     if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.toggleHub();
     if (Phaser.Input.Keyboard.JustDown(this.iKey)) this.openShop();
-    if (Phaser.Input.Keyboard.JustDown(this.uKey)) this.upgradeTool();
+    if (Phaser.Input.Keyboard.JustDown(this.uKey)) this.openSmithy();
     if (Phaser.Input.Keyboard.JustDown(this.vKey)) this.claimFestival();
     if (this.qKey && Phaser.Input.Keyboard.JustDown(this.qKey)) this.toggleQuestLog();
     if (Phaser.Input.Keyboard.JustDown(this.gKey) && this.inDialogue) this.handleGift(this.selectedNPC);
@@ -3055,9 +3106,11 @@ rations, and your name on the manifest.
     if (this.recipePanel) this.recipePanel.setVisible(false);
     if (this.questPanel) this.questPanel.setVisible(false);
     if (this.backpackPanel) this.backpackPanel.setVisible(false);
+    if (this.smithyPanel) this.smithyPanel.setVisible(false);
     if (this.hub) this.hub.close();
     this.showingHub = false;
     this.showingBackpack = false;
+    this.showingSmithy = false;
     this.showingGE = false;
     this.showingShop = false;
     this.showingRanch = false;
@@ -3072,6 +3125,18 @@ rations, and your name on the manifest.
   }
 
   openGrandExchange() {
+    // The Grand Exchange is a PLACE, not a menu item: you walk to its building
+    // and use the sell board at its door. The hub's EXCHANGE row (and any
+    // shortcut) coaches you there instead of teleporting the board open, so the
+    // building stays the thing you visit — SPACE/A at the door opens it.
+    const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
+    const exch = BUILDINGS.find(b => b.action === 'exchange');
+    const door = exch ? exch.door : { x: 30, y: 11 };
+    if (Math.hypot(px - door.x, py - door.y) > 2.5) {
+      this.showToast('The Exchange is a building — walk to the grand exchange stand to trade.');
+      this._pingBuilding('exchange');
+      return;
+    }
     this.showingGE = true;
     this.gePanel.setVisible(true);
     const counts = {
@@ -3093,6 +3158,20 @@ rations, and your name on the manifest.
       `[SPACE] Close\n\n` +
       `${this.credits} CR on hand`
     );
+  }
+
+  // ── Bounce marker over a building so the player can SEE where to walk. ──
+  _pingBuilding(key) {
+    const bs = (this.buildingSprites || []).find(o => o.b && o.b.key === key);
+    if (!bs) return;
+    const bx = bs.b.x * T, by = bs.b.y * T;
+    const m = this.add.text(bx, by - 40, `${bs.b.label || ''}  ▼`, {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#ffe9a0',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(960);
+    this.world.add(m);
+    this.tweens.add({ targets: m, y: by - 28, duration: 260, yoyo: true, repeat: 7 });
+    this.time.delayedCall(4500, () => m.destroy());
   }
 
   // ── Grand Exchange sell — turn holdings into credits (server ledger).
@@ -3282,10 +3361,53 @@ rations, and your name on the manifest.
     this._backpackDynamic.push(cargo);
   }
 
-  // ── Smithy: tool upgrades for credits (Slice 4). ──
+  // ── Smithy: per-tool upgrades for credits (Slice 4). Rows are tap-friendly
+  //    (mobile) and 1-4 driven (desktop). ──
   openSmithy() {
-    if (typeof this._openSmithyPanel === 'function') this._openSmithyPanel();
-    else this.showToast('The smithy is being fitted out…');
+    this._openSmithyPanel();
+  }
+
+  _openSmithyPanel() {
+    this.showingSmithy = true;
+    this.smithyPanel.setVisible(true);
+    this._renderSmithy();
+    if (this.audio) this.audio.sfx('menu', { volume: 0.3 });
+  }
+
+  // ── Rebuild the smithy's rows: each owned tool, current tier → next tier,
+  //    and the CR cost. Rebuilt on open and after every upgrade. ──
+  _renderSmithy() {
+    if (!this.smithyPanel) return;
+    for (const d of this._smithyDynamic) d.destroy();
+    this._smithyDynamic = [];
+    const rowH = 54, rowGap = 6, topY = -120;
+    const toolIds = ['hoe', 'watering', 'pickaxe', 'rod'];
+    const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", stroke: '#04080c', strokeThickness: 2 };
+    toolIds.forEach((id, i) => {
+      const cur = this.toolTiers[id] || 'base';
+      const next = TIER_TO_NEXT[cur];
+      const def = SMITHY_TOOLS[id] || { label: id, next: [] };
+      const cost = next ? def.next[cur === 'base' ? 0 : 1] : null;
+      const y = topY + i * (rowH + rowGap);
+      const rect = this.add.rectangle(0, y, 440, rowH - 8, 0x0d1624, 0.96)
+        .setStrokeStyle(next ? 1.5 : 1, next ? 0xd8a05a : 0x2c3c50)
+        .setInteractive({ useHandCursor: true });
+      rect.on('pointerdown', () => { if (next) this.upgradeTool(id); });
+      const name = this.add.text(-206, y - 8, `[${i + 1}] ${def.label}`, {
+        ...f, fontSize: '13px', color: '#ffe9a0', fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      const hint = this.add.text(-206, y + 12,
+        next ? `${TOOL_TIER_NAME[cur]} → ${TOOL_TIER_NAME[next]}   ·   ${cost} CR` : `${TOOL_TIER_NAME[cur]} — the finest in the colony`,
+        { ...f, fontSize: '10px', color: next ? '#8fb8ae' : '#d8a05a' }).setOrigin(0, 0.5);
+      this.smithyPanel.add([rect, name, hint]);
+      this._smithyDynamic.push(rect, name, hint);
+    });
+    const foot = this.add.text(0, 152, `${this.credits} CR on hand   ·   higher tiers cut energy costs`, {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', color: '#ffe9a0',
+      align: 'center',
+    }).setOrigin(0.5);
+    this.smithyPanel.add(foot);
+    this._smithyDynamic.push(foot);
   }
 
   // ── Supply Depot purchase — the farm needs seeds, and the depot can't be a
