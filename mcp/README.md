@@ -24,15 +24,19 @@ npm run test:mcp     # node mcp/smoke.cjs
 ## What MCP clients get
 
 - **Tools — the full W1 surface**, single-sourced from `rl/env_core.cjs`:
-  `till`, `plant`, `water`, `harvest`, `sell`, `buy_animal`, `feed`,
-  `upgrade_tool`, `fish`, `mine`, `gift`, `talk`, `claim_festival`, `rest`
-  (the world actions), plus the eyes-and-memory tools `inspect`, `get_state`,
-  `read_colony_log`, `write_journal`, and one MCP-only **environment control**
-  tool — `reset(seed)` — that starts a fresh deterministic episode (clearly
+  `equip` (put a tool in hand — farm work is tool-gated), `fill_water` (refill
+  the watering can at a station), `till`, `plant`, `water`, `harvest`, `sell`,
+  `buy_animal`, `feed`, `upgrade_tool` (now per-tool: pass `tool`), `fish`,
+  `mine`, `gift`, `talk`, `claim_festival`, `rest` (the world actions), plus
+  the eyes-and-memory tools `inspect`, `get_state`, `read_colony_log`,
+  `write_journal`, and one MCP-only **environment control** tool —
+  `reset(seed)` — that starts a fresh deterministic episode (clearly
   documented as *not* a world action).
 - **Resources:**
-  - `farm://state` — the colony’s quiet ledger (credits, energy, inventory,
-    farm tiles, livestock, friendships);
+  - `farm://state` — the colony’s quiet ledger (credits, energy, equipped
+    tool + can tank, inventory, farm tiles, livestock, friendships);
+  - `farm://backpack` — what you carry right now: the equipped tool, every
+    tool you own with its tier, the watering-can tank, and your cargo;
   - `farm://colony-log` — what has happened since arrival, day by day;
   - `farm://npc/<id>` — a colonist’s profile: who they are, their friendship
     with you, and what they love/like/loathe;
@@ -83,6 +87,7 @@ npx @modelcontextprotocol/inspector node mcp/server.cjs
 ~~~
 
 For a standard interactive LLM session the end-to-end flow is: read
-`farm://state` and `farm://colony-log` → `briefing`-style context via a tool
-call or prompt → act (plant/water/harvest/talk/gift…) → `write_journal` to
-remember → `rest` to end the day.
+`farm://state` and `farm://backpack` → `briefing`-style context via a tool
+call or prompt → **equip the right tool** (`equip`) → act
+(plant/water/harvest/mine/fish/talk/gift…) → `fill_water` when the can runs
+low → `write_journal` to remember → `rest` to end the day.

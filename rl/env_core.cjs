@@ -11,7 +11,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-const { FarmRoom, QUESTS, ENERGY_COSTS, TOOL_DEFS, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
+const { FarmRoom, QUESTS, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
 // The calendar is a SERVICE with ONE implementation (shared/calendar.js). This
 // env never re-implements season math, crop maturity, growth pacing, or
@@ -46,6 +46,7 @@ const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 
 const ACTION_TYPES = ['equip', 'fill_water', 'till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
 const TOOL_IDS = ['', 'hoe', 'watering', 'pickaxe', 'rod'];
+const UPGRADE_TOOL_IDS = ['hoe', 'watering', 'pickaxe', 'rod'];
 const TIER_NUM = { base: 0, iron: 1, gold: 2 };
 
 // ── Story clock: the calendar is the story's heartbeat. Season/festival math
@@ -183,8 +184,14 @@ const TOOLS = [
   },
   {
     name: 'upgrade_tool',
-    description: 'Pay credits to upgrade your hoe. A better hoe spends less energy in the field.',
-    parameters: { type: 'object', additionalProperties: false, properties: {} },
+    description: 'Pay credits at the smithy to upgrade ONE owned tool to its next tier (basic → iron → gold). Higher tiers spend less energy in the field.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        tool: { type: 'string', enum: UPGRADE_TOOL_IDS, description: 'Which tool to upgrade (hoe, watering, pickaxe, or rod).' },
+      },
+      required: ['tool'],
+    },
   },
   {
     name: 'fish',
@@ -281,6 +288,9 @@ const TOOL_BY_NAME = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]));
 function toolArgsToNative(name, args = {}) {
   const a = args || {};
   if (name === 'rest' || name === 'advance_day') return { type: 'advance_day' };
+  if (name === 'equip') return { type: 'equip', tool: String(a.tool || '') };
+  if (name === 'fill_water') return { type: 'fill_water' };
+  if (name === 'upgrade_tool') return { type: 'upgrade_tool', tool: String(a.tool || 'hoe') };
   if (name === 'till' || name === 'water' || name === 'harvest') {
     return { type: name, tileX: Number(a.x), tileY: Number(a.y) };
   }
@@ -295,7 +305,7 @@ function toolArgsToNative(name, args = {}) {
     return { type: 'gift', npc: String(a.npc), item: String(a.item), quantity: Number(a.quantity ?? 1) };
   }
   if (name === 'talk') return { type: 'talk', npc: String(a.npc) };
-  if (name === 'upgrade_tool' || name === 'mine' || name === 'claim_festival') return { type: name };
+  if (name === 'mine' || name === 'claim_festival') return { type: name };
   return null; // introspection tools are handled by the caller
 }
 
@@ -695,8 +705,9 @@ class FarmEnv {
     const inv = obs.inventory.map((v, i) => v > 0 ? `${ITEMS[i]} x${v}` : null).filter(Boolean);
     const animals = Object.fromEntries(p.animals || []);
     const friends = Object.fromEntries(p.friendships || []);
+    const equipped = obs.equipped ? this.toolName(obs.equipped) : 'bare hands';
     const parts = [
-      `stamina ${obs.energy}/${obs.staminaMax || 100} · credits ${obs.credits} · day ${st.day} · ${this.calendar.seasonName(st.day)} · hoe ${p.tool || 'base'}`,
+      `stamina ${obs.energy}/${obs.staminaMax || 100} · credits ${obs.credits} · day ${st.day} · ${this.calendar.seasonName(st.day)} · in hand ${equipped}${obs.equipped === 'watering' ? ` · tank ${obs.waterLevel}/${WATER_TANK_MAX}` : ''}`,
       `farm [${counts.join(' ')}]`,
     ];
     if (inv.length) parts.push(`inventory ${inv.join(', ')}`);
@@ -707,6 +718,28 @@ class FarmEnv {
     if (p.quests && p.quests.completed.length) parts.push(`quests done ${p.quests.completed.length}`);
     if (p.marriedTo) parts.push(`married to ${p.marriedTo}`);
     return '[' + parts.join(' | ') + ']';
+  }
+
+  // human name for a tool+its tier, e.g. "Iron Hoe" (mirror of the web HUD)
+  toolName(id) {
+    const tier = this.obs().toolTiers[id] || 'base';
+    const def = TOOL_DEFS[id] || { label: id };
+    return `${TOOL_TIERS[tier] ? TOOL_TIERS[tier].name : tier} ${def.label}`;
+  }
+
+  // ── The backpack: what the Keeper is carrying right now (equip-aware) ──
+  backpackText() {
+    const obs = this.obs();
+    const label = (id) => (TOOL_DEFS[id] || { label: id }).label;
+    const equipped = obs.equipped ? this.toolName(obs.equipped) : 'bare hands';
+    const tools = TOOL_ORDER.map((id) => `${this.toolName(id)}`).join(', ');
+    const cargo = obs.inventory.map((v, i) => v > 0 ? `${ITEMS[i]} x${v}` : null).filter(Boolean);
+    return [
+      'BACKPACK — what you carry',
+      `in hand: ${equipped}${obs.equipped === 'watering' ? ` (can tank ${obs.waterLevel}/${WATER_TANK_MAX})` : ''}`,
+      `tools owned: ${tools}`,
+      `cargo: ${cargo.join(', ') || 'empty — plant a field!'}`,
+    ].join('\n');
   }
 
   inspectText(target) {

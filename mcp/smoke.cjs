@@ -62,28 +62,36 @@ function main() {
       // 2. tools/list — the full W1 surface is single-sourced from env_core
       const tools = await rpc('tools/list');
       const names = (tools.tools || []).map((t) => t.name).sort();
-      for (const want of ['till', 'plant', 'water', 'harvest', 'sell', 'buy_animal',
+      for (const want of ['equip', 'fill_water', 'till', 'plant', 'water', 'harvest', 'sell', 'buy_animal',
         'feed', 'upgrade_tool', 'fish', 'mine', 'gift', 'talk', 'claim_festival',
         'rest', 'inspect', 'get_state', 'read_colony_log', 'write_journal', 'reset']) {
         if (!names.includes(want)) { failed++; console.error(`  ✗ tool list missing ${want}`); }
       }
-      assert(names.length >= 19, `tools/list → 19+ tools (got ${names.length})`);
+      assert(names.length >= 21, `tools/list → 21+ tools (got ${names.length})`);
       const till = tools.tools.find((t) => t.name === 'till');
       assert(!!till && till.inputSchema && till.inputSchema.properties.x, 'till inputSchema carries tile x (single source)');
+      const equip = tools.tools.find((t) => t.name === 'equip');
+      assert(!!equip && equip.inputSchema && equip.inputSchema.properties.tool, 'equip inputSchema carries the tool enum (single source)');
 
-      // 3. world round trip — till → plant → water → harvest must earn credits
+      // 3. world round trip — EQUIP hoe → till → plant → EQUIP can → water
+      //    (refilling via fill_water when the tank runs low) → EQUIP hands →
+      //    harvest must earn credits.
       const cash0 = (await rpc('tools/call', { name: 'get_state', arguments: {} })).content[0].text;
+      await rpc('tools/call', { name: 'equip', arguments: { tool: 'hoe' } });
       const t0 = await rpc('tools/call', { name: 'till', arguments: { x: 0, y: 0 } });
       assert(!t0.isError && /ground|soil|refus/i.test(t0.content[0].text), 'till(0,0) → world voice');
       const p0 = await rpc('tools/call', { name: 'plant', arguments: { x: 0, y: 0, crop: 'space-wheat' } });
       assert(!p0.isError, 'plant(0,0,space-wheat) ok');
+      await rpc('tools/call', { name: 'equip', arguments: { tool: 'watering' } });
       const w0 = await rpc('tools/call', { name: 'water', arguments: { x: 0, y: 0 } });
       assert(!w0.isError, 'water(0,0) ok');
       // each day the crop must be watered again to keep growing (6 spring days)
       for (let i = 0; i < 6; i++) {
         await rpc('tools/call', { name: 'water', arguments: { x: 0, y: 0 } });
+        await rpc('tools/call', { name: 'fill_water', arguments: {} });
         await rpc('tools/call', { name: 'rest', arguments: {} });
       }
+      await rpc('tools/call', { name: 'equip', arguments: { tool: '' } });
       const h0 = await rpc('tools/call', { name: 'harvest', arguments: { x: 0, y: 0 } });
       const cash1 = (await rpc('tools/call', { name: 'get_state', arguments: {} })).content[0].text;
       const credits0 = (cash0.match(/credits (\d+)/) || [])[1];
@@ -91,11 +99,13 @@ function main() {
       assert(!h0.isError, 'harvest(0,0) after spring growth');
       assert(Number(credits1) > Number(credits0), `credits rose ${credits0} → ${credits1}`);
 
-      // 4. resources — templates, state, npc, year
+      // 4. resources — templates, state, backpack, npc, year
       const templates = await rpc('resources/templates/list');
       assert(templates.resourceTemplates && templates.resourceTemplates.length >= 2, 'resources/templates/list → 2+ templates');
       const stateRes = await rpc('resources/read', { uri: 'farm://state' });
       assert(/day \d+/i.test(stateRes.contents[0].text), 'farm://state readable');
+      const packRes = await rpc('resources/read', { uri: 'farm://backpack' });
+      assert(/BACKPACK/.test(packRes.contents[0].text) && /in hand/.test(packRes.contents[0].text), 'farm://backpack shows equip state');
       const npcRes = await rpc('resources/read', { uri: 'farm://npc/nova' });
       assert(/\bNova\b/.test(npcRes.contents[0].text), 'farm://npc/nova readable');
       const yearRes = await rpc('resources/read', { uri: 'farm://year/1' });

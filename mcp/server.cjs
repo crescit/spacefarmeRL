@@ -100,7 +100,8 @@ function yearSummary(n) {
 }
 
 const RESOURCES = [
-  { uri: 'farm://state', name: 'Colony state', description: 'The colony\u2019s quiet ledger: credits, energy, inventory, farm tiles, livestock, friendships.' },
+  { uri: 'farm://state', name: 'Colony state', description: 'The colony\u2019s quiet ledger: credits, energy, equipped tool + tank, inventory, farm tiles, livestock, friendships.' },
+  { uri: 'farm://backpack', name: 'Backpack', description: 'What you carry right now: the equipped tool, every tool you own with its tier, the watering-can tank, and your cargo.' },
   { uri: 'farm://colony-log', name: 'Colony log', description: 'What has happened since arrival, day by day — the log remembers.' },
   ...NPC_IDS.map((id) => ({
     uri: `farm://npc/${id}`,
@@ -117,6 +118,7 @@ const RESOURCE_TEMPLATES = [
 
 function readResource(uri) {
   if (uri === 'farm://state') return env.stateText();
+  if (uri === 'farm://backpack') return env.backpackText();
   if (uri === 'farm://colony-log') return env.colonyLogText();
   const npcMatch = String(uri).match(/^farm:\/\/npc\/([a-z0-9_-]+)$/);
   if (npcMatch) {
