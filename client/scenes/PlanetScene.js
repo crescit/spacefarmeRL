@@ -2936,11 +2936,29 @@ rations, and your name on the manifest.
     this.showToast?.(`DAY ${this.dayCount} :: ${line}`, { duration: 4200, y: 120 });
   }
 
+  // ── Cinematic letterbox: slide the black bars in/out so a cutscene opens and
+  //    closes like a film, not a toggle. ──
+  _cinema(on) {
+    if (!this.cinemaTop || !this.cinemaBottom) return;
+    const dur = 420;
+    const h = this.game.config.height;
+    if (on) {
+      this.cinemaTop.setVisible(true).setY(-34);
+      this.cinemaBottom.setVisible(true).setY(h + 34);
+      this.tweens.add({ targets: this.cinemaTop, y: 34, duration: dur, ease: 'Cubic.easeOut' });
+      this.tweens.add({ targets: this.cinemaBottom, y: h - 34, duration: dur, ease: 'Cubic.easeOut' });
+    } else {
+      this.tweens.killTweensOf([this.cinemaTop, this.cinemaBottom]);
+      this.tweens.add({ targets: this.cinemaTop, y: -34, duration: dur, ease: 'Cubic.easeIn', onComplete: () => this.cinemaTop.setVisible(false) });
+      this.tweens.add({ targets: this.cinemaBottom, y: h + 34, duration: dur, ease: 'Cubic.easeIn', onComplete: () => this.cinemaBottom.setVisible(false) });
+    }
+  }
+
   // ── First contact: cinematic arrival, ambiguous council, persistent aftermath ──
   startAlienContact(alien) {
     this.closeAllPanels();
     this.selectedAlien = alien; this.inAlienContact = true;
-    this.cinemaTop.setVisible(true); this.cinemaBottom.setVisible(true);
+    this._cinema(true);
     const prior = this.contactChoices[alien.scenarioId];
     if (prior) { this.showContactCouncil(alien, prior); return; }
     this.contactPhase = "arrival";
@@ -3075,6 +3093,7 @@ rations, and your name on the manifest.
     ];
     this.eventQueue = heartLines;
     this.eventIdx = 0;
+    this._cinema(true);                     // cinematic letterbox for the payoff
     this._renderEventLine(threshold);
     // heart-event jingle
     if (this.audio) this.audio.sfx('romance', { volume: 0.5 });
@@ -3096,6 +3115,7 @@ rations, and your name on the manifest.
     } else {
       this.eventQueue = null;
       this.eventIdx = 0;
+      this._cinema(false);                      // close the letterbox
       this.startNPCDialogue(this.selectedNPC);  // return to normal dialogue
     }
   }
@@ -3187,8 +3207,7 @@ rations, and your name on the manifest.
     this._diaDone = true;
     this.gePanel.setVisible(false);
     if (this.contactPanel) this.contactPanel.setVisible(false);
-    if (this.cinemaTop) this.cinemaTop.setVisible(false);
-    if (this.cinemaBottom) this.cinemaBottom.setVisible(false);
+    this._cinema(false);
     this.shopPanel.setVisible(false);
     this.ranchPanel.setVisible(false);
     this.chestPanel.setVisible(false);
