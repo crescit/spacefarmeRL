@@ -404,6 +404,7 @@ class PlanetScene extends Phaser.Scene {
       const marker = this.add.text(ax, ay + 38, "FIRST CONTACT", { fontFamily: "system-ui, sans-serif", fontSize: "6px", color: "#f3d99b", stroke: "#000", strokeThickness: 2 }).setOrigin(0.5).setDepth(alien.y + 0.8);
       this.world.add([aura, spr, label, marker]);
       spr.alienId = alien.id; spr._aura = aura; spr._marker = marker; spr._label = label;
+      spr._baseY = ay;
       this.alienSprites.push(spr);
       this._applyContactAftermath(alien, false);
     }
@@ -1960,6 +1961,24 @@ rations, and your name on the manifest.
     for (const b of Object.values(this.npcBrains)) {
       this.tickNpc(b, dt, time);
     }
+    // ── Alien idle animation — bioluminescent envoys breathe and their aura
+    //    pulses on their own phase, so first contact reads as alive, not a sticker.
+    if (this.alienSprites) {
+      for (const a of this.alienSprites) {
+        const ph = (a.alienId || 'a').length * 1.7;
+        a.y = (a._baseY || a.y) + Math.sin(time * 0.0012 + ph) * 2;
+        if (a.setScale) a.setScale(0.9 + 0.02 * Math.sin(time * 0.0016 + ph));
+        if (a._aura && a._aura.setAlpha) a._aura.setAlpha(0.24 + 0.12 * Math.sin(time * 0.0016 + ph));
+      }
+    }
+    // ── Festival crowd idle sway — guests bob on their own phase (the singer
+    //    keeps its dedicated tween), so the plaza reads as a living crowd.
+    if (this.festivalGuests && this._festActive()) {
+      for (const g of this.festivalGuests) {
+        if (g.singing) continue;
+        g.spr.y = g.baseY + Math.sin(time * 0.0016 + g.phase) * 2;
+      }
+    }
 
     if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack || this.showingSmithy) {
       if (this.inAlienContact) {
@@ -2273,6 +2292,9 @@ rations, and your name on the manifest.
         this._pickErrand(b);
       }
       spr.setTexture(`npc.${b.id}_0`);
+      // idle "breath" — a gentle scale bob so the colony never sits frozen
+      // (guarded: the headless test harness may expose a sprite without setScale)
+      if (spr.setScale) spr.setScale(1 + 0.02 * Math.sin(time * 0.0018 + (b.id.length * 1.3)));
       if (spr._label) spr._label.setPosition(b.x, b.y - 16);
       return;
     }

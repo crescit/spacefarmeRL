@@ -52,6 +52,9 @@ class IntroScene extends Phaser.Scene {
       .setDepth(950).setAlpha(0.7);
     this.asteroid = this.add.image(width - 210, height - 150, tex('fx.asteroid'))
       .setDepth(940).setScale(0.85).setAlpha(0.9);
+    // the guide droid (BEEP) drifts across the void as a cameo — a thread from
+    // the crawl into the tutorial, so the ship's little guide is never a stranger
+    this.introDroid = this.add.image(120, 300, tex('ship.droid')).setDepth(945).setScale(1.3).setAlpha(0.9);
 
     // ── Title card (hidden until the crawl finishes) ──
     this.titleCard = this.add.container(width / 2, height / 2).setVisible(false);
@@ -237,6 +240,15 @@ class IntroScene extends Phaser.Scene {
     if (this.asteroid) {
       this.asteroid.rotation = Math.sin(this.time.now * 0.00018) * 0.07;
       this.asteroid.y += Math.sin(this.time.now * 0.0004) * 0.06;
+    }
+    // the droid drifts slowly across the nebula, bobbing and swaying like a
+    // little probe — a living detail behind the crawl text
+    if (this.introDroid) {
+      const { width } = this.game.config;
+      this.introDroid.x += 0.22;
+      this.introDroid.y = 300 + Math.sin(this.time.now * 0.0008) * 9;
+      this.introDroid.rotation = Math.sin(this.time.now * 0.0005) * 0.16;
+      if (this.introDroid.x > width + 40) this.introDroid.x = -40;
     }
     this.drawStarfield();
   }
