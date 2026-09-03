@@ -425,6 +425,11 @@ class PlanetScene extends Phaser.Scene {
     ).setScale(0.68).setDepth(PLAYER_START.y + 1);
     this.playerSpeed = 4.4;
     this.world.add(this.playerSpr);
+    // held tool — the equipped hoe/can/pickaxe/rod drawn beside the player so
+    // every craft reads as a held tool, not an invisible press (swung on use).
+    this.toolSpr = this.add.image(this.playerSpr.x, this.playerSpr.y, tex('tool.hoe'))
+      .setVisible(false).setDepth(PLAYER_START.y + 1.2);
+    this.world.add(this.toolSpr);
     // cool rim-light under the player so night keeps their silhouette readable
     // warm pool at the player's feet so night keeps their silhouette readable
     this.playerRim = this.add.image(this.playerSpr.x, this.playerSpr.y + 12, 'fx.pool_player')
@@ -859,7 +864,7 @@ class PlanetScene extends Phaser.Scene {
     this.festivalDecor = [];
     const add = (o) => { o.setVisible(false); this.world.add(o); this.festivalDecor.push(o); return o; };
 
-    // bunting garlands between the lamp posts — sagging rows of pennants
+    // bunting garlands between the lamp posts — sagging rows of colony pennants
     for (const s of FEST_BUNTING) {
       const x1 = px(s.x1), x2 = px(s.x2), y = py(s.y) - 26;
       const n = 9;
@@ -867,12 +872,11 @@ class PlanetScene extends Phaser.Scene {
         const bx = x1 + (x2 - x1) * (i / n);
         const sag = Math.sin((i / n) * Math.PI) * 7;          // catenary-ish dip
         const by = y + sag;
-        const c = EARTH_PALETTE[i % 3];
-        const flag = this.add.rectangle(bx, by, 4, 7, c, 0.95).setOrigin(0.5, 0);
+        const flag = this.add.image(bx, by, texAt('fest.pennant', i)).setOrigin(0.5, 0).setScale(1.1);
         add(flag);
         if (i % 2 === 0) {                                    // string-light bulbs
-          const bulb = this.add.circle(bx, by + 9, 2, 0xfff2c8, 0.95)
-            .setBlendMode(Phaser.BlendModes.ADD);
+          const bulb = this.add.image(bx, by + 9, tex('fest.bulb'))
+            .setBlendMode(Phaser.BlendModes.ADD).setScale(0.8).setAlpha(0.9);
           add(bulb);
         }
       }
@@ -883,28 +887,21 @@ class PlanetScene extends Phaser.Scene {
       add(gx);
     }
 
-    // the stage — a raised platform facing the crowd, with the day's sign
-    const st = this.add.rectangle(px(FEST_STAGE.x), py(FEST_STAGE.y) + 8, 5.2 * T, 1.4 * T, 0x2a2f45, 0.92)
-      .setStrokeStyle(2, 0xd8a05a);
+    // the stage — a colony platform facing the crowd, with a teal edge-glow
+    const st = this.add.image(px(FEST_STAGE.x), py(FEST_STAGE.y) + 8, tex('fest.stage')).setScale(1.9);
     add(st);
     const stageGlow = this.add.rectangle(px(FEST_STAGE.x), py(FEST_STAGE.y) + 14, 5.6 * T, 0.8 * T, 0x2e7d4f, 0.18);
     add(stageGlow);
-    const sign = this.add.text(px(FEST_STAGE.x), py(FEST_STAGE.y) - 4, '★ EARTH DAY ★', {
+    const sign = this.add.text(px(FEST_STAGE.x), py(FEST_STAGE.y) - 12, '★ EARTH DAY ★', {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#ffe9a0', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(12.4);
     add(sign);
 
-    // two food stalls — striped awnings + a table of dishes
+    // two colony food stalls — holo awnings + a glowing counter of dishes
     for (const s of FEST_STALLS) {
       const tx = px(s.x), ty = py(s.y);
-      const table = this.add.rectangle(tx, ty + 4, 1.4 * T, 0.7 * T, 0x6a4a2a, 0.95).setStrokeStyle(1, 0xd8a05a);
-      add(table);
-      const awning = this.add.rectangle(tx, ty - 10, 1.6 * T, 0.5 * T, 0xc0392b, 0.95);
-      add(awning);
-      for (let i = 0; i < 3; i++) {                          // dishes on the table
-        const dish = this.add.circle(tx - 24 + i * 24, ty + 2, 5, EARTH_PALETTE[i % 3], 0.95);
-        add(dish);
-      }
+      const stall = this.add.image(tx, ty - 6, tex('fest.stall')).setOrigin(0.5, 0.5).setScale(1.4);
+      add(stall);
     }
 
     // the visiting crowd — festival guests (reused villager art), hidden unless festival
@@ -955,9 +952,8 @@ class PlanetScene extends Phaser.Scene {
     for (let i = 0; i < 90; i++) {
       const x = px + (Math.random() - 0.5) * 40;
       const y = py - 30 - Math.random() * 20;
-      const c = EARTH_PALETTE[i % 3];
-      const bit = this.add.rectangle(x, y, 3 + Math.random() * 3, 5 + Math.random() * 4, c, 0.95)
-        .setDepth(600).setRotation(Math.random() * Math.PI);
+      const bit = this.add.image(x, y, texAt('fest.confetti', i % 3))
+        .setDepth(600).setRotation(Math.random() * Math.PI).setScale(0.8 + Math.random() * 0.6);
       this.tweens.add({
         targets: bit,
         x: x + (Math.random() - 0.5) * 160,
@@ -1644,30 +1640,16 @@ rations, and your name on the manifest.
     // backdrop (full-viewport dim to mask the world behind)
     stage.add(this.add.rectangle(cx, cy, width, height, 0x000000, 0.82));
 
-    // ── ROOM: a real space, not a card. Back wall band + floor with depth ──
-    // back wall: warm panelled habitat wall
-    stage.add(this.add.rectangle(cx, top + wallH / 2, W, wallH, 0x6e553c)
-      .setStrokeStyle(3, 0x8a6c4a));
-    // wall panel seams (vertical ribs so the repeat reads as plating, not flat)
-    for (let i = 1; i < 6; i++) {
-      const wx = cx - W / 2 + i * (W / 6);
-      stage.add(this.add.rectangle(wx, top + wallH / 2, 2, wallH - 6, 0x5a442e, 0.85));
-    }
-    // warm skirting where wall meets floor (depth cue)
-    stage.add(this.add.rectangle(cx, top + wallH, W, 5, 0x8a6c4a));
-    // floor: warm wood with a soft vertical gradient (lighter at the wall, darker near you)
-    const fg = this.add.graphics();
-    fg.fillGradientStyle(0x6e5538, 0x6e5538, 0x40301e, 0x40301e);
-    fg.fillRect(cx - W / 2, top + wallH, W, H - wallH);
-    stage.add(fg);
-    // floorboard seams
-    for (let i = 1; i < 5; i++) {
-      const ly = top + wallH + i * ((H - wallH) / 5);
-      stage.add(this.add.rectangle(cx, ly, W - 6, 1, 0x3c2d1c, 0.55));
-    }
+    // ── ROOM: a real habitat module, not a timber cabin. Slate panelled wall
+    //    (teal trim) + a machined metal deck floor — the colony's building
+    //    language carries through indoors.
+    stage.add(this.add.image(cx, top + wallH / 2, tex('int.wall')).setScale(W / 96, wallH / 24));
     // warm light pool from the window (the room is LIT)
     stage.add(this.add.image(cx - 30, top + wallH + 26, 'fx.lamp_glow')
       .setBlendMode(Phaser.BlendModes.ADD).setScale(2.6, 1.6).setAlpha(0.20));
+    // metal deck floor — colony seams + a soft vertical gradient (lighter at wall)
+    const fg = this.add.image(cx, top + wallH + (H - wallH) / 2, tex('int.floor')).setScale(W / 96, (H - wallH) / 24);
+    stage.add(fg);
 
     // window (against far wall) — glows with the sky
     const windowImg = this.add.image(cx, top + 44, 'int.window').setScale(0.9);
@@ -1706,27 +1688,27 @@ rations, and your name on the manifest.
     this.intBed = { x: cx - W / 2 + 65, y: cy + H / 2 - 55 };
     this.intBedImg = bedImg;
 
-    // kitchen stove (cook 2 crops → 1 cooked-food)
-    const stove = this.add.rectangle(cx + W / 2 - 55, cy - H / 2 + 40, 70, 34, 0x3a2a20)
-      .setStrokeStyle(2, 0xd8a05a);
+    // kitchen stove (cook 2 crops → 1 cooked-food) — colony galley, not wood fire
+    const stove = this.add.rectangle(cx + W / 2 - 55, cy - H / 2 + 40, 70, 34, 0x232a3c)
+      .setStrokeStyle(2, 0x67e1cd);
     stage.add(stove);
     stage.add(this.add.text(cx + W / 2 - 55, cy - H / 2 + 32, 'STOVE (recipes)', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', color: '#ffe9a0',
     }).setOrigin(0.5));
     this.intStove = { x: cx + W / 2 - 55, y: cy - H / 2 + 40 };
 
-    // storage chest (deposit/withdraw harvests) — beside the bookcase
-    const chest = this.add.rectangle(cx - W / 2 + 22, cy - 40, 44, 30, 0x4a3322)
-      .setStrokeStyle(2, 0xd8a05a);
+    // storage chest (deposit/withdraw harvests) — colony cargo pod beside bookcase
+    const chest = this.add.rectangle(cx - W / 2 + 22, cy - 40, 44, 30, 0x232a3c)
+      .setStrokeStyle(2, 0x67e1cd);
     stage.add(chest);
     stage.add(this.add.text(cx - W / 2 + 22, cy - 56, 'CHEST', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#ffe9a0',
     }).setOrigin(0.5));
     this.intChest = { x: cx - W / 2 + 22, y: cy - 40 };
 
-    // the door (exit) — warm glow marker on the bottom edge
-    const doorRect = this.add.rectangle(cx + W / 2 - 30, cy + H / 2 - 24, 50, 24, 0x2e2118)
-      .setStrokeStyle(2, 0xe0a860);
+    // the door (exit) — teal airlock marker on the bottom edge
+    const doorRect = this.add.rectangle(cx + W / 2 - 30, cy + H / 2 - 24, 50, 24, 0x1c2636)
+      .setStrokeStyle(2, 0x67e1cd);
     stage.add(doorRect);
     stage.add(this.add.text(cx + W / 2 - 30, cy + H / 2 - 36, 'DOOR', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', color: '#ffe9a0',
@@ -1830,6 +1812,30 @@ rations, and your name on the manifest.
     this.handleInteract();
   }
 
+  // ── Held tool sprite: follow the player, show the equipped tool's texture,
+  //    and tuck it to the side the player faces (so it reads as "in hand"). ──
+  _updateToolSprite() {
+    if (!this.toolSpr) return;
+    const e = this.equipped;
+    this.toolSpr.setVisible(!!e);
+    if (!e) return;
+    this.toolSpr.setTexture(tex(`tool.${e}`));
+    const dx = this.playerDir === 'left' ? -1 : this.playerDir === 'right' ? 1 : 0;
+    const dy = this.playerDir === 'back' ? -1 : (this.playerDir === 'front' ? 1 : 0);
+    this.toolSpr.setPosition(this.playerSpr.x + dx * 9, this.playerSpr.y + dy * 7 - 3);
+    this.toolSpr.setDepth(this.playerSpr.depth + 0.2);
+    this.toolSpr.setFlipX(dx < 0);
+    this.toolSpr.setScale(0.78);
+  }
+
+  // ── Swing the held tool: a quick raise-and-settle so a press visibly uses it.
+  _swingTool() {
+    if (!this.toolSpr || !this.toolSpr.visible) return;
+    this.tweens.killTweensOf(this.toolSpr);
+    this.toolSpr.setAngle(-34);
+    this.tweens.add({ targets: this.toolSpr, angle: 0, duration: 130, ease: 'Back.easeOut' });
+  }
+
   // ── Equipped-tool action: only when the tool has a target in range, so a
   //    rod never hijacks talking to an NPC. Field work (hoe/can/harvest) is
   //    handled inside handleTileAction; the shore tap refill lives in
@@ -1841,11 +1847,13 @@ rations, and your name on the manifest.
     if (e === 'rod') {
       const atShore = Math.hypot(px - 27, py - 22) <= 3.5 || Math.hypot(px - 38, py - 21) <= 3.5;
       if (!atShore) return false;
+      this._swingTool();
       this.fish();
       return true;
     }
     if (e === 'pickaxe') {
       if (Math.hypot(px - this.mineX, py - this.mineY) > 4) return false;
+      this._swingTool();
       this.mine();
       return true;
     }
@@ -2133,6 +2141,7 @@ rations, and your name on the manifest.
     const moving = !!dx || !!dy;
     const fKey = moving ? Math.floor(time / 110) % 3 : 0;
     this.playerSpr.setTexture(`${this.playerDir}_${fKey}`);
+    this._updateToolSprite();
 
     // camera target follows player (world-local → scene coords)
     this.camTarget.setPosition(this.playerSpr.x + this.worldX, this.playerSpr.y + this.worldY);
@@ -2716,6 +2725,7 @@ rations, and your name on the manifest.
         ft.img.setTexture(tex('farm.tilled'));
         const netTill = window.SpaceFarmer.net;
         if (netTill && netTill.connected) netTill.send('till', { tileX: s.x, tileY: s.y });
+        this._swingTool();                            // the hoe swings as it tills
         this._tileFX(s.x, s.y, 'till');               // dust rings off the hoe
         if (this.audio) this.audio.sfx('bounce');
         this.showToast('Tilled the cosmic soil');
@@ -2743,6 +2753,7 @@ rations, and your name on the manifest.
           this._burnEnergy(wcost);
           const net2 = window.SpaceFarmer.net;
           if (net2 && net2.connected) net2.send('water', { tileX: s.x, tileY: s.y });
+          this._swingTool();                          // the can tips as it waters
           this._tileFX(s.x, s.y, 'water');            // a dew-ring on the shoot
           if (this.audio) this.audio.sfx('glow');
           this.showToast('Watered with stardust dew');

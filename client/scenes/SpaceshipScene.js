@@ -196,6 +196,10 @@ class SpaceshipScene extends Phaser.Scene {
     this.playerSpr = this.add.image(TILE_SIZE * 4 + TILE_SIZE / 2, TILE_SIZE * 6 + TILE_SIZE / 2, PLAYER_TEX_FRONT());
     this.playerSpeed = 6;
     this.playerDir = 'front';
+    // held tool — the equipped kit drawn beside the player (swung on use), so
+    // the tutorial teaches "equip → it appears in hand → press to use it".
+    this.toolSpr = this.add.image(this.playerSpr.x, this.playerSpr.y, tex('tool.hoe'))
+      .setVisible(false).setDepth(220);
 
     // ── Camera: zoom in on the action so sprites read clearly (2000s JRPG) ──
     this.cam = this.cameras.main;
@@ -546,6 +550,20 @@ class SpaceshipScene extends Phaser.Scene {
     const moving = !!(this.touchDir || this.moveIntent);
     const f = moving ? Math.floor(time / 120) % 3 : 0;
     this.playerSpr.setTexture(`player.${this.playerDir}_${f}`);
+    // held tool follows the player, tucked to the facing side
+    if (this.toolSpr) {
+      const e = this.equipped || '';
+      this.toolSpr.setVisible(!!e);
+      if (e) {
+        this.toolSpr.setTexture(tex(`tool.${e}`));
+        const dx = this.playerDir === 'left' ? -1 : this.playerDir === 'right' ? 1 : 0;
+        const dy = this.playerDir === 'back' ? -1 : (this.playerDir === 'front' ? 1 : 0);
+        this.toolSpr.setPosition(this.playerSpr.x + dx * 13, this.playerSpr.y + dy * 11 - 4);
+        this.toolSpr.setDepth(this.playerSpr.depth + 1);
+        this.toolSpr.setFlipX(dx < 0);
+        this.toolSpr.setScale(1);
+      }
+    }
 
     // living porthole: stars drift, twinkle, and slide in parallax
     if (this.portholeStars) {
@@ -713,7 +731,10 @@ class SpaceshipScene extends Phaser.Scene {
     if (tool && !this.tools[tool]) { this._cueText(`You don't own that tool yet.`); return; }
     this.equipped = tool;
     if (tool === '') { this._cueText('Hands free — harvest & interact.'); }
-    else { this._cueText(`Equipped ${SHIP_KIT[tool].label}.`); }
+    else {
+      this._cueText(`Equipped ${SHIP_KIT[tool].label}.`);
+      this._popToolCard(tool);
+    }
     if (!this.checks.equip) {
       this.checks.equip = true;   // tracker line flips once you've used the menu
     }
@@ -804,6 +825,34 @@ class SpaceshipScene extends Phaser.Scene {
     if (best && bestD < 4.5) {
       this._cueText(`Walk closer to the ${best.label}, then press SPACE.`);
     }
+  }
+
+  // pop a tool card above the player — the sprite + label, so the tutorial
+  // teaches "equip → it appears in hand" without a text-only hint
+  _popToolCard(toolId) {
+    if (!this.toolSpr || !this.tools) return;
+    const label = SHIP_KIT[toolId] ? SHIP_KIT[toolId].label : toolId;
+    const card = this.add.container(this.playerSpr.x, this.playerSpr.y - 30).setDepth(230);
+    card.add(this.add.rectangle(0, 0, 58, 24, 0x0d121c, 0.9).setStrokeStyle(1, 0x67e1cd, 0.9));
+    card.add(this.add.image(0, 0, tex(`tool.${toolId}`)).setScale(1.1));
+    card.add(this.add.text(0, 8, label, {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '7px', fontStyle: 'bold',
+      color: '#a8eeff', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5));
+    this.tweens.add({
+      targets: card, y: this.playerSpr.y - 48, alpha: 1, duration: 240, ease: 'Back.easeOut',
+    });
+    this.time.delayedCall(1500, () => {
+      this.tweens.add({ targets: card, y: this.playerSpr.y - 60, alpha: 0, duration: 300, onComplete: () => card.destroy() });
+    });
+  }
+
+  // swing the held tool — a quick raise-and-settle so a press visibly uses it
+  _swingTool() {
+    if (!this.toolSpr || !this.toolSpr.visible) return;
+    this.tweens.killTweensOf(this.toolSpr);
+    this.toolSpr.setAngle(-34);
+    this.tweens.add({ targets: this.toolSpr, angle: 0, duration: 130, ease: 'Back.easeOut' });
   }
 
   // one-shot droid hint bubble that fades (does not clobber the guidance marker)
@@ -966,6 +1015,7 @@ class SpaceshipScene extends Phaser.Scene {
           return;
         }
         planter.state = 'tilled';
+        this._swingTool();
         this.showDialogue(['[C.O.R.A.]: Tilled the soil. Press SPACE again to plant a seed.']);
         break;
       case 'tilled':
@@ -988,6 +1038,7 @@ class SpaceshipScene extends Phaser.Scene {
         this.waterLevel = Math.max(0, this.waterLevel - SHIP_WATER_COST);
         planter.watered = true;
         planter.state = 'growing';
+        this._swingTool();
         this.showDialogue(['[C.O.R.A.]: Watered! The crop will grow overnight. Sleep to advance the day.']);
         if (!this.checks.plant) {
           this.checks.plant = true;
@@ -1035,6 +1086,7 @@ class SpaceshipScene extends Phaser.Scene {
     const reward = Math.floor(Math.random() * 50) + 50;
     this.credits += reward;
     this.bridgeConsole.mined = true;
+    this._swingTool();
     this.showDialogue([`[Console]: Asteroid mined with the pickaxe! +${reward} credits. Total: ${this.credits} cr.`]);
     if (!this.checks.power) {
       this.checks.power = true;

@@ -117,6 +117,23 @@ export const THEME = {
     bookcase: 'int.bookcase',
     rug: 'int.rug',
     plant: 'int.plant',
+    wall: 'int.wall',
+    floor: 'int.floor',
+  },
+  // colony festival kit (Earth Day / Hearthnight plaza)
+  fest: {
+    stage: 'fest.stage',
+    stall: 'fest.stall',
+    pennant: ['fest.pennant_0', 'fest.pennant_1', 'fest.pennant_2'],
+    bulb: 'fest.bulb',
+    confetti: ['fest.confetti_0', 'fest.confetti_1', 'fest.confetti_2'],
+  },
+  // held tool kit — equipped tool beside the player + use swing
+  tool: {
+    hoe: 'tool.hoe',
+    watering: 'tool.watering',
+    pickaxe: 'tool.pickaxe',
+    rod: 'tool.rod',
   },
 };
 

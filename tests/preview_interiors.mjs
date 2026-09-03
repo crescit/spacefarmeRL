@@ -97,19 +97,24 @@ function makeCanvas(W, H) {
 {
   const W = 480, H = 340, wallH = 104;
   const C = makeCanvas(W, H);
-  // back wall (warm panels)
-  for (let y = 0; y < wallH; y++) for (let x = 0; x < W; x++) C.put(x, y, [110, 85, 60]);
-  for (let i = 1; i < 6; i++) { const wx = Math.round(i * (W / 6)); for (let y = 3; y < wallH - 3; y++) C.put(wx, y, [90, 68, 46]); }
-  // skirting
-  for (let x = 0; x < W; x++) for (let y = wallH; y < wallH + 5; y++) C.put(x, y, [138, 108, 74]);
-  // floor: warm wood, gradient lighter at wall -> darker near you
-  for (let y = wallH + 5; y < H; y++) {
-    const t = (y - wallH - 5) / (H - wallH - 5);
-    const r = 110 + (64 - 110) * t, g = 85 + (48 - 85) * t, b = 56 + (30 - 56) * t;
-    for (let x = 0; x < W; x++) C.put(x, y, [r | 0, g | 0, b | 0]);
+  // back wall: colony slate habitat (teal trim) — stretch INT_WALL across the band
+  for (let y = 0; y < wallH; y++) {
+    const sy = Math.min(23, Math.floor(y * 24 / wallH));
+    for (let x = 0; x < W; x++) {
+      const sx = Math.min(95, Math.floor(x * 96 / W));
+      const p = px(SS.INT_WALL, sx, sy);
+      C.put(x, y, [p[0], p[1], p[2]]);
+    }
   }
-  // floorboard seams
-  for (let i = 1; i < 5; i++) { const ly = wallH + i * ((H - wallH) / 5); for (let x = 3; x < W - 3; x++) C.put(x, ly, [60, 45, 28]); }
+  // floor: machined metal deck (colony seams) — stretch INT_FLOOR
+  for (let y = wallH; y < H; y++) {
+    const sy = Math.min(23, Math.floor((y - wallH) * 24 / (H - wallH)));
+    for (let x = 0; x < W; x++) {
+      const sx = Math.min(95, Math.floor(x * 96 / W));
+      const p = px(SS.INT_FLOOR, sx, sy);
+      C.put(x, y, [p[0], p[1], p[2]]);
+    }
+  }
   // window light pool (the room is lit)
   C.glow(W / 2 - 30, wallH + 26, 120, 80, 255, 230, 180, 0.16);
   // props (blits at SC)
@@ -120,9 +125,9 @@ function makeCanvas(W, H) {
   C.shadow(240, 170, 70, 12, 0.30); C.blit(T('int.table'), 175, 125, SC);
   C.shadow(130, 230, 55, 10, 0.30); C.blit(T('int.rug'), 80, 205, SC);
   C.shadow(90, 290, 60, 12, 0.35); C.blit(T('int.bed'), 40, 235, SC);
-  // chest + stove (simple warm props with brass strokes, like the scene)
-  C.rect(30, 110, 74, 138, [74, 51, 34], [216, 160, 90]);
-  C.rect(400, 55, 455, 88, [58, 42, 32], [216, 160, 90]);
+  // chest + stove — colony cargo pod + galley, slate hull with teal strokes
+  C.rect(30, 110, 74, 138, [35, 42, 60], [103, 225, 205]);
+  C.rect(400, 55, 455, 88, [35, 42, 60], [103, 225, 205]);
   C.vignette(0.45);
   C.write('/tmp/interior_home.png');
 }

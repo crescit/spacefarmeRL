@@ -1541,17 +1541,19 @@ const toSnake = k => k.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 // ══ HOME INTERIOR — painterly furniture in the colony palette (warm dark
 //    wood + teal accents), replacing the old 16px pixel grids. ══
 const INT_BED = paintSurface(48, 30, (P) => {
-  P.box(1, 6, 47, 11, 4, [140, 108, 76], [92, 66, 44]);         // wooden headboard
-  P.box(3, 12, 45, 28, 4, [112, 84, 58], [70, 50, 36]);          // frame base
+  P.box(1, 6, 47, 11, 4, [80, 92, 112], [56, 66, 84]);           // slate headboard
+  P.box(3, 12, 45, 28, 4, [66, 76, 94], [48, 56, 72]);           // metal frame base
+  P.box(2, 11, 46, 12, 1, [90, 228, 216], [40, 140, 160]);       // teal frame trim
   P.box(19, 11, 45, 26, 6, [198, 150, 118], [150, 112, 84]);     // mattress
   P.ell(34, 17, 9, 5, [236, 220, 202], [198, 180, 162]);         // pillow
   P.ell(30, 23, 13, 5, [60, 172, 170], [38, 128, 126]);          // teal blanket accent
 });
 const INT_TABLE = paintSurface(44, 26, (P) => {
-  P.box(0, 14, 8, 24, 3, [88, 62, 40], [60, 42, 28]);            // leg l
-  P.box(36, 14, 44, 24, 3, [88, 62, 40], [60, 42, 28]);          // leg r
-  P.box(2, 24, 42, 26, 3, [88, 62, 40], [60, 42, 28]);       // leg base (guard)
+  P.box(0, 14, 8, 24, 3, [66, 76, 94], [48, 56, 72]);            // leg l (metal)
+  P.box(36, 14, 44, 24, 3, [66, 76, 94], [48, 56, 72]);          // leg r (metal)
+  P.box(2, 24, 42, 26, 3, [66, 76, 94], [48, 56, 72]);           // leg base (guard)
   P.box(3, 6, 41, 12, 3, [150, 110, 70], [100, 70, 46]);         // tabletop
+  P.box(3, 7, 41, 8, 1, [90, 228, 216], [40, 140, 160]);         // teal tabletop trim
   P.ell(22, 14, 11, 4, [70, 160, 104], [48, 128, 80]);           // little plant on table (moss)
   P.ell(33, 14, 4, 3, [220, 182, 120], [180, 142, 88]);       // cup (warm)
 });
@@ -1563,7 +1565,8 @@ const INT_WINDOW = paintSurface(36, 28, (P) => {
   P.ell(29, 20, 1.5, 1.5, [255, 240, 200], [220, 190, 140]);     // star
 });
 const INT_BOOKCASE = paintSurface(44, 30, (P) => {
-  P.box(2, 2, 42, 28, 2, [120, 84, 54], [78, 52, 34]);           // case body
+  P.box(2, 2, 42, 28, 2, [72, 84, 104], [50, 60, 78]);           // metal case body
+  P.box(2, 2, 42, 3, 1, [90, 228, 216], [40, 140, 160]);         // teal top trim
   P.box( 2, 8, 42, 11, 0, [110, 76, 50], [90, 62, 42]);   // shelf 2
   P.box(2, 18, 42, 21, 0, [110, 76, 50], [90, 62, 42]);          // shelf 3
   // books (muted spines) on shelves
@@ -1588,6 +1591,120 @@ const INT_PLANT = paintSurface(40, 32, (P) => {
   P.ell(14, 14, 6, 9, [90, 190, 170], [50, 130, 120]);
   P.ell(26, 14, 6, 9, [90, 190, 170], [50, 130, 120]);       // right frond
   P.ell(20, 3, 2, 2, [180, 255, 235], [130, 220, 200]);           // glowing tip
+});
+
+
+// ═══════════════════════════════════════════════════════════
+// COLONY FESTIVAL — Earth Day / Hearthnight plaza kit. The town's big night
+// reads as BUILT SPACE: a tech stage, holo stalls, and teal/amber pennants —
+// not paper bunting. Same building language as the plaza decking.
+// ═══════════════════════════════════════════════════════════
+// festival palette: colony teal / cream / amber (matches plaza seam + warm glow)
+const FEST_PAL = [
+  [96, 226, 220],    // colony teal
+  [250, 240, 220],   // cream
+  [255, 176, 96],    // warm amber
+];
+
+// colony stage — slate platform, teal edge-glow strip, holo sign, support legs
+const FEST_STAGE = paintSurface(56, 28, (P) => {
+  P.box(0, 14, 56, 26, 4, [58, 68, 88], [34, 42, 58]);             // slate platform
+  P.box(0, 12, 56, 14, 1, [86, 100, 122], [56, 66, 84]);           // deck lip
+  P.box(2, 15, 54, 16, 1, [90, 228, 216], [40, 140, 160]);         // teal edge glow
+  P.box(18, 3, 38, 10, 2, [40, 50, 66], [24, 32, 46]);             // holo sign back
+  P.ell(28, 6, 8, 2, [120, 240, 230], [60, 170, 180]);             // teal holo sign
+  P.ell(28, 9, 4, 1.5, [255, 224, 150], [220, 180, 110]);          // warm accent
+  P.box(6, 26, 10, 28, 1, [40, 48, 64], [26, 34, 48]);             // support leg l
+  P.box(46, 26, 50, 28, 1, [40, 48, 64], [26, 34, 48]);            // support leg r
+});
+
+// colony food stall — metal frame, cyan-striped awning, glowing counter, dishes
+const FEST_STALL = paintSurface(40, 30, (P) => {
+  P.box(4, 10, 6, 28, 1, [96, 108, 130], [60, 70, 90]);            // frame post l
+  P.box(34, 10, 36, 28, 1, [96, 108, 130], [60, 70, 90]);          // frame post r
+  P.box(2, 2, 38, 9, 2, [70, 190, 200], [40, 130, 150]);           // awning cyan stripe
+  P.box(2, 4, 38, 6, 1, [240, 246, 250], [200, 210, 220]);         // awning white stripe
+  P.box(2, 7, 38, 9, 1, [70, 190, 200], [40, 130, 150]);           // awning cyan stripe
+  P.box(6, 16, 34, 24, 3, [120, 130, 150], [80, 88, 106]);         // metal counter
+  P.ell(20, 18, 10, 2.5, [90, 228, 216], [40, 140, 160]);          // counter glow
+  P.ell(12, 14, 3, 2, [255, 226, 180], [210, 180, 130]);           // warm dish
+  P.ell(20, 14, 3, 2, [120, 210, 190], [70, 160, 150]);            // teal dish
+  P.ell(28, 14, 3, 2, [255, 218, 158], [220, 168, 110]);           // amber dish
+});
+
+// pennant garland flags — one sprite per palette entry (3 variants, themeable)
+const FEST_PENNANT = FEST_PAL.map(([r, g, b]) => paintSurface(10, 7, (P) => {
+  for (let y = 0; y < 7; y++) {
+    const w = Math.max(1, Math.round((7 - y) * 10 / 7));           // tapering pennant
+    P.box(0, y, w, y + 1, 0, [r, g, b], [Math.round(r * 0.75), Math.round(g * 0.75), Math.round(b * 0.75)]);
+  }
+}));
+
+// string-light bulb — warm glow with a soft halo (ADD-blend in the scene)
+const FEST_BULB = paintSurface(8, 8, (P) => {
+  P.ell(4, 4, 3.2, 3.2, [255, 244, 200], [230, 200, 130]);
+  P.ell(4, 4, 1.6, 1.6, [255, 252, 236], [255, 240, 200]);
+});
+
+// confetti bits — one sprite per palette entry (tweened in the scene)
+const FEST_CONFETTI = FEST_PAL.map(([r, g, b]) => paintSurface(6, 6, (P) => {
+  P.box(1, 2, 5, 4, 1, [r, g, b], [Math.round(r * 0.8), Math.round(g * 0.8), Math.round(b * 0.8)]);
+}));
+
+
+// ═══════════════════════════════════════════════════════════
+// COLONY TOOL KIT — held-item sprites for the equipped tool (hoe / watering
+// can / pickaxe / fishing rod). Drawn beside the player so every craft reads as
+// a held tool, and swung on use. All in the same slate+teal colony language.
+// ═══════════════════════════════════════════════════════════
+const TOOL_HOE = paintSurface(14, 14, (P) => {
+  P.box(7, 3, 8, 12, 1, [150, 110, 70], [100, 70, 46]);            // wooden handle
+  P.box(4, 0, 11, 3, 1, [96, 108, 130], [60, 70, 90]);             // metal head
+  P.box(4, 1, 11, 2, 0, [140, 150, 170], [90, 100, 120]);          // blade highlight
+});
+const TOOL_WATERING = paintSurface(14, 14, (P) => {
+  P.box(4, 7, 11, 12, 2, [90, 150, 160], [56, 104, 118]);          // can body (teal)
+  P.box(3, 3, 5, 6, 1, [110, 124, 148], [70, 82, 104]);            // spout
+  P.box(5, 2, 11, 3, 1, [110, 124, 148], [70, 82, 104]);           // top handle
+  P.ell(8, 9, 3, 1.5, [90, 228, 216], [40, 140, 160]);             // water glint
+});
+const TOOL_PICKAXE = paintSurface(14, 14, (P) => {
+  P.box(6, 3, 7, 12, 1, [150, 110, 70], [100, 70, 46]);            // wooden handle
+  P.box(2, 0, 12, 3, 1, [110, 124, 148], [70, 82, 104]);           // pick head
+  P.ell(7, 1.5, 4, 1.5, [170, 180, 200], [120, 130, 150]);         // blade
+});
+const TOOL_ROD = paintSurface(14, 14, (P) => {
+  P.box(1, 0, 3, 1, 1, [110, 124, 148], [70, 82, 104]);            // butt
+  P.box(2, 0, 11, 1, 0, [96, 108, 130], [60, 70, 90]);             // shaft
+  P.box(3, 1, 12, 2, 0, [96, 108, 130], [60, 70, 90]);             // shaft taper
+  P.box(12, 1, 13, 2, 1, [110, 124, 148], [70, 82, 104]);          // tip
+  P.box(13, 3, 13, 12, 0, [220, 230, 240], [170, 180, 190]);       // line
+  P.box(12, 12, 13, 13, 1, [150, 160, 170], [110, 120, 130]);      // hook
+});
+
+
+// ═══════════════════════════════════════════════════════════
+// COLONY INTERIOR — the home/shop interior reads as a habitat module: slate
+// panelled walls with a teal trim line and a machined metal deck floor, not a
+// timber cabin. Tileable 96×24 strips used as the room's wall + floor.
+// ═══════════════════════════════════════════════════════════
+const INT_WALL = paintSurface(96, 24, (P) => {
+  P.box(0, 0, 96, 22, 0, [96, 110, 130], [64, 76, 94]);            // slate wall
+  P.box(0, 0, 96, 2, 0, [90, 228, 216], [40, 140, 160]);           // teal trim line
+  P.box(0, 21, 96, 23, 0, [70, 82, 100], [52, 62, 78]);            // skirting
+  // vertical panel seams (machined, not flat paint)
+  P.box(24, 0, 25, 22, 0, [60, 70, 88], [44, 52, 66]);
+  P.box(48, 0, 49, 22, 0, [60, 70, 88], [44, 52, 66]);
+  P.box(72, 0, 73, 22, 0, [60, 70, 88], [44, 52, 66]);
+});
+const INT_FLOOR = paintSurface(96, 24, (P) => {
+  P.box(0, 0, 96, 24, 0, [64, 74, 90], [44, 52, 66]);              // metal deck
+  P.box(0, 0, 96, 1, 0, [90, 228, 216], [40, 140, 160]);           // teal seam top
+  P.box(0, 12, 96, 13, 0, [60, 70, 88], [44, 52, 66]);             // seam mid
+  P.box(12, 0, 13, 24, 0, [56, 66, 84], [42, 50, 64]);             // vertical seam
+  P.box(36, 0, 37, 24, 0, [56, 66, 84], [42, 50, 64]);
+  P.box(60, 0, 61, 24, 0, [56, 66, 84], [42, 50, 64]);
+  P.box(84, 0, 85, 24, 0, [56, 66, 84], [42, 50, 64]);
 });
 
 
@@ -1946,6 +2063,19 @@ const TEXTURES = {
   'int.bookcase': INT_BOOKCASE,
   'int.rug': INT_RUG,
   'int.plant': INT_PLANT,
+  'int.wall': INT_WALL,
+  'int.floor': INT_FLOOR,
+  // colony festival kit (Earth Day / Hearthnight plaza)
+  'fest.stage': FEST_STAGE,
+  'fest.stall': FEST_STALL,
+  ...Object.fromEntries(FEST_PENNANT.map((c, i) => [`fest.pennant_${i}`, c])),
+  'fest.bulb': FEST_BULB,
+  ...Object.fromEntries(FEST_CONFETTI.map((c, i) => [`fest.confetti_${i}`, c])),
+  // held tool kit (equipped tool beside the player + use swing)
+  'tool.hoe': TOOL_HOE,
+  'tool.watering': TOOL_WATERING,
+  'tool.pickaxe': TOOL_PICKAXE,
+  'tool.rod': TOOL_ROD,
   // ranch + fishing
   'bld.barn': BLD_BARN,
   'decor.pond': DECOR_POND,
@@ -2049,6 +2179,9 @@ export {
   SHADOW, BLD_SHADOW, makeShadow,
   planterBox, barrelWater, barrelCargo, bush,
   COLONY_SOLAR, COLONY_ANTENNA, COLONY_CRATE, COLONY_HOLOSIGN, COLONY_PLAZA,
+  FEST_STAGE, FEST_STALL, FEST_PENNANT, FEST_BULB, FEST_CONFETTI, FEST_PAL,
+  TOOL_HOE, TOOL_WATERING, TOOL_PICKAXE, TOOL_ROD,
+  INT_WALL, INT_FLOOR,
   houseSprite, houseGlowSprite,
   shopSprite, shopGlow, exchangeA, exchangeB, exchangeGlow,
   tavernA, tavernB, tavernC, tavernGlow,
