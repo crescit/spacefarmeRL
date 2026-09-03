@@ -97,7 +97,7 @@ const NPC_DIALOGUES = {
       '[C.O.R.A.]: You have been in cryo-sleep for 47 years. The ship is functional.',
       '[C.O.R.A.]: Your grandfather\u2019s farm on Asteroid B-612 awaits. But first — training.',
       '[C.O.R.A.]: Move with WASD or arrow keys. Press SPACE or E to interact.',
-      '[C.O.R.A.]: Your starter kit: HOE, WATERING CAN, PICKAXE, FISHING ROD. Open MENU (TAB) → BACKPACK to equip them.',
+      '[C.O.R.A.]: Your starter kit: HOE, WATERING CAN, PICKAXE, FISHING ROD. Open MENU (M) → BACKPACK to equip them.',
     ],
     x: 10, y: 4,
   },
@@ -112,7 +112,7 @@ const NPC_DIALOGUES = {
     text: [
       '[C.O.R.A.]: Welcome to the bridge. Here you can see our trajectory.',
       '[C.O.R.A.]: Asteroid B-612 is 2.4 million kilometers ahead.',
-      '[C.O.R.A.]: The power crystal needs a PICKAXE. Open MENU (TAB) → BACKPACK and equip it.',
+      '[C.O.R.A.]: The power crystal needs a PICKAXE. Open MENU (M) → BACKPACK and equip it.',
       '[C.O.R.A.]: Then press SPACE to swing. Each asteroid yields 50-100 credits worth of ore.',
     ],
     x: 40, y: 4,
@@ -333,7 +333,7 @@ class SpaceshipScene extends Phaser.Scene {
     this.waterLevel = SHIP_TANK_MAX;    // watering-can tank (drains as you water)
 
     // ── The Colony Hub — same one-menu-one-path interface the planet uses:
-    //    desktop TAB and the mobile MENU button both land here. ──
+    //    desktop M and the mobile MENU button both land here. ──
     this.showingHub = false;
     this.hub = new ColonyHub(this).build();
     this.hub.setSections([
@@ -383,7 +383,7 @@ class SpaceshipScene extends Phaser.Scene {
     };
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.eKey = this.input.keyboard.addKey('E');
-    this.tabKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
+    this.mKey = this.input.keyboard.addKey('M');
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.oneKey = this.input.keyboard.addKey('ONE');
     this.twoKey = this.input.keyboard.addKey('TWO');
@@ -437,12 +437,12 @@ class SpaceshipScene extends Phaser.Scene {
 
   update(time, delta) {
     // ── Panel lock: while the hub or backpack is open the ship holds still.
-    //    TAB/menu toggles the hub, ESC/B closes panels, and the number keys
+    //    M/menu toggles the hub, ESC/B closes panels, and the number keys
     //    drive equip rows (the same interaction the planet uses). ──
     if (this.showingBackpack || (this.showingHub && this.hub)) {
-      // TAB over the backpack closes panels rather than stacking the hub on top;
+      // M over the backpack closes panels rather than stacking the hub on top;
       // over the hub it toggles the hub like the mobile MENU button does.
-      if (Phaser.Input.Keyboard.JustDown(this.tabKey)) {
+      if (Phaser.Input.Keyboard.JustDown(this.mKey)) {
         if (this.showingBackpack) this.closeAllPanels();
         else this.toggleHub();
       }
@@ -462,7 +462,7 @@ class SpaceshipScene extends Phaser.Scene {
       }
       return;
     }
-    if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.toggleHub();
+    if (Phaser.Input.Keyboard.JustDown(this.mKey)) this.toggleHub();
     // ── Movement ──
     let dx = 0, dy = 0;
 
@@ -615,7 +615,7 @@ class SpaceshipScene extends Phaser.Scene {
     //    tools gate their craft; the console teaches you to switch tools).
     if (this.dist(px, py, this.bridgeConsole.x, this.bridgeConsole.y) < range) {
       if (this.equipped !== 'pickaxe') {
-        this._cueText('The crystal needs a PICKAXE — open MENU (TAB) → BACKPACK and equip it.');
+        this._cueText('The crystal needs a PICKAXE — open MENU (M) → BACKPACK and equip it.');
         return;
       }
       if (!this.bridgeConsole.mined) {
@@ -691,7 +691,7 @@ class SpaceshipScene extends Phaser.Scene {
     this.showingHub = false;
   }
 
-  // ── Colony Hub — TAB (desktop) and MENU (mobile) both land here, the same
+  // ── Colony Hub — M (desktop) and MENU (mobile) both land here, the same
   //    one-menu path the planet uses. ──
   toggleHub() {
     if (this.hub) this.hub.toggle();

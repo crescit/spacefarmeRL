@@ -1,7 +1,7 @@
 // ColonyHub.js — the colony's ONE menu.
 //
 // A single Phaser panel that holds every activity the colony offers. It is
-// opened by ONE code path from BOTH inputs — desktop presses TAB, mobile taps
+// opened by ONE code path from BOTH inputs — desktop presses M, mobile taps
 // the MENU button in the touch bar — so keyboard and touch players drive the
 // exact same interface. Plug-and-play: the scene registers sections
 // ({ id, label, hint, run }) and the hub renders them as rows that are

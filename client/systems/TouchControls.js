@@ -99,7 +99,7 @@ export class TouchControls {
         info.style.display = 'none';      // bar is up → don't let it block the D-pad
       } else {
         info.style.display = '';
-        info.textContent = 'WASD/Arrows: Move · SPACE/E: Interact · TAB: Colony Hub · I: Shop · U: Upgrades · ESC: Close';
+        info.textContent = 'WASD/Arrows: Move · SPACE/E: Interact · M: Colony Hub · I: Shop · U: Upgrades · ESC: Close';
       }
     }
   }
