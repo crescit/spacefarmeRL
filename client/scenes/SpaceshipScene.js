@@ -72,22 +72,24 @@ const SHIP_MAP = [
 ];
 
 // Tile type definitions for the spaceship (new texture registry keys)
+import { tex, resolveKey } from '../systems/AssetTheme.js';
+
 const TILE_TYPES = {
-  0: { tex: 'ship.floor', color: 0xdcc090 },
-  1: { tex: 'ship.wall', color: 0x5a6e6e },
-  2: { tex: 'ship.cryopod', color: 0xaaccaa },
-  3: { tex: 'ship.console', color: 0xaad286 },
-  4: { tex: 'ship.planter', color: 0x5c4a1e },
-  5: { tex: 'ship.door', color: 0xff6b6b },
-  6: { tex: 'ship.airlock', color: 0x82aaac },
+  0: { tex: () => tex('ship.floor'), color: 0xdcc090 },
+  1: { tex: () => tex('ship.wall'), color: 0x5a6e6e },
+  2: { tex: () => tex('ship.cryopod'), color: 0xaaccaa },
+  3: { tex: () => tex('ship.console'), color: 0xaad286 },
+  4: { tex: () => tex('ship.planter'), color: 0x5c4a1e },
+  5: { tex: () => tex('ship.door'), color: 0xff6b6b },
+  6: { tex: () => tex('ship.airlock'), color: 0x82aaac },
 };
 
 // Player texture keys
-const PLAYER_TEX_FRONT = 'player.front';
-const PLAYER_TEX_BACK = 'player.back';
-const PLAYER_TEX_LEFT = 'player.left';
-const PLAYER_TEX_RIGHT = 'player.right';
-const FARM_TEX = { soil: 'tile.soil', tilled: 'tile.tilled', seeded: 'tile.seeded', growing: 'tile.growing', mature: 'tile.mature', empty: 'ship.floor' };
+const PLAYER_TEX_FRONT = () => tex('player.front');
+const PLAYER_TEX_BACK = () => tex('player.back');
+const PLAYER_TEX_LEFT = () => tex('player.left');
+const PLAYER_TEX_RIGHT = () => tex('player.right');
+const FARM_TEX = { soil: () => tex('farm.empty'), tilled: () => tex('farm.tilled'), seeded: () => tex('farm.seeded'), growing: () => tex('farm.growing'), mature: () => tex('farm.mature'), empty: () => tex('ship.floor') };
 
 // NPC dialogue data
 const NPC_DIALOGUES = {
@@ -179,7 +181,7 @@ class SpaceshipScene extends Phaser.Scene {
         const idx = y * MAP_W + x;
         const val = this.mapData[idx];
         const tileInfo = TILE_TYPES[val] || TILE_TYPES[0];
-        const texKey = tileInfo.tex;
+        const texKey = tileInfo.tex();
         const spr = this.add.image(
           x * TILE_SIZE + TILE_SIZE / 2,
           y * TILE_SIZE + TILE_SIZE / 2,
@@ -191,7 +193,7 @@ class SpaceshipScene extends Phaser.Scene {
     }
 
     // ── Player (pixel art) ──
-    this.playerSpr = this.add.image(TILE_SIZE * 4 + TILE_SIZE / 2, TILE_SIZE * 6 + TILE_SIZE / 2, PLAYER_TEX_FRONT);
+    this.playerSpr = this.add.image(TILE_SIZE * 4 + TILE_SIZE / 2, TILE_SIZE * 6 + TILE_SIZE / 2, PLAYER_TEX_FRONT());
     this.playerSpeed = 6;
     this.playerDir = 'front';
 
@@ -199,17 +201,17 @@ class SpaceshipScene extends Phaser.Scene {
     this.cam = this.cameras.main;
     this.cam.setZoom(1.0);
     // follow the player smoothly so the interior stays navigable
-    this.camTarget = this.add.image(this.playerSpr.x, this.playerSpr.y, PLAYER_TEX_FRONT).setVisible(false);
+    this.camTarget = this.add.image(this.playerSpr.x, this.playerSpr.y, PLAYER_TEX_FRONT()).setVisible(false);
     this.cam.startFollow(this.camTarget, false, 0.12, 0.12);
     this.cam.setBounds(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE);
     // counter the zoom so the full-screen dialogue/HUD aren't scaled up
     // (HUD/text created later will use setScrollFactor(0) to stay fixed)
 
     // ── Cinematic depth: vignette frames the interior; a starfield porthole on the hull ──
-    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, 'fx.vignette')
+    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.vignette'))
       .setDepth(960).setScrollFactor(0);
-    this.porthole = this.add.image(696, 184, 'ship.porthole').setDepth(210).setScale(1.6);
-    this.warmGlow = this.add.image(704, 256, 'fx.lamp_glow').setDepth(150)
+    this.porthole = this.add.image(696, 184, tex('ship.porthole')).setDepth(210).setScale(1.6);
+    this.warmGlow = this.add.image(704, 256, tex('fx.lampGlow')).setDepth(150)
       .setScale(2.4).setAlpha(0.22).setBlendMode(Phaser.BlendModes.ADD);
     // living porthole — a drift of stars behind the glass, twinkle + parallax
     this.portholeStars = [];
@@ -226,9 +228,9 @@ class SpaceshipScene extends Phaser.Scene {
       this.portholeStars.push(st);
     }
     // cryo-pod + bridge console breathe softly (the ship is alive, not a diorama)
-    this.consoleGlow = this.add.image(40 * TILE_SIZE + TILE_SIZE / 2, 4 * TILE_SIZE + 12, 'fx.lamp_glow')
+    this.consoleGlow = this.add.image(40 * TILE_SIZE + TILE_SIZE / 2, 4 * TILE_SIZE + 12, tex('fx.lampGlow'))
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(1.1).setAlpha(0.18);
-    this.cryoGlow = this.add.image(12 * TILE_SIZE + TILE_SIZE / 2, 8 * TILE_SIZE + 14, 'fx.lamp_glow')
+    this.cryoGlow = this.add.image(12 * TILE_SIZE + TILE_SIZE / 2, 8 * TILE_SIZE + 14, tex('fx.lampGlow'))
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(0.95).setAlpha(0.14);
 
     // ── Bunk (your bed) — warm PX banner + label, sleep to end the day ──
@@ -264,7 +266,7 @@ class SpaceshipScene extends Phaser.Scene {
     this.edgeArrow = this.add.graphics().setScrollFactor(0).setDepth(990);
 
     // ── Our little guide droid (BEEP) — flies ahead and shows you what's next ──
-    this.droid = this.add.image(this.playerSpr.x + 22, this.playerSpr.y, 'ship.droid')
+    this.droid = this.add.image(this.playerSpr.x + 22, this.playerSpr.y, tex('ship.droid'))
         .setDepth(220);
     this.droidCue = this.add.text(0, 0, '', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 })
         .setOrigin(0.5).setDepth(221);
@@ -572,7 +574,7 @@ class SpaceshipScene extends Phaser.Scene {
       const val = this.mapData[i];
       const tileInfo = TILE_TYPES[val] || TILE_TYPES[0];
       // planters (val 4) are handled below; give them a base for now
-      const texKey = val === 4 ? 'ship.floor' : tileInfo.tex;
+      const texKey = val === 4 ? tex('ship.floor') : tileInfo.tex();
       spr.setTexture(texKey);
     }
 
@@ -581,7 +583,7 @@ class SpaceshipScene extends Phaser.Scene {
       const idx = p.y * MAP_W + p.x;
       const spr = this.tileSprites[idx];
       if (!spr) continue;
-      spr.setTexture(FARM_TEX[p.state] || 'tile.soil');
+      spr.setTexture((FARM_TEX[p.state] || FARM_TEX.soil)());
       // sway the living crop — growing/mature plants breathe
       const baseY = p.y * TILE_SIZE + TILE_SIZE / 2;
       const sway = (p.state === 'growing' || p.state === 'mature') ? Math.sin(time * 0.004 + p.x * 0.7) * 1.6 : 0;
@@ -933,7 +935,7 @@ class SpaceshipScene extends Phaser.Scene {
   // a labelled, glowing signpost so every interactable reads as a "building"
   _buildPOIBadge(p) {
     const wx = p.x * TILE_SIZE, wy = p.y * TILE_SIZE;
-    const glow = this.add.image(wx, wy, 'fx.lamp_glow')
+    const glow = this.add.image(wx, wy, tex('fx.lampGlow'))
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(206).setScale(1.05).setAlpha(0.13);
     const badge = { id: p.id, glow, phase: Math.random() * Math.PI * 2 };
     if (p.noLabel) return badge;

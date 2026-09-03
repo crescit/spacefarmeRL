@@ -36,8 +36,8 @@ function makeGround() {
   // pond
   for (let y = POND.y0; y <= POND.y1; y++)
     for (let x = POND.x0; x <= POND.x1; x++) g[y][x] = 'water';
-  // main street
-  for (let x = STREET_X0; x <= STREET_X1; x++) g[STREET_Y][x] = 'path';
+  // main street — colony plaza decking (town reads as built space)
+  for (let x = STREET_X0; x <= STREET_X1; x++) g[STREET_Y][x] = 'plaza';
   // gate path (house door → street)
   for (let y = 6; y <= STREET_Y; y++) g[y][GATE_PATH_X] = 'path';
   // field split path (street → field bottom)
@@ -110,6 +110,12 @@ export const DECOR = [
   // cargo / water barrels by the shop
   { tex: 'decor.barrel_cargo', x: 4, y: 11 },
   { tex: 'decor.barrel_water', x: 8, y: 11 },
+  // colony props — tech world-feel along the town street
+  { tex: 'decor.colony_solar', x: 12, y: 12 },
+  { tex: 'decor.colony_antenna', x: 15, y: 12 },
+  { tex: 'decor.colony_holosign', x: 20, y: 12 },
+  { tex: 'decor.colony_crate', x: 26, y: 12 },
+  { tex: 'decor.colony_antenna', x: 33, y: 12 },
   // alien bushes — edges + corners
   { tex: 'decor.bush', x: 1, y: 1 },
   { tex: 'decor.bush', x: 38, y: 1 },

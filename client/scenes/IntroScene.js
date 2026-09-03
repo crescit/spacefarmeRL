@@ -5,6 +5,7 @@
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { story } from '../systems/StoryService.js';
+import { tex } from '../systems/AssetTheme.js';
 
 // The opening crawl and title-card copy live in the StoryBank
 // (shared/story/intro.js) — the ONLY source for these words. We render
@@ -28,9 +29,9 @@ class IntroScene extends Phaser.Scene {
     this.touchCtrl.build();
 
     // ── Backdrop: nebula tile + planet + twinkling stars ──
-    this.nebula = this.add.tileSprite(width / 2, height / 2, width, height, 'fx.nebula');
-    this.planet = this.add.image(width - 170, height - 190, 'fx.planet');
-    this.planet2 = this.add.image(120, 150, 'fx.planet').setScale(0.55).setAlpha(0.6).setFlipX(true);
+    this.nebula = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.nebula'));
+    this.planet = this.add.image(width - 170, height - 190, tex('fx.planet'));
+    this.planet2 = this.add.image(120, 150, tex('fx.planet')).setScale(0.55).setAlpha(0.6).setFlipX(true);
 
     this.stars = [];
     for (let i = 0; i < 180; i++) {
@@ -47,9 +48,9 @@ class IntroScene extends Phaser.Scene {
     this.drawStarfield();
 
     // ── Cinematic depth: CRT scanlines + soft vignette + homeworld in the void
-    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, 'fx.vignette')
+    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.vignette'))
       .setDepth(950).setAlpha(0.7);
-    this.asteroid = this.add.image(width - 210, height - 150, 'fx.asteroid')
+    this.asteroid = this.add.image(width - 210, height - 150, tex('fx.asteroid'))
       .setDepth(940).setScale(0.85).setAlpha(0.9);
 
     // ── Title card (hidden until the crawl finishes) ──
@@ -59,8 +60,8 @@ class IntroScene extends Phaser.Scene {
     orbit.lineStyle(2, 0xf2bd68, 0.5).beginPath().arc(0, -116, 155, 2.8, 4.7).strokePath();
     const titlePlate = this.add.rectangle(0, 36, Math.min(620, width * 0.78), 190, 0x071a20, 0.8)
       .setStrokeStyle(1, 0x67e1cd, 0.5);
-    this.houseImg = this.add.image(0, -150, 'bld.house').setScale(2.2);
-    this.houseGlow = this.add.image(0, -120, 'bld.house_glow').setBlendMode(Phaser.BlendModes.ADD).setScale(2.2).setAlpha(0.8);
+    this.houseImg = this.add.image(0, -150, tex('bld.house')).setScale(2.2);
+    this.houseGlow = this.add.image(0, -120, tex('bld.houseGlow')).setBlendMode(Phaser.BlendModes.ADD).setScale(2.2).setAlpha(0.8);
     const eyebrow = this.add.text(0, -28, story.intro.eyebrow, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold', color: '#83c6ba',
     }).setOrigin(0.5);

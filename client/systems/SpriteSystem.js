@@ -258,6 +258,67 @@ function buildSmoothGround() {
   };
 }
 
+// ══ COLONY PLAZA — seamless colony decking for the town (walkable street) ══
+// Cool slate-grey metal plating with teal panel seams, warm underglow, and
+// subtle vent slots. Reads unmistakably as "built space" so the town separates
+// from the grassy farm — the Harvest-Moon "walk into town" moment.
+const COLONY_PLAZA = (() => {
+  const S = 32, TAU = Math.PI * 2;
+  const P = { lit: [108, 116, 132], base: [74, 82, 100], deep: [48, 56, 72] };
+  return createSurface(S, S, (s) => {
+    const ctx = s.canvas.getContext('2d');
+    const img = ctx.createImageData(S, S), d = img.data;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const nx = x / S, ny = y / S;
+      // edge-symmetric so tiles lock seamlessly (same convention as ground)
+      const edge = Math.max(Math.abs(nx - 0.5), Math.abs(ny - 0.5)) * 2;
+      const key = 0.46 - 0.08 * edge;
+      const f = Math.sin(nx * 2 * TAU + ny) * 0.02 + Math.sin((nx + ny) * 3 * TAU) * 0.012;
+      let t = Math.max(0, Math.min(1, key + f));
+      // plating micro-grain so metal reads machined, not flat
+      const g = Math.sin(x * 13.3 + y * 7.1) * Math.sin(x * 5.9 - y * 11.3);
+      t += g * 0.035;
+      let r = P.lit[0] + (P.deep[0] - P.lit[0]) * t;
+      let g2 = P.lit[1] + (P.deep[1] - P.lit[1]) * t;
+      let b = P.lit[2] + (P.deep[2] - P.lit[2]) * t;
+      const i = (y * S + x) * 4;
+      d[i] = Math.max(0, Math.min(255, r)) | 0;
+      d[i + 1] = Math.max(0, Math.min(255, g2)) | 0;
+      d[i + 2] = Math.max(0, Math.min(255, b)) | 0;
+      d[i + 3] = 255;
+    }
+    // panel seams: a 2×2 grid of plates, teal-tinted groove lines
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const seamX = (x % 16) === 0 || (x % 16) === 15;
+      const seamY = (y % 16) === 0 || (y % 16) === 15;
+      if (seamX || seamY) {
+        const i = (y * S + x) * 4;
+        d[i] = Math.min(255, d[i] * 0.62 + 18);
+        d[i + 1] = Math.min(255, d[i + 1] * 0.62 + 42);
+        d[i + 2] = Math.min(255, d[i + 2] * 0.62 + 66);
+      }
+    }
+    // teal corner rivets where plates meet (subtle colony signature)
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const atCorner = (x % 16 === 0 && y % 16 === 0) || (x % 16 === 0 && y % 16 === 15) ||
+                       (x % 16 === 15 && y % 16 === 0) || (x % 16 === 15 && y % 16 === 15);
+      if (atCorner) {
+        const i = (y * S + x) * 4;
+        d[i] = 96; d[i + 1] = 214; d[i + 2] = 214; // teal rivet
+      }
+    }
+    // warm underglow strip along the lower edge (lamp-lit deck)
+    for (let y = 20; y < 28; y++) for (let x = 0; x < S; x++) {
+      const i = (y * S + x) * 4;
+      const glow = 0.10 * Math.max(0, 1 - Math.abs(y - 24) / 5);
+      d[i] = Math.min(255, d[i] + 60 * glow);
+      d[i + 1] = Math.min(255, d[i + 1] + 42 * glow);
+      d[i + 2] = Math.min(255, d[i + 2] + 20 * glow);
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+})();
+
 function applyGroundDepth(src, seed) {
   const rnd = depthRng(seed), W = src.width, H = src.height;
   return createSurface(W, H, (s) => {
@@ -578,7 +639,8 @@ function paintSurface(W, H, draw) {
 }
 const makePaint32 = (draw) => paintSurface(32, 32, draw);
 
-// Meadow Market Stall (shop) — round warm stall under a scalloped canopy
+// Supply Depot (shop) — slate colony kiosk: holo sign, glass display bay,
+// rooftop antenna + panel seams so it reads as *built space*.
 const shopSprite = makePaint32((P) => {
   // dark slate kiosk hull with a glowing holo sign and a glass display bay
   P.box(4, 8, 28, 30, 6, [44, 56, 74], [26, 34, 50]);            // hull
@@ -591,6 +653,15 @@ const shopSprite = makePaint32((P) => {
   P.box(13, 21, 19, 30, 3, [30, 42, 60], [20, 30, 44]);         // portal door
   P.ell(16, 25, 3, 4, [100, 224, 220], [60, 160, 170]);         // door glow
   P.box(3, 30, 29, 32, 1, [60, 72, 90], [40, 52, 68]);          // base plate
+  // rooftop antenna mast + teal beacon (colony signature)
+  P.box(21, 1, 23, 4, 1, [110, 124, 148], [70, 82, 104]);
+  P.ell(22, 1.6, 1.4, 1.4, [255, 200, 110], [226, 160, 80]);
+  // vertical panel seams on the hull (machined, not flat paint)
+  P.box(10, 12, 11, 28, 1, [36, 46, 62], [24, 32, 46]);
+  P.box(21, 12, 22, 28, 1, [36, 46, 62], [24, 32, 46]);
+  // side vent slots (cool teal)
+  P.box(6, 9, 8, 10, 1, [56, 68, 86], [40, 50, 66]);
+  P.box(24, 9, 26, 10, 1, [56, 68, 86], [40, 50, 66]);
 });
 const shopGlow = createSurface(32, 24, (s) => {
   const y = [255, 200, 110];
@@ -614,6 +685,10 @@ function drawExchange(s, frame) {
   ell(16, 19, (frame === 0 ? 4 : 3), 3.2, [235, 246, 250], [150, 220, 228]);  // orb pulse
   ell(16, 9, 3, 4, [120, 140, 160], [80, 100, 120]);            // beacon mast
   ell(16, 7, 1.7, 1.7, [255, 178, 96], [224, 120, 54]);         // warm beacon
+  // side fins + panel seams (built-tech tower, not a smooth blob)
+  ell(8, 24, 2.5, 5, [74, 88, 112], [50, 62, 84]);              // left fin
+  ell(24, 24, 2.5, 5, [74, 88, 112], [50, 62, 84]);             // right fin
+  ell(16, 26, 3, 1.6, [40, 52, 68], [28, 38, 52]);              // base seam
   ctx.putImageData(img, 0, 0);
 }
 const exchangeA = createSurface(32, 32, (s) => drawExchange(s, 0));
@@ -644,6 +719,13 @@ function drawTavern(s, frame) {
   box(10, 4, 22, 7, 2, [30, 38, 54], [22, 30, 44]);
   ell(16, 5, 5, 1.6, [255, 168, 122], [232, 110, 78]);          // warm 'OPEN' neon glow
   ell(16, 8, 11, 2.4, [84, 150, 168], [52, 96, 114]);           // awning
+  // awning scallop dots (reads as fabric canopy, not flat band)
+  ell(12, 9, 0.9, 0.9, [60, 120, 136], [40, 90, 104]);
+  ell(19, 9, 0.9, 0.9, [60, 120, 136], [40, 90, 104]);
+  // rooftop exhaust vent (colony machinery detail)
+  box(24, 11, 26, 13, 1, [90, 100, 120], [60, 70, 88]);
+  // side panel seam
+  box(6, 20, 7, 26, 1, [42, 52, 68], [30, 38, 52]);
   box(14, 21, 18, 29, 3, [38, 50, 68], [26, 36, 50]);           // door
   ell(16, 25, 3.2, 4, [234, 198, 150], [188, 150, 98]);         // warm door glow
   ctx.putImageData(img, 0, 0);
@@ -1030,10 +1112,11 @@ function drawVillager(s, dir, frame, C, look) {
   };
   // ── per-NPC SILHOUETTE (build) — nobody has the same fat body ──
   const bd = look.build || 'avg';
-  const T = bd === 'slim'   ? { t0: 20, t1: 44, tb: 32, tl: 59, tr: 5, lx1: 24, lx2: 40, ax1: 15, ax2: 49, hx1: 12, hx2: 52, ly: 65, lr: 9 }
-         : bd === 'tall'   ? { t0: 17, t1: 47, tb: 30, tl: 58, tr: 5, lx1: 20, lx2: 44, ax1: 13, ax2: 51, hx1: 10, hx2: 54, ly: 62, lr: 12 }
-         : bd === 'stocky' ? { t0: 13, t1: 51, tb: 34, tl: 62, tr: 8, lx1: 17, lx2: 47, ax1: 9,  ax2: 55, hx1: 6,  hx2: 58, ly: 67, lr: 10 }
-         :                   { t0: 16, t1: 48, tb: 33, tl: 61, tr: 6, lx1: 21, lx2: 43, ax1: 12, ax2: 52, hx1: 8,  hx2: 56, ly: 66, lr: 10 };
+  // Slimmer, leggier builds — narrow torso, thin legs, longer visible leg.
+  const T = bd === 'slim'   ? { t0: 24, t1: 40, tb: 33, tl: 53, tr: 3, lx1: 26, lx2: 38, ax1: 26, ax2: 38, hx1: 26, hx2: 38, ly: 65, lr: 4 }
+         : bd === 'tall'   ? { t0: 21, t1: 43, tb: 30, tl: 51, tr: 3, lx1: 22, lx2: 42, ax1: 23, ax2: 41, hx1: 23, hx2: 41, ly: 62, lr: 5 }
+         : bd === 'stocky' ? { t0: 18, t1: 46, tb: 34, tl: 55, tr: 5, lx1: 19, lx2: 45, ax1: 20, ax2: 44, hx1: 20, hx2: 44, ly: 66, lr: 6 }
+         :                   { t0: 21, t1: 43, tb: 33, tl: 53, tr: 3, lx1: 23, lx2: 41, ax1: 23, ax2: 41, hx1: 24, hx2: 40, ly: 65, lr: 5 };
   // ── grounded drop shadow ──
   paint(32, 79, 20, 2, [20, 26, 38], [12, 16, 26]);
   // ── legs + boots (human only — robots draw their own legs in the head/branch) ──
@@ -1082,13 +1165,13 @@ function drawVillager(s, dir, frame, C, look) {
     paint(44, 49 + bob, 6, 3, [148, 128, 100], [112, 94, 70]);  // flap
   }
   // ── arms (distinct limbs, not bumps) ──
-  paint(T.ax1, 46 + bob, 5, 16, C.suit, C.suitSh);
-  paint(T.ax2, 46 + bob, 5, 16, C.suit, C.suitSh);
-  paint(T.hx1, 58 + bob, 3.6, 4.5, C.faceSh, C.faceSh);
-  paint(T.hx2, 58 + bob, 3.6, 4.5, C.faceSh, C.faceSh);
+  paint(T.ax1, 46 + bob, 3.6, 15, C.suit, C.suitSh);
+  paint(T.ax2, 46 + bob, 3.6, 15, C.suit, C.suitSh);
+  paint(T.hx1, 58 + bob, 3, 3.8, C.faceSh, C.faceSh);
+  paint(T.hx2, 58 + bob, 3, 3.8, C.faceSh, C.faceSh);
   // ── head (approx 1/4.5 of full height — reads human) ──
   if (human) {
-    paint(32, 16 + bob, 12, 10.5, C.face, C.faceSh);             // face / neck
+    paint(32, 18 + bob, 9.8, 8.4, C.face, C.faceSh);             // face / neck
     const hc = look.hairC || shade(C.helmet, 0.6);
     const hs = look.hair || 'short';
     if (hs === 'buzz') {
@@ -1524,6 +1607,11 @@ const BLD_BARN = makePaint32((P) => {
   P.ell(16, 25, 3, 4, [100, 224, 220], [60, 160, 172]);             // door glow
   P.box(4, 30, 28, 32, 1, [60, 72, 90], [40, 52, 68]);              // base plate
   P.ell(16, 4.5, 1.7, 1.7, [255, 200, 110], [226, 160, 80]);        // roof beacon
+  // silo mast + panel seams (ranch pod reads as a working structure)
+  P.box(22, 1, 24, 4, 1, [110, 124, 148], [70, 82, 104]);
+  P.ell(23, 1.6, 1.4, 1.4, [255, 224, 160], [226, 168, 108]);
+  P.box(8, 16, 9, 28, 1, [36, 46, 62], [24, 32, 46]);
+  P.box(22, 16, 23, 28, 1, [36, 46, 62], [24, 32, 46]);
 });
 
 // ── stardust pond (fishing spot) ──
@@ -1538,6 +1626,57 @@ const DECOR_POND = mkSprite(`
 ..wWwWwWwWwW..
 ...wwwwwwww...
 `, { w: [86, 154, 185], W: [128, 196, 216] }, 1);
+
+// ══ COLONY DECOR — space-colony props for the town (read as "built world") ══
+// Solar array — a tilted teal photovoltaic panel on a dark mount (clean tech).
+const COLONY_SOLAR = createSurface(20, 18, (s) => {
+  s.rect(2, 4, 16, 9, [40, 52, 76]);                 // panel backing
+  s.rect(2, 4, 16, 9, [58, 128, 150]);               // glass wash
+  s.rect(2, 4, 16, 1, [90, 196, 214]);               // top specular
+  s.rect(2, 12, 16, 1, [34, 88, 104]);               // bottom shade
+  for (let x = 6; x < 18; x += 4) s.rect(x, 4, 1, 9, [30, 70, 88]);   // cell seams
+  s.rect(8, 13, 4, 4, [52, 60, 76]);                 // mount
+  s.rect(7, 17, 6, 1, [40, 46, 60]);                 // base
+});
+
+// Colony antenna — a slender comms mast with a pulsing teal beacon.
+const COLONY_ANTENNA = createSurface(16, 20, (s) => {
+  s.rect(7, 4, 2, 14, [96, 108, 132]);               // mast
+  s.rect(6, 3, 4, 2, [56, 68, 92]);                  // top cradle
+  s.rect(5, 1, 6, 2, [90, 224, 220]);                // teal beacon
+  s.rect(4, 18, 8, 2, [60, 70, 88]);                 // base
+  s.rect(3, 17, 10, 1, [44, 52, 68]);
+});
+
+// Colony cargo crate — a teal-striped supply box (distinct from farm barrels).
+const COLONY_CRATE = mkSprite(`
+................
+.....MMMMMM.....
+...MMTTTTTTMM...
+..MTTCCCCCCTTM..
+..MTCCCCCCCCCT..
+..MTCCCCCCCCCT..
+..MTCCCCCCCCCT..
+..MTTTTTTTTTTT..
+..MTCCCCCCCCCT..
+..MTCCCCCCCCCT..
+..MTTTTTTTTTTT..
+..MTCCCCCCCCCT..
+...MMTTTTTTMM...
+.....MMMMMM.....
+................
+................
+`, { M: [96, 108, 132], T: [68, 78, 100], C: [110, 214, 214] }, 1);
+
+// Colony holo-sign — a floating teal info panel on a slim post (town signage).
+const COLONY_HOLOSIGN = createSurface(18, 14, (s) => {
+  s.rect(8, 8, 2, 5, [72, 84, 108]);                 // post
+  s.rect(3, 1, 12, 7, [26, 38, 56]);                 // sign housing
+  s.rect(4, 2, 10, 5, [70, 196, 196]);               // holo panel
+  s.rect(5, 3, 3, 1, [150, 240, 240]);               // text glint a
+  s.rect(9, 3, 3, 1, [150, 240, 240]);               // text glint b
+  s.rect(8, 13, 2, 1, [52, 60, 78]);                 // foot
+});
 
 // ═══════════════════════════════════════════════════════════
 // PORTRAITS — EarthBound-style speech-box faces (40×48, 3 mouth frames)
@@ -1824,6 +1963,13 @@ const TEXTURES = {
   'decor.bush': bush,
   'decor.tree_leaf': treeLeaf,
   'decor.tree_bloom': treeBloom,
+  // colony props — tech world-feel for the town
+  'decor.colony_solar': COLONY_SOLAR,
+  'decor.colony_antenna': COLONY_ANTENNA,
+  'decor.colony_crate': COLONY_CRATE,
+  'decor.colony_holosign': COLONY_HOLOSIGN,
+  // colony plaza decking (town walkable street)
+  'tile.plaza': COLONY_PLAZA,
   // buildings
   'bld.house': houseSprite,
   'bld.house_glow': houseGlowSprite,
@@ -1902,6 +2048,7 @@ export {
   fencePost, fenceBeamA, fenceBeamB, lampPost, lampGlow,
   SHADOW, BLD_SHADOW, makeShadow,
   planterBox, barrelWater, barrelCargo, bush,
+  COLONY_SOLAR, COLONY_ANTENNA, COLONY_CRATE, COLONY_HOLOSIGN, COLONY_PLAZA,
   houseSprite, houseGlowSprite,
   shopSprite, shopGlow, exchangeA, exchangeB, exchangeGlow,
   tavernA, tavernB, tavernC, tavernGlow,

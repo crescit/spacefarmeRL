@@ -24,7 +24,7 @@ const toScreenY = wy => (worldY + wy - camTop) * ZOOM;
 const GROUND_TEX = {
   grass_a: 'tile.grass_a', grass_b: 'tile.grass_b', grass_c: 'tile.grass_c',
   grass_d: 'tile.grass_d', grass_e: 'tile.grass_e', grass_f: 'tile.grass_f',
-  path: 'tile.path', water: 'tile.water', soil: 'tile.soil',
+  path: 'tile.path', plaza: 'tile.plaza', water: 'tile.water', soil: 'tile.soil',
   soil_b: 'tile.soil_b',
 };
 const DECOR_TEX = {
@@ -34,6 +34,10 @@ const DECOR_TEX = {
   'decor.tree_leaf': SS.TEXTURES['decor.tree_leaf'],
   'decor.tree_bloom': SS.TEXTURES['decor.tree_bloom'],
   'decor.pond': SS.TEXTURES['decor.pond'],
+  'decor.colony_solar': SS.TEXTURES['decor.colony_solar'],
+  'decor.colony_antenna': SS.TEXTURES['decor.colony_antenna'],
+  'decor.colony_crate': SS.TEXTURES['decor.colony_crate'],
+  'decor.colony_holosign': SS.TEXTURES['decor.colony_holosign'],
 };
 const NEB = SS.makeNebula();
 const SKY = SS.makeSky();

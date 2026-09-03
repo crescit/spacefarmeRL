@@ -127,15 +127,22 @@ const NPCS = Object.values(NPC_DATA).map(n => ({
   color: n.color, role: n.role, data: n,
 }));
 
+import { tex, texAt, resolveKey } from '../systems/AssetTheme.js';
+
+// ground variant name → texture key (resolved through the active theme)
 const GROUND_TEX = {
-  grass_a: 'tile.grass_a', grass_b: 'tile.grass_b', grass_c: 'tile.grass_c',
-  grass_d: 'tile.grass_d', grass_e: 'tile.grass_e', grass_f: 'tile.grass_f',
-  path: 'tile.path', water: 'tile.water', soil: 'tile.soil', soil_b: 'tile.soil_b',
+  grass_a: () => texAt('ground.grass', 0), grass_b: () => texAt('ground.grass', 1),
+  grass_c: () => texAt('ground.grass', 2), grass_d: () => texAt('ground.grass', 3),
+  grass_e: () => texAt('ground.grass', 4), grass_f: () => texAt('ground.grass', 5),
+  path: () => tex('ground.path'), plaza: () => tex('ground.plaza'),
+  water: () => tex('ground.water'),
+  soil: () => tex('ground.soil'), soil_b: () => tex('ground.soilB'),
 };
 // farm state → tile key (overrides ground once farmed)
 const TILE_FOR_STATE = {
-  empty: 'tile.soil', tilled: 'tile.tilled', seeded: 'tile.seeded',
-  growing: 'tile.growing', mature: 'tile.mature',
+  empty: () => tex('farm.empty'), tilled: () => tex('farm.tilled'),
+  seeded: () => tex('farm.seeded'), growing: () => tex('farm.growing'),
+  mature: () => tex('farm.mature'),
 };
 
 class PlanetScene extends Phaser.Scene {
@@ -231,7 +238,7 @@ class PlanetScene extends Phaser.Scene {
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
         const g = ground[y][x];
-        const gKey = GROUND_TEX[g] || GROUND_TEX.grass_a;
+        const gKey = (GROUND_TEX[g] || GROUND_TEX.grass_a)();
         const img = this.add.image(x * T + T / 2, y * T + T / 2, gKey);
         if (g === 'soil' || g === 'soil_b') {
           this.farmTiles.push({
@@ -291,23 +298,24 @@ class PlanetScene extends Phaser.Scene {
     this.lampGlows = [];
     this.lightPools = [];   // Task 4: ground light pools (lamps, doors)
     for (const d of DECOR) {
-      const img = this.add.image(d.x * T + T / 2, d.y * T + T / 2, d.tex);
+      const decKey = resolveKey(d.tex);
+      const img = this.add.image(d.x * T + T / 2, d.y * T + T / 2, decKey);
       img.setDepth(d.y);
       this.world.add(img);
       this.decorSprites.push({ img, d });
       // soft cast shadow under natural decor (trees, flora) — grounds the scene
-      if (d.tex !== 'decor.lamp' && d.tex !== 'decor.pond') {
-        const sh = this.add.image(d.x * T + T / 2 + 3, d.y * T + 4, 'fx.bld_shadow')
+      if (decKey !== resolveKey('decor.lamp') && decKey !== resolveKey('decor.pond')) {
+        const sh = this.add.image(d.x * T + T / 2 + 3, d.y * T + 4, tex('fx.bldShadow'))
           .setScale(0.42, 0.5).setDepth(d.y - 0.05).setAlpha(0.5);
         this.world.add(sh);
       }
-      if (d.tex === 'decor.lamp') {
-        const glow = this.add.image(d.x * T + T / 2, d.y * T - 2, 'fx.lamp_glow')
+      if (decKey === resolveKey('decor.lamp')) {
+        const glow = this.add.image(d.x * T + T / 2, d.y * T - 2, tex('fx.lampGlow'))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(1000).setVisible(false);
         this.world.add(glow);
         this.lampGlows.push(glow);
         // Task 4: warm pool of light cast on the ground beneath the lamp
-        const pool = this.add.image(d.x * T + T / 2, d.y * T + 12, 'fx.pool_warm')
+        const pool = this.add.image(d.x * T + T / 2, d.y * T + 12, tex('fx.poolWarm'))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(902).setVisible(false).setAlpha(0);
         this.world.add(pool);
         this.lightPools.push({ img: pool, base: 0.55, phase: Math.random() * 6.283, speed: 0.0011 + Math.random() * 0.0006 });
@@ -319,20 +327,19 @@ class PlanetScene extends Phaser.Scene {
     this.glowRegistry = [];
     this.buildingGlows = [];
     for (const b of [...BUILDINGS].sort((a, c) => (a.y + a.h) - (c.y + c.h))) {
-      const img = this.add.image(
-        b.x * T, b.y * T,
-        b.key === 'tavern' ? 'bld.tavern_a' : b.key === 'exchange' ? 'bld.exchange_a' : b.tex
-      );
+      const bldKey = b.key === 'tavern' ? texAt('bld.tavern', 0)
+        : b.key === 'exchange' ? tex('bld.exchange') : resolveKey(b.tex);
+      const img = this.add.image(b.x * T, b.y * T, bldKey);
       img.setDepth(b.y + b.h);
       this.world.add(img);
       // long soft cast shadow under the structure (light from upper-left)
-      const bs = this.add.image(b.x * T + 6, (b.y + b.h) * T + 2, 'fx.bld_shadow')
+      const bs = this.add.image(b.x * T + 6, (b.y + b.h) * T + 2, tex('fx.bldShadow'))
         .setScale(Math.max(0.6, (b.w || 3) * 0.5), 0.55)
         .setDepth(b.y - 0.05).setAlpha(0.55);
       this.world.add(bs);
       this.buildingSprites.push({ b, img });
       if (b.glow) {
-        const glow = this.add.image(b.x * T, b.y * T, b.glow)
+        const glow = this.add.image(b.x * T, b.y * T, resolveKey(b.glow))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(1001).setVisible(false);
         this.world.add(glow);
         glow.phase = Math.random() * Math.PI * 2;   // each landmark breathes on its own beat
@@ -1921,15 +1928,15 @@ rations, and your name on the manifest.
       }
     }
     // fence beam flicker
-    const beamTex = Math.floor(time / 500) % 2 === 0 ? 'decor.fence_beam_a' : 'decor.fence_beam_b';
+    const beamTex = Math.floor(time / 500) % 2 === 0 ? tex('decor.fenceBeamA') : tex('decor.fenceBeamB');
     for (const b of this.fenceBeams) b.setTexture(beamTex);
     // water shimmer (2-frame)
-    const waterTex = Math.floor(time / 600) % 2 === 0 ? 'tile.water' : 'tile.water2';
+    const waterTex = Math.floor(time / 600) % 2 === 0 ? tex('ground.water') : tex('ground.water2');
     for (const wt of this.waterTiles) wt.setTexture(waterTex);
     // building animation frames
     for (const bs of this.buildingSprites) {
-      if (bs.b.key === 'exchange') bs.img.setTexture(Math.floor(time / 400) % 2 === 0 ? 'bld.exchange_a' : 'bld.exchange_b');
-      if (bs.b.key === 'tavern') bs.img.setTexture(['bld.tavern_a', 'bld.tavern_b', 'bld.tavern_c'][Math.floor(time / 300) % 3]);
+      if (bs.b.key === 'exchange') bs.img.setTexture(Math.floor(time / 400) % 2 === 0 ? tex('bld.exchange') : tex('bld.exchangeAlt'));
+      if (bs.b.key === 'tavern') bs.img.setTexture(texAt('bld.tavern', Math.floor(time / 300) % 3));
     }
     // buildings breathe at night — windows/doors/signs pulse on their own beat
     if (this.isNight && this.buildingGlows.length) {
@@ -2526,7 +2533,7 @@ rations, and your name on the manifest.
         local.state.crop = tile.crop || '';
         local.state.watered = watered;
         local.state.growth = tile.growthDay || 0;
-        local.img.setTexture(TILE_FOR_STATE[type] || local.baseKey || 'tile.soil');
+        local.img.setTexture((TILE_FOR_STATE[type] || (() => local.baseKey))() || local.baseKey || tex('farm.empty'));
       }
     }
   }
@@ -2706,7 +2713,7 @@ rations, and your name on the manifest.
         const tillCost = this._energyCost('till', 5);   // hoe tier scales the till
         s.type = 'tilled';
         this._burnEnergy(tillCost);
-        ft.img.setTexture('tile.tilled');
+        ft.img.setTexture(tex('farm.tilled'));
         const netTill = window.SpaceFarmer.net;
         if (netTill && netTill.connected) netTill.send('till', { tileX: s.x, tileY: s.y });
         this._tileFX(s.x, s.y, 'till');               // dust rings off the hoe
@@ -2755,7 +2762,7 @@ rations, and your name on the manifest.
         if (cs.regrow) {
           // continuous crop stays planted & regrows (needs watering again)
           s.type = 'growing'; s.growth = 0; s.watered = false; s.crop = s.crop;
-          ft.img.setTexture('tile.growing');
+          ft.img.setTexture(tex('farm.growing'));
           const tag = 'it will regrow';
           const net3 = window.SpaceFarmer.net;
           if (net3 && net3.connected) net3.send('harvest', { tileX: s.x, tileY: s.y });
@@ -2763,7 +2770,7 @@ rations, and your name on the manifest.
           this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR — ${tag}`);
         } else {
           s.type = 'empty'; s.crop = ''; s.growth = 0; s.watered = false;
-          ft.img.setTexture(ft.baseKey || 'tile.soil');
+          ft.img.setTexture(ft.baseKey || tex('farm.empty'));
           const net4 = window.SpaceFarmer.net;
           if (net4 && net4.connected) net4.send('harvest', { tileX: s.x, tileY: s.y });
           if (this.audio) this.audio.sfx('harvest', { volume: 0.4 });
@@ -2781,7 +2788,7 @@ rations, and your name on the manifest.
     s.crop = key; s.type = 'seeded';
     this.inventory.seeds--;
     this._burnEnergy(this._energyCost('plant', 5));        // planting is bare-handed
-    ft.img.setTexture('tile.seeded');
+    ft.img.setTexture(tex('farm.seeded'));
     this._tileFX(s.x, s.y, 'plant');                   // a gold glint in the soil
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('plant', { tileX: s.x, tileY: s.y, crop: key });
@@ -2832,13 +2839,13 @@ rations, and your name on the manifest.
       if (s.type === 'seeded' && s.watered) {
         s.growth++;
         s.type = 'growing';
-        ft.img.setTexture('tile.growing');
+        ft.img.setTexture(tex('farm.growing'));
       } else if (s.type === 'growing' && s.watered) {
         s.growth++;
       }
       if (s.growth >= growTo && s.crop) {
         s.type = 'mature';
-        ft.img.setTexture('tile.mature');
+        ft.img.setTexture(tex('farm.mature'));
       }
       s.watered = false;
     }

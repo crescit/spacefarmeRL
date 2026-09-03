@@ -143,7 +143,7 @@ const skinHues = new Set();
 let brownPpl = 0;
 for (const id of humanIds) {
   const c = SS.TEXTURES[`npc.${id}_0`];
-  const p = SS.px(c, 27, 25); // cheek skin band (new proportional face)
+  const p = SS.px(c, 32, 20); // face center skin band (new slimmer face)
   skinHues.add(p.join(','));
   if (p[0] > 80 && p[0] < 225 && p[1] < p[0]) brownPpl++;
 }

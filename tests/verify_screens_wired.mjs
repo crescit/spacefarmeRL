@@ -133,7 +133,7 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
 
   // the intro's building is the SAME house the planet renders — one texture
   check('intro renders the shared house (bld.house)', /'bld\.house'/.test(introSrc));
-  check('intro renders the shared house glow (bld.house_glow)', /'bld\.house_glow'/.test(introSrc));
+  check('intro renders the shared house glow (theme role bld.houseGlow)', /tex\('bld\.houseGlow'\)/.test(introSrc));
   // the ship's player walks with the same frames the planet player uses
   check('ship uses shared player walk frames', /\$\{this\.playerDir\}_\$\{f\}/.test(shipSrc));
 
