@@ -382,7 +382,7 @@ Wake from cryo. C.O.R.A. guides you through:
 |-----|--------|
 | WASD / Arrows | Move |
 | SPACE / E | Interact / Confirm |
-| TAB | Grand Exchange |
+| M | Colony Hub |
 | I | Shop / Inventory |
 | ESC | Close panel / Back |
 

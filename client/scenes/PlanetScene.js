@@ -498,7 +498,7 @@ class PlanetScene extends Phaser.Scene {
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.eKey = this.input.keyboard.addKey('E');
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    this.tabKey = this.input.keyboard.addKey('TAB');
+    this.mKey = this.input.keyboard.addKey('M');
     this.iKey = this.input.keyboard.addKey('I');
     this.gKey = this.input.keyboard.addKey('G');
     this.pKey = this.input.keyboard.addKey('P');
@@ -562,7 +562,7 @@ class PlanetScene extends Phaser.Scene {
     this.qKey = this.input.keyboard.addKey('Q'); // The Stardust Story — quest log
     this.cKey = this.input.keyboard.addKey('C'); // Kitchen — recipe book
 
-    // ── The Colony Hub — ONE menu for every activity. Desktop TAB and the
+    // ── The Colony Hub — ONE menu for every activity. Desktop M and the
     //    mobile MENU button both call toggleHub(), so both inputs drive the
     //    same panel through the same code path (no more desktop-only hotkeys). ──
     this.showingHub = false;
@@ -2136,10 +2136,10 @@ rations, and your name on the manifest.
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
       this._pressAction();
     }
-    // TAB opens the Colony Hub — the one menu both inputs share (touch bar:
+    // M opens the Colony Hub — the one menu both inputs share (touch bar:
     // MENU). The Grand Exchange is now a PLACE: walk to its building (or pick
     // the row in the hub) rather than a global hotkey.
-    if (Phaser.Input.Keyboard.JustDown(this.tabKey)) this.toggleHub();
+    if (Phaser.Input.Keyboard.JustDown(this.mKey)) this.toggleHub();
     if (Phaser.Input.Keyboard.JustDown(this.iKey)) this.openShop();
     if (Phaser.Input.Keyboard.JustDown(this.uKey)) this.openSmithy();
     if (Phaser.Input.Keyboard.JustDown(this.vKey)) this.claimFestival();
@@ -3305,7 +3305,7 @@ rations, and your name on the manifest.
     ], (d) => this.buyFromShop(d.item), { panelKey: 'shopPanel', rowH: 34, gap: 5, top: -20 });
   }
 
-  // ── The Colony Hub — one menu, one path. Desktop TAB and the mobile MENU
+  // ── The Colony Hub — one menu, one path. Desktop M and the mobile MENU
   //    button both land here; the hub's rows route to this scene's methods. ──
   toggleHub() {
     if (this.hub) this.hub.toggle();
