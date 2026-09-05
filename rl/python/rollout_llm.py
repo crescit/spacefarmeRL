@@ -16,7 +16,8 @@ def main() -> None:
     parser.add_argument("--model")
     parser.add_argument("--api-key")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--horizon-days", type=int, default=12)
+    parser.add_argument("--horizon-days", type=int, default=None,
+                        help="Episode length in days. Default: one season (Node's seasonDays).")
     parser.add_argument("--max-steps", type=int, default=500)
     parser.add_argument("--output", type=Path, default=Path("trajectories/llm-episode.jsonl"))
     args = parser.parse_args()

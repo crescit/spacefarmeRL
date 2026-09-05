@@ -15,3 +15,6 @@ checkpoints/
 .hermes/
 .env
 .DS_Store
+
+# Generated QA sprite-sheet captures (regenerable via client/_qa/cdp_*)
+client/_qa/*.png
