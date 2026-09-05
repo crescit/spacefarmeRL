@@ -93,11 +93,14 @@ export class ColonyHub {
 
   /** Confirm the selected row (SPACE/ENTER/E or a tap). */
   confirm(index) {
+    if (!this.open || this._confirming) return;   // one action per open, no double-fire
     const s = this.sections[index] || this.sections[this.sel];
     if (!s) return;
+    this._confirming = true;
     // switching to a panel = close the hub and run the action.
     if (typeof this.scene.closeAllPanels === 'function') this.scene.closeAllPanels();
     this.close();
+    this._confirming = false;
     if (s.run) s.run();
   }
 
@@ -136,6 +139,36 @@ export class ColonyHub {
       rect.on('pointerout', () => rect.setFillStyle(i === this.sel ? 0x244154 : 0x132432, 0.98));
       this.panel.add([rect, labelText, hintText]);
       this.rows.push({ rect, labelText, hintText, section: s });
+    });
+    // ── Scene-level tap fallback ──
+    // This codebase's known device quirk: per-object in-canvas hit areas can
+    // slip on touch devices / scaled canvases (see TouchControls header +
+    // DialoguePanel's collapse-on-tap). Scene input fires on every canvas tap,
+    // so also hit-test the rows manually against screen space. The panel is
+    // scrollFactor(0) at (panel.x, panel.y), so a row's screen box is simply
+    // (panel + row offset) in game-canvas coords — exactly what pointer.x/y
+    // are in. Guarded on hub.open, and de-duped against the object path so a
+    // healthy click can never fire confirm() twice.
+    if (this._tapFallbackWired) return;
+    this._tapFallbackWired = true;
+    scene.input.on('pointerdown', (pointer, over) => {
+      if (!this.open || !this.panel || !this.panel.visible) return;
+      // Scene input fires BEFORE per-object handlers; if Phaser's own hit-test
+      // already resolved one of our rows, the object path will confirm() it —
+      // don't double-fire.
+      const ol = over || [];
+      for (const rw of this.rows) if (ol.indexOf(rw.rect) !== -1) return;
+      const px = pointer.x, py = pointer.y;
+      for (let i = 0; i < this.rows.length; i++) {
+        const r = this.rows[i].rect;
+        if (!r || !r.visible) continue;
+        const cx = this.panel.x + r.x, cy = this.panel.y + r.y;
+        if (px >= cx - r.width / 2 && px <= cx + r.width / 2 &&
+            py >= cy - r.height / 2 && py <= cy + r.height / 2) {
+          this.confirm(i);
+          return;
+        }
+      }
     });
   }
 }

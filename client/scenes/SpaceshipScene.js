@@ -799,7 +799,7 @@ class SpaceshipScene extends Phaser.Scene {
     });
     const foot = this.add.text(0, 150, 'Starter kit — tools are yours. The planet smithy can upgrade them for credits.', {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae', align: 'center',
-      wordWrap: { width: 420 },
+      wordWrap: { enable: true, width: 420 },
     }).setOrigin(0.5);
     this.backpackPanel.add(foot);
     this._backpackDynamic.push(foot);

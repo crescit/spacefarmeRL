@@ -267,24 +267,55 @@ class PlanetScene extends Phaser.Scene {
     // Raised agri-decks unify the farm tiles into two intentional fields.
     // This is presentation-only: the simulation and its 8x8 RL farm state
     // keep exactly the same coordinates and semantics.
+    // QA 0904B.12: the rects/furrows/labels used to be hardcoded tile coords
+    // (rows 16..29) — when FARM moved to rows 4..15 the overlay orphaned over
+    // empty grass and read as floating CAD wireframes. Geometry is now DERIVED
+    // from the ground grid (MapData ground = the single source of truth), so a
+    // future farm relocation can never desync it again.
+    const soilAt = (x, y) => ground[y][x] === 'soil' || ground[y][x] === 'soil_b';
+    let sbx0 = 1e9, sby0 = 1e9, sbx1 = -1e9, sby1 = -1e9;
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        if (!soilAt(x, y)) continue;
+        if (x < sbx0) sbx0 = x; if (y < sby0) sby0 = y;
+        if (x > sbx1) sbx1 = x; if (y > sby1) sby1 = y;
+      }
+    }
+    // Split into two decks at an interior non-soil column (a gate path cuts
+    // the field), else at the midpoint so the pair always tiles over soil.
+    let splitX = -1;
+    for (let x = sbx0 + 2; x <= sbx1 - 2; x++) {
+      let hasSoil = false;
+      for (let y = sby0; y <= sby1; y++) if (soilAt(x, y)) { hasSoil = true; break; }
+      if (!hasSoil) { splitX = x; break; }
+    }
+    if (splitX < 0) splitX = Math.floor((sbx0 + sbx1) / 2);
+    const decks = [
+      { x0: sbx0, x1: splitX - 1, label: 'AGRI-DECK 01' },
+      { x0: splitX + 1, x1: sbx1, label: 'AGRI-DECK 02' },
+    ].filter(function (d) { return d.x1 >= d.x0; });
     this.fieldDeck = this.add.graphics().setDepth(0.12);
     this.fieldDeck.lineStyle(3, 0x263d35, 0.82);
-    this.fieldDeck.strokeRoundedRect(7 * T + 3, 16 * T + 3, 11 * T - 6, 13 * T - 6, 9);
-    this.fieldDeck.strokeRoundedRect(19 * T + 3, 16 * T + 3, 13 * T - 6, 13 * T - 6, 9);
+    for (const d of decks) {
+      this.fieldDeck.strokeRoundedRect(
+        d.x0 * T + 3, sby0 * T + 3,
+        (d.x1 - d.x0 + 1) * T - 6, (sby1 - sby0 + 1) * T - 6, 9);
+    }
     this.fieldDeck.lineStyle(1, 0xd6b477, 0.18);
-    for (let fy = 16; fy <= 28; fy++) {
-      this.fieldDeck.lineBetween(7 * T + 8, fy * T + T / 2, 18 * T - 8, fy * T + T / 2);
-      this.fieldDeck.lineBetween(19 * T + 8, fy * T + T / 2, 32 * T - 8, fy * T + T / 2);
+    for (const d of decks) {
+      for (let fy = sby0; fy <= sby1; fy++) {
+        this.fieldDeck.lineBetween(
+          d.x0 * T + 8, fy * T + T / 2, (d.x1 + 1) * T - 8, fy * T + T / 2);
+      }
     }
     this.world.add(this.fieldDeck);
     const deckLabelStyle = {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '8px', fontStyle: 'bold',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold',
       color: '#f1d69b', stroke: '#17231f', strokeThickness: 3,
     };
-    this.fieldDeckLabels = [
-      this.add.text(7 * T + 10, 16 * T + 8, 'AGRI-DECK 01', deckLabelStyle).setDepth(0.2),
-      this.add.text(19 * T + 10, 16 * T + 8, 'AGRI-DECK 02', deckLabelStyle).setDepth(0.2),
-    ];
+    this.fieldDeckLabels = decks.map(function (d) {
+      return this.add.text(d.x0 * T + 10, sby0 * T + 8, d.label, deckLabelStyle).setDepth(0.2);
+    }, this);
     this.world.add(this.fieldDeckLabels);
     // ── fence line ──
     this.fenceBeams = [];
@@ -625,27 +656,32 @@ class PlanetScene extends Phaser.Scene {
   buildHUD(width, height) {
     const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', fontStyle: 'bold' };
     const y = height - 48;
+    // Screen-fixed (scrollFactor 0): the HUD is viewport furniture. Without this
+    // the strips scroll with the camera and the dark bars drift into the middle
+    // of the world (QA 0904B.2). Every buildHUD element gets sf0 via the list.
+    const screenFix = [];
     // Floating glass telemetry keeps status scannable without hiding the world.
     this.hudBar = this.add.rectangle(width / 2, y, width - 24, 44, 0x081a20, 0.88)
-      .setStrokeStyle(1, 0x6be7d0, 0.7).setDepth(997);
-    this.hudAccent = this.add.rectangle(24, y, 4, 28, 0xf3bd67, 1).setDepth(998);
+      .setStrokeStyle(1, 0x6be7d0, 0.7).setDepth(997); screenFix.push(this.hudBar);
+    this.hudAccent = this.add.rectangle(24, y, 4, 28, 0xf3bd67, 1).setDepth(998); screenFix.push(this.hudAccent);
     this.hudText = this.add.text(38, y - 7, '', {
       ...f, color: '#effff9', stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(0, 0.5).setDepth(1000);
-    this.energyTrack = this.add.rectangle(38, y + 11, 170, 5, 0x16363a, 1).setOrigin(0, 0.5).setDepth(999);
-    this.energyFill = this.add.rectangle(38, y + 11, 170, 5, 0x6be7d0, 1).setOrigin(0, 0.5).setDepth(1000);
+    }).setOrigin(0, 0.5).setDepth(1000); screenFix.push(this.hudText);
+    this.energyTrack = this.add.rectangle(38, y + 11, 170, 5, 0x16363a, 1).setOrigin(0, 0.5).setDepth(999); screenFix.push(this.energyTrack);
+    this.energyFill = this.add.rectangle(38, y + 11, 170, 5, 0x6be7d0, 1).setOrigin(0, 0.5).setDepth(1000); screenFix.push(this.energyFill);
     this.hudDay = this.add.text(width - 34, y, '', {
       ...f, fontSize: '11px', color: '#f8d797', align: 'right', stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(1, 0.5).setDepth(1000);
+    }).setOrigin(1, 0.5).setDepth(1000); screenFix.push(this.hudDay);
     this.colonyMark = this.add.text(width - 34, 12, 'B-612  /  FRONTIER AGRICULTURE', {
       ...f, fontSize: '9px', color: '#8dc9c0',
       stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(1, 0).setDepth(1000);
+    }).setOrigin(1, 0).setDepth(1000); screenFix.push(this.colonyMark);
     this.questPlate = this.add.rectangle(12, 8, Math.min(430, width * 0.54), 38, 0x081a20, 0.78)
-      .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997);
+      .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997); screenFix.push(this.questPlate);
     this.questChip = this.add.text(24, 18, '', {
       ...f, fontSize: '10px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(0, 0).setDepth(1000);
+    }).setOrigin(0, 0).setDepth(1000); screenFix.push(this.questChip);
+    screenFix.forEach(o => o.setScrollFactor(0));
   }
   buildDialogue(width, height) {
     const bw = width - 96, bh = 158, cx = width / 2, cy = height - 92;
@@ -719,12 +755,12 @@ class PlanetScene extends Phaser.Scene {
     const panelWidth = Math.min(720, width - 40);
     const bg = this.add.rectangle(0, 0, panelWidth, 500, 0x07121c, 0.98).setStrokeStyle(2, 0x7adfd5);
     this.contactTitle = this.add.text(0, -220, "FIRST CONTACT COUNCIL", { fontFamily: "system-ui, sans-serif", fontSize: "16px", color: "#f2d99a", fontStyle: "bold" }).setOrigin(0.5);
-    this.contactPremise = this.add.text(0, -182, "", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#e9f3f4", align: "center", wordWrap: { width: panelWidth - 70 }, lineSpacing: 4 }).setOrigin(0.5, 0);
+    this.contactPremise = this.add.text(0, -182, "", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#e9f3f4", align: "center", wordWrap: { enable: true, width: panelWidth - 70 }, lineSpacing: 4 }).setOrigin(0.5, 0);
     this.contactPanel.add([bg, this.contactTitle, this.contactPremise]);
     this.contactRows = CONTACT_DOCTRINES.map((doctrine, index) => {
       const y = -55 + index * 62;
       const row = this.add.rectangle(0, y, panelWidth - 70, 52, 0x132432, 0.96).setStrokeStyle(1, doctrine.color).setInteractive({ useHandCursor: true });
-      const copy = this.add.text(-panelWidth / 2 + 52, y, "[" + (index + 1) + "] " + doctrine.label + " — " + doctrine.description, { fontFamily: "system-ui, sans-serif", fontSize: "10px", color: "#e9f3f4", wordWrap: { width: panelWidth - 110 } }).setOrigin(0, 0.5);
+      const copy = this.add.text(-panelWidth / 2 + 52, y, "[" + (index + 1) + "] " + doctrine.label + " — " + doctrine.description, { fontFamily: "system-ui, sans-serif", fontSize: "10px", color: "#e9f3f4", wordWrap: { enable: true, width: panelWidth - 110 } }).setOrigin(0, 0.5);
       row.on("pointerdown", () => this.chooseContactDoctrine(doctrine.id));
       row.on("pointerover", () => row.setFillStyle(0x244154, 1));
       row.on("pointerout", () => row.setFillStyle(0x132432, 0.96));
@@ -3076,7 +3112,7 @@ rations, and your name on the manifest.
       entries.forEach(([h, b], i) => {
         const y = -(H / 2) + 70 + i * rowH;
         this._codexGroup.add(this.add.text(-280, y, h.toUpperCase(), { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#ffd98a', fontStyle: 'bold' }));
-        this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#c8d6ff', wordWrap: { width: 560 }, lineSpacing: 4 }));
+        this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#c8d6ff', wordWrap: { enable: true, width: 560 }, lineSpacing: 4 }));
       });
       this._codexGroup.add(this.add.text(0, H / 2 - 22, story.codex.closeHint, { fontFamily: 'system-ui, sans-serif', fontSize: '10px', color: '#8a90b0' }).setOrigin(0.5));
     }
@@ -3668,7 +3704,7 @@ rations, and your name on the manifest.
     const parts = Object.keys(inv).filter(k => (inv[k] || 0) > 0).map(k => `${ITEM_LABEL[k] || k} ×${inv[k]}`);
     const cargo = this.add.text(0, 152, 'CARGO  ·  ' + (parts.length ? parts.join('   ') : 'empty — plant a field!'), {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae',
-      align: 'center', wordWrap: { width: 440 },
+      align: 'center', wordWrap: { enable: true, width: 440 },
     }).setOrigin(0.5, 0);
     this.backpackPanel.add(cargo);
     this._backpackDynamic.push(cargo);

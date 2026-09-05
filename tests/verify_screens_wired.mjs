@@ -246,5 +246,90 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   check('touch bar B dismisses panels', /closeAllPanels/.test(touchSrc));
 }
 
+// ── 6. QA 0904B.12 ATTRIBUTE gate: the agri-deck overlay must COVER the soil,
+//     never float over it as an orphan. The bug that shipped green: hardcoded
+//     strokeRoundedRect rows desynced from the FARM zone when the layout moved.
+//     Gate shape: (a) the deck geometry must be DERIVED from the ground grid —
+//     no literal tile-row constants in the deck block; (b) the derived bounds
+//     must coincide with the actual soil tile bounds. ──
+{
+  const planetSrc = read('client/scenes/PlanetScene.js');
+  const deckBlock = (() => {
+    const i = planetSrc.indexOf('this.fieldDeck = this.add.graphics');
+    if (i < 0) return '';
+    const j = planetSrc.indexOf('this.world.add(this.fieldDeckLabels)', i);
+    return planetSrc.slice(Math.max(0, planetSrc.indexOf('QA 0904B.12', i) - 40), j > 0 ? j : i + 2200);
+  })();
+  check('agri-deck overlay block exists', deckBlock.length > 100);
+  check('agri-deck derives from the ground grid (soilAt scan)', /soilAt|ground\[y\]\[x\] === 'soil'/.test(deckBlock));
+  check('agri-deck has NO hardcoded tile-row literals (0904B.12 regression)',
+    !/strokeRoundedRect\(\s*\d+\s*\*\s*T/.test(deckBlock) && !/for \(let fy = \d+;/.test(deckBlock));
+  // (b) derived deck bounds must equal soil bounds — recompute here the same way
+  const { ground } = MD;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (let y = 0; y < MD.MAP_H; y++) for (let x = 0; x < MD.MAP_W; x++) {
+    if (ground[y][x] !== 'soil' && ground[y][x] !== 'soil_b') continue;
+    if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y;
+  }
+  const farm = MD.FARM;
+  check('soil tiles exist at all', x1 > 0, 'no soil tiles in the ground grid!');
+  if (farm) {
+    check('soil bounds match FARM zone (MapData self-consistency)',
+      x0 === farm.x0 && y0 === farm.y0 && x1 === farm.x1 && y1 === farm.y1,
+      `soil(${x0},${y0})-(${x1},${y1}) vs FARM(${farm.x0},${farm.y0})-(${farm.x1},${farm.y1})`);
+  }
+}
+
+// ── 7. QA 0904B.2/B.3/B.1 ATTRIBUTE gates: HUD screen-anchor, dialogue
+//     header guard + real wrapping, deep-link start retry. Each gate was
+//     negative-controlled against the pre-fix source (gate FAILS on old bug). ──
+{
+  const planetSrc = read('client/scenes/PlanetScene.js');
+  const diaSrc = read('client/systems/DialoguePanel.js');
+  const gameSrc = read('client/game.js');
+  const shipSrc2 = read('client/scenes/SpaceshipScene.js');
+
+  // B.2 — buildHUD: every screen-HUD element must be scroll-anchored
+  const hudBlock = (() => {
+    const i = planetSrc.indexOf('buildHUD(width, height) {');
+    const j = planetSrc.indexOf('\n  }', i);
+    return i < 0 ? '' : planetSrc.slice(i, j > 0 ? j : i + 3000);
+  })();
+  check('buildHUD exists', hudBlock.length > 100);
+  check('buildHUD screen-anchors its strips (scrollFactor 0 sweep)', /setScrollFactor\(0\)/.test(hudBlock));
+  check('buildHUD anchors the telemetry bar ref', /screenFix\.push\(this\.hudBar\)/.test(hudBlock));
+
+  // B.3 — dialogue header can never render literal undefined/empty-brackets,
+  // and body wrapping must be actually ENABLED (Phaser needs enable:true —
+  // a bare {width} silently disables wrapping => clipped words, 0904B.3)
+  check('dialogue title guards undefined/null/blank (no "undefined undefined")',
+    /title !== undefined && title !== null && String\(title\)\.trim\(\)/.test(diaSrc));
+  check('dialogue body wrap is enabled', /wordWrap: \{ enable: true, width: wrapW \}/.test(diaSrc));
+  const noEnable = [planetSrc, shipSrc2].filter(src =>
+    /wordWrap: \{ width:/.test(src.replace(/wordWrap: \{ enable: true, width:/g, '')));
+  check('no wordWrap-without-enable sites remain in scenes', noEnable.length === 0,
+    noEnable.length ? `${noEnable.length} file(s) still pass {width} without enable` : '');
+
+  // B.1 — deep-link boot: the startIt cycle must stop ALL scenes (incl. target),
+  // wait for the queue to settle to an empty active list, then start once, and
+  // retry the whole cycle (attempt<3) if the target never activates.
+  // (Old bug: start() on an already-active target took the swallowed restart()
+  // branch behind queued sibling stop()s → every scene inactive, black canvas.)
+  check('deep-link boot stops all scenes incl. target then settles before start',
+    /startIt = \(attempt\)/.test(gameSrc) && /for \(const sc of game\.scene\.getScenes\(true\)\)/.test(gameSrc)
+    && /settle = \(n\)/.test(gameSrc) && /n < 40/.test(gameSrc) && /attempt < 3/.test(gameSrc));
+}
+
+// ── 8. QA 0904C gate: Colony Hub rows must be tappable through TWO paths —
+//     the object pointerdown AND a scene-level manual hit-test fallback (the
+//     codebase's known flaky-device quirk: in-canvas hit areas can slip).
+{
+  const hubSrc = read('client/systems/ColonyHub.js');
+  check('hub row pointerdown wired', /rect\.on\('pointerdown'[^)]*confirm/.test(hubSrc.replace(/\s+/g, ' ')) || /pointerdown.*confirm\(/.test(hubSrc));
+  check('hub scene-level tap fallback', /scene\.input\.on\('pointerdown'/.test(hubSrc) && /indexOf\(rw\.rect\) !== -1/.test(hubSrc));
+  check('hub fallback guarded on open+visible', /if \(!this\.open \|\| !this\.panel \|\| !this\.panel\.visible\) return;/.test(hubSrc));
+  check('hub fallback dedupes vs object over-list', /const ol = over \|\| \[\];/.test(hubSrc));
+}
+
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);

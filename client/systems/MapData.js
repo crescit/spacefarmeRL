@@ -14,7 +14,7 @@ const VROAD_X0 = 24, VROAD_X1 = 25;   // vertical main road
 const HROAD_Y0 = 22, HROAD_Y1 = 23;   // horizontal main road
 
 // ── Zone bounds ──
-const FARM  = { x0: 4, x1: 20, y0: 4, y1: 15 };
+export const FARM = { x0: 4, x1: 20, y0: 4, y1: 15 };
 const LAKE_WATER = { x0: 28, x1: 42, y0: 3, y1: 15 };
 const LAKE_BEACH = { x0: 26, x1: 44, y0: 2, y1: 16 };
 const RIVER_X0 = 42, RIVER_X1 = 45;   // river flows south (bridge at the road)
