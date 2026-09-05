@@ -32,7 +32,7 @@ export class ColonyHub {
     const { width, height } = scene.game.config;
     const panelW = Math.min(620, width - 24);
     const panelH = Math.min(Math.round(height * 0.86), 620);
-    const panel = scene.add.container(width / 2, height / 2).setDepth(1010).setVisible(false);
+    const panel = scene.add.container(width / 2, height / 2).setDepth(1010).setScrollFactor(0).setVisible(false);
     const bg = scene.add.rectangle(0, 0, panelW, panelH, 0x070714, 0.96).setStrokeStyle(3, 0x67e1cd);
     const title = scene.add.text(0, -panelH / 2 + 24, 'COLONY HUB', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",

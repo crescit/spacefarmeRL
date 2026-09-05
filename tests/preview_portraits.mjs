@@ -32,12 +32,40 @@ const cellX = (ci) => PAD + ci * (cellW + GAP);
 const rowY = (ri) => PAD + ri * (cellH + GAP);
 
 // column separator strips tinted by each NPC's suit color
+// QA 0904 Stage 5: the sheet used to run cells edge-to-edge with no breathing
+// room; a 2px SLATE gutter now frames every cell on all four sides so adjacent
+// faces never bleed into each other at a glance (the 'same face in a row' read
+// was partly the zero-gutter contact-sheet layout, not only the face geometry).
+const GUT = 2, GUT_COL = [34, 40, 56];
+for (let ri = 0; ri < ROWS; ri++) for (let ci = 0; ci < COLS; ci++) {
+  const x0 = cellX(ci), y0 = rowY(ri);
+  for (let x = -GUT; x < cellW + GUT; x++) {
+    for (let g = 0; g < GUT; g++) {
+      put(x0 + x, y0 - GUT + g, GUT_COL);
+      put(x0 + x, y0 + cellH + g, GUT_COL);
+    }
+  }
+  for (let y = -GUT; y < cellH + GUT; y++) {
+    for (let g = 0; g < GUT; g++) {
+      put(x0 - GUT + g, y0 + y, GUT_COL);
+      put(x0 + cellW + g, y0 + y, GUT_COL);
+    }
+  }
+}
 for (let i = 0; i < npcs.length; i++) {
   const col = NPC_COLORS[npcs[i]];
   const colrgb = [(col >> 16) & 255, (col >> 8) & 255, col & 255];
+  // QA 0904 Stage 5: the identity chips used to be a bare colour bar, so a
+  // dark-shirted NPC's chip sank into the dark sheet and the column became
+  // unreadable (blue-on-blue, col 8). Contrast BY RULE, not by picking hues
+  // that happen to differ: every chip gets a light keyline + dark mount, so
+  // it separates from BOTH the sheet and the subject's own palette.
   for (let y = 0; y < Hpx - PAD; y++) put(cellX(i) - GAP / 2 + 6, y + 2, colrgb);
   // frame-label dots on the left of each row
-  for (let x = 0; x < 6; x++) for (let y = 0; y < cellH; y++) put(x + 3, rowY(i >= ROWS ? 0 : i) + y, colrgb);
+  const ry0 = rowY(i >= ROWS ? 0 : i);
+  for (let y = -1; y <= cellH; y++) { put(2, ry0 + y, [214, 224, 240]); put(9, ry0 + y, [214, 224, 240]); }
+  for (let x = 3; x < 9; x++) { put(x, ry0 - 1, [214, 224, 240]); put(x, ry0 + cellH, [214, 224, 240]); }
+  for (let x = 0; x < 6; x++) for (let y = 0; y < cellH; y++) put(x + 3, ry0 + y, colrgb);
 }
 // frame index markers in a footer band
 const bandY = PAD + ROWS * (cellH + GAP) + 8;

@@ -24,10 +24,17 @@ export const THEME = {
     grass: ['tile.grass_a', 'tile.grass_b', 'tile.grass_c', 'tile.grass_d', 'tile.grass_e', 'tile.grass_f'],
     path: 'tile.path',
     plaza: 'tile.plaza',
-    water: 'tile.water',
+    // 3 caustic families; the lake assigns a family per tile position and the
+    // shimmer cycles each family on its own offset, so open water never reads
+    // as one flat cyan billboard even on a still frame.
+    water: ['tile.water', 'tile.water2', 'tile.water3'],
     water2: 'tile.water2',
     soil: 'tile.soil',
     soilB: 'tile.soil_b',
+    sand: 'tile.sand',
+    wetSand: 'tile.wet_sand',
+    cliff: 'tile.cliff',
+    forest: 'tile.forest',
   },
   // farm-state overrides once a tile is worked
   farm: {

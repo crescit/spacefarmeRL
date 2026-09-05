@@ -42,6 +42,7 @@ const BUILDING_TEX = [
 ];
 const INTERIOR_TEX = [
   'int.window', 'int.rug', 'int.bookcase', 'int.plant', 'int.table', 'int.bed',
+  'int.stove', 'int.chest', 'int.door', 'int.counter', 'int.stall', 'int.terminal',
 ];
 const PLAYER_WALK_FRAMES = [];
 for (const dir of ['front', 'back', 'left', 'right'])
@@ -53,7 +54,7 @@ for (const tex of [...BUILDING_TEX, ...INTERIOR_TEX, ...PLAYER_WALK_FRAMES]) {
 
 // ── 2. Map layout wiring: every building has a door, label, action; all
 //     doors are walkable; the map is reachable from the player start ──
-const KNOWN_ACTIONS = new Set(['shop', 'exchange', 'ranch', 'sleep', 'talk_rhea']);
+const KNOWN_ACTIONS = new Set(['shop', 'exchange', 'ranch', 'sleep', 'talk_rhea', 'barracks']);
 for (const b of BUILDINGS) {
   check(`building ${b.key} has door+label+action`,
     !!b.door && !!b.label && !!b.action, JSON.stringify(b));
@@ -78,23 +79,33 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
     JSON.stringify(spot));
 }
 
-// ── 3. PlanetScene building-action wiring: every BUILDINGS.action key is
-//     dispatched to a real handler method ──
+// ── 3. PlanetScene building-action wiring: every BUILDINGS.action key routes
+//     into its interior room, and each room's interaction point dispatches to
+//     the real handler method ──
 {
   const calls = [];
   const ps = Object.create(PS.PlanetScene.prototype);
   ps.openShop = () => calls.push('openShop');
   ps.openGrandExchange = () => calls.push('openGrandExchange');
   ps.openRanch = () => calls.push('openRanch');
-  ps.enterHouse = () => calls.push('enterHouse');
+  ps.sleep = () => calls.push('sleep');
+  ps.openRecipeBook = () => calls.push('openRecipeBook');
+  ps.openChest = () => calls.push('openChest');
   ps.startNPCDialogue = () => calls.push('startNPCDialogue');
   ps.showToast = () => {};
+  ps.enterInterior = (k) => { calls.push('enterInterior:' + k); };
+  ps.exitInterior = () => calls.push('exitInterior');
   // prototype methods the wiring relies on must actually exist
-  for (const m of ['buildingAction', 'enterHouse', 'exitHouse', 'buildInterior',
+  for (const m of ['buildingAction', 'enterInterior', 'exitInterior', 'buildRoom', '_roomAction',
     'openShop', 'openGrandExchange', 'openRanch', 'startNPCDialogue']) {
     check(`PlanetScene.prototype.${m} exists`, typeof ps[m] === 'function');
   }
-  const byAction = { shop: 'openShop', exchange: 'openGrandExchange', ranch: 'openRanch', sleep: 'enterHouse', talk_rhea: 'startNPCDialogue' };
+  // buildingAction routes each kind into its interior room
+  const byAction = {
+    shop: 'enterInterior:shop', exchange: 'enterInterior:exchange',
+    ranch: 'enterInterior:ranch', sleep: 'enterInterior:home', talk_rhea: 'enterInterior:tavern',
+    barracks: 'enterInterior:barracks',
+  };
   for (const b of BUILDINGS) {
     calls.length = 0;
     try {
@@ -105,6 +116,62 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
       check(`buildingAction(${b.key}) → ${byAction[b.action]}`,
         false, `threw: ${error.message}`);
     }
+  }
+  // _roomAction dispatches interior interaction points to the real handlers
+  const roomByAction = {
+    exit: 'exitInterior', sleep: 'sleep', recipes: 'openRecipeBook', chest: 'openChest',
+    shop: 'openShop', exchange: 'openGrandExchange', ranch: 'openRanch', talk_rhea: 'startNPCDialogue',
+  };
+  for (const [action, handler] of Object.entries(roomByAction)) {
+    calls.length = 0;
+    try {
+      ps._roomAction(action);
+      check(`_roomAction(${action}) → ${handler}`, calls.includes(handler), `got [${calls}]`);
+    } catch (error) {
+      check(`_roomAction(${action}) → ${handler}`, false, `threw: ${error.message}`);
+    }
+  }
+}
+
+// ── 3b. Interior composition gate (QA 0904 gate-blindness fix): the five
+//     rooms used to be the SAME room with glyphs swapped and no test noticed,
+//     because wiring was checked but composition never was. Contract: each
+//     _decorateRoom kind branch must reference ≥1 prop texture key that is not
+//     present in EVERY other room's branch — no room may collapse to the fully
+//     generic shared set — plus the named signature props QA called out
+//     (tavern owns bar furniture, ranch owns livestock). ──
+{
+  const src = read('client/scenes/PlanetScene.js');
+  const m = src.match(/_decorateRoom\(kind, room, stage\) \{([\s\S]*?)\n  \}\n/);
+  check('_decorateRoom found in PlanetScene', !!m);
+  if (m) {
+    const body = m[1];
+    const kinds = ['home', 'shop', 'tavern', 'exchange', 'ranch'];
+    const sets = {};
+    for (const k of kinds) {
+      // slice this kind's branch: from its `kind === '<k>'` to the next branch (or end)
+      const start = body.search(new RegExp(`kind\\s*===\\s*'${k}'`));
+      if (start < 0) { sets[k] = null; continue; }
+      let end = body.length;
+      for (const other of kinds) {
+        if (other === k) continue;
+        const om = body.slice(start + 1).match(new RegExp(`kind\\s*===\\s*'${other}'`));
+        if (om && start + 1 + om.index < end) end = start + 1 + om.index;
+      }
+      const seg = body.slice(start, end);
+      sets[k] = new Set([...seg.matchAll(/'(?:int|ranch)\.[a-z0-9_]+'/g)].map((mm) => mm[0]));
+    }
+    for (const k of kinds) {
+      if (!sets[k]) { check(`room ${k} has a decoration branch`, false, 'no kind branch found'); continue; }
+      const unique = [...sets[k]].filter(key => kinds.some(o => o !== k && (!sets[o] || !sets[o].has(key))));
+      check(`room ${k} has ≥1 signature prop (not shared by all rooms)`, unique.length >= 1,
+        `props=[${[...sets[k]].join(', ')}]`);
+    }
+    // the two rooms QA called out specifically: tavern must own bar furniture,
+    // ranch must own livestock (the report read: "the tavern has no bar; the
+    // ranch has no animals")
+    check('tavern owns bar furniture (counter/barback/stool)', sets.tavern && [...sets.tavern].some(k => /counter|barback|stool/.test(k)));
+    check('ranch owns livestock sprites (ranch.*)', sets.ranch && [...sets.ranch].some(k => k.startsWith("'ranch.")));
   }
 }
 

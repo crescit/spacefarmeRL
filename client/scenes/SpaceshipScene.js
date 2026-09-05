@@ -194,8 +194,12 @@ class SpaceshipScene extends Phaser.Scene {
 
     // ── Player (pixel art) ──
     this.playerSpr = this.add.image(TILE_SIZE * 4 + TILE_SIZE / 2, TILE_SIZE * 6 + TILE_SIZE / 2, PLAYER_TEX_FRONT());
+    this.playerSpr.setDepth(2);
     this.playerSpeed = 6;
     this.playerDir = 'front';
+    // soft cast shadow under the player — grounds them in the lit interior
+    this.playerShadow = this.add.image(this.playerSpr.x, this.playerSpr.y + 30, tex('fx.shadow'))
+      .setScale(1.5).setDepth(1).setAlpha(0.9);
     // held tool — the equipped kit drawn beside the player (swung on use), so
     // the tutorial teaches "equip → it appears in hand → press to use it".
     this.toolSpr = this.add.image(this.playerSpr.x, this.playerSpr.y, tex('tool.hoe'))
@@ -236,6 +240,27 @@ class SpaceshipScene extends Phaser.Scene {
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(1.1).setAlpha(0.18);
     this.cryoGlow = this.add.image(12 * TILE_SIZE + TILE_SIZE / 2, 8 * TILE_SIZE + 14, tex('fx.lampGlow'))
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(0.95).setAlpha(0.14);
+    // warm interior lighting — the deck is lit from the ceiling, so the ship
+    // reads as a warm habitat, not a cold sterile grid.
+    // QA fix: a MULTIPLY amber at 0.25 only DARKENED the slate (multiply can't
+    // add warmth, it subtracts) — that is why "the warm tone did not land".
+    // Same filmic grade the planet uses and it works there: SOFT_LIGHT amber
+    // wash pushes the midtones toward the fixture colour instead of crushing it,
+    // plus a faint ADD sheen so blacks stay open.
+    this.shipAmbient = this.add.rectangle(width / 2, height / 2, width, height, 0xffb46a, 0)
+      .setBlendMode(Phaser.BlendModes.SOFT_LIGHT).setDepth(190).setAlpha(0.34);
+    this.shipSheen = this.add.rectangle(width / 2, height / 2, width, height, 0xffd9a0, 0)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(189).setAlpha(0.05);
+    // warm ceiling light pools so the deck reads lit-from-above, not uniformly cold
+    [[0.28, 0.30], [0.62, 0.62], [0.78, 0.34]].forEach(([fx, fy], i) => {
+      const p = this.add.image(width * fx, height * fy, tex('fx.poolWarm'))
+        .setBlendMode(Phaser.BlendModes.ADD).setDepth(188).setAlpha(0.14)
+        .setScale(1.6 + i * 0.15, 1.0);
+      void p;
+    });
+    // soft cool lift in the corners (ambient occlusion feel — corners fall back)
+    this.shipVignetteCool = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.vignette'))
+      .setDepth(191).setAlpha(0.5).setScrollFactor(0);
 
     // ── Bunk (your bed) — warm PX banner + label, sleep to end the day ──
     const bunkX = 22, bunkY = 4;

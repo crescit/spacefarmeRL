@@ -170,11 +170,20 @@ function buildSmoothGround() {
   // all separate and the scene reads clearly instead of a dark monochrome soup.
   const PA = {
     grass: { lit: [90, 126, 82], base: [62, 92, 62], deep: [40, 62, 44] },
-    path:  { lit: [186, 170, 138], base: [150, 132, 100], deep: [110, 94, 68] },   // light warm STONE (reads apart from soil)
-    soil:  { lit: [128, 88, 62], base: [94, 62, 42], deep: [64, 40, 30] },         // deep warm EARTH (distinct from stone path)
+    // Colony crete walkway — cool machined GREY, deliberately in the slate family
+    // with plaza/grass. (Was warm sand-brown: the feeder trails read as dirt
+    // paths cut through a sci-fi colony, which broke the whole art direction.)
+    path:  { lit: [128, 136, 150], base: [100, 108, 122], deep: [72, 80, 94] },
+    soil:  { lit: [128, 88, 62], base: [94, 62, 42], deep: [64, 40, 30] },         // deep warm EARTH (farm beds only)
     water: { lit: [80, 190, 204], base: [48, 142, 162], deep: [28, 96, 116] },
+    sand:  { lit: [212, 188, 134], base: [182, 156, 108], deep: [150, 124, 82] },  // warm BEACH sand
+    // Damp tide-line sand: sits between beach and open water so the lake edge
+    // feathers instead of ending in a 1-tile razor line of dry beach.
+    wetSand: { lit: [158, 140, 112], base: [126, 110, 88], deep: [96, 84, 68] },
+    cliff: { lit: [118, 108, 98], base: [90, 82, 74], deep: [60, 54, 48] },        // rocky MOUNTAIN stone
+    forest:{ lit: [66, 92, 50], base: [46, 66, 38], deep: [28, 44, 26] },          // mossy FOREST floor
   };
-  const tile = (kind, phase = 0) => {
+  const tile = (kind, phase = 0, vseed = 0) => {
     const P = PA[kind];
     return createSurface(S, S, (s) => {
       const ctx = s.canvas.getContext('2d');
@@ -193,21 +202,82 @@ function buildSmoothGround() {
           // micro-grain so earth/stone read as textured, not flat paint
           const g = Math.sin(x * 11.7 + y * 5.3) * Math.sin(x * 3.7 - y * 17.9);
           t += g * 0.05;
+          // SEAMLESS periodic grain: integer cycles across the 32px tile so it
+          // locks with neighbours with no seams (QA 0904: the crete walkway was
+          // near-flat at sd≈2.0 and read as one slab of paint, not ground).
+          const pg = Math.sin(nx * 3 * TAU + 0.7) * Math.cos(ny * 4 * TAU - 0.3)
+                   + 0.6 * Math.sin((nx + ny) * 6 * TAU)
+                   + 0.4 * Math.sin((nx - ny) * 5 * TAU + 1.2);
+          t += pg * 0.085;
+        }
+        if (kind === 'path') {
+          // aggregate flecks + pits in the crete so a walkway has reading detail
+          const ag = Math.sin(nx * 7 * TAU + 1.1) * Math.sin(ny * 5 * TAU + 0.4);
+          if (ag > 0.72) t -= 0.14; else if (ag < -0.72) t += 0.13;
         }
         if (kind === 'soil') {
           // occasional darker clump / lighter fleck so a field never reads empty
           const cl = Math.sin((x + 7) * 3.1) * Math.cos((y + 3) * 4.7);
           if (cl > 0.86) t -= 0.12; else if (cl < -0.86) t += 0.10;
+          // seamless clod field (QA 0904: soil sat at sd≈3.1 — flat warm paint)
+          const clod = Math.sin(nx * 5 * TAU + 0.3) * Math.cos(ny * 6 * TAU + 1.1)
+                     + 0.5 * Math.sin((nx - ny) * 4 * TAU);
+          t += clod * 0.05;
+          if (clod > 1.15) t -= 0.14; else if (clod < -1.15) t += 0.12;
         }
         let r = P.lit[0] + (P.deep[0] - P.lit[0]) * t;
         let g = P.lit[1] + (P.deep[1] - P.lit[1]) * t;
         let b = P.lit[2] + (P.deep[2] - P.lit[2]) * t;
         if (kind === 'grass') {          // faint bioluminescent-green undertone
-          const bio = 5 * Math.max(0, Math.sin(nx * 3 * TAU + ny * 2 * TAU));
+          const bio = 5 * Math.max(0, Math.sin(nx * 3 * TAU + ny * 2 * TAU + vseed));
           g += bio; b += bio * 0.5;
+          // organic blade tufts: light tips + dark shadow clumps (deterministic,
+          // seamless-friendly) so grass reads as living ground, not wallpaper.
+          // vseed rotates the tuft field per variant so a 6-variant spread is
+          // genuinely distinct tiles, not the same tile under six names.
+          const tuft = Math.sin((x * 3 + y * 2) * (1.7 + vseed * 0.11)) * Math.sin((x - y) * (2.3 - vseed * 0.08) + vseed);
+          if (tuft > 0.72 - vseed * 0.012) { g = Math.min(255, g + 24 + vseed * 3); b = Math.min(255, b + 10); }
+          else if (tuft < -0.78 + vseed * 0.01) { g = Math.max(0, g - 18); b = Math.max(0, b - 8); }
+          // sparse wildflower flecks on 2 of the 6 variants (breaks monoculture
+          // without turning the whole map into confetti)
+          if (vseed === 2 || vseed === 4) {
+            const fl = Math.sin((x * 7.3 + y * 11.1) * 1.3 + vseed * 2.2) * Math.cos((x - y * 2) * 2.7);
+            if (fl > 0.93) {
+              const wr = vseed === 2 ? [255, 236, 150] : [236, 232, 248];
+              r = wr[0]; g = wr[1]; b = wr[2];
+            }
+          }
         } else if (kind === 'water') {   // soft plasma shimmer
           const sh = 12 * Math.sin((nx * 3 + ny * 2 + phase) * TAU);
           b += sh; g += sh * 0.6;
+          // vseed-offset caustic sparkle + a second interference band so variants
+          // do not stack into one flat cyan billboard
+          const sp = Math.sin((x * 5.7 + y * 3.1) * 1.7 + vseed * 2.6) * Math.cos((x * 1.9 - y * 4.7) + vseed);
+          if (sp > 0.86) { b = Math.min(255, b + 26); g = Math.min(255, g + 18); }
+          const band = Math.sin((nx * 2 + ny * 5 + vseed * 0.7) * TAU);
+          if (band > 0.8) { b = Math.min(255, b + 14); }
+          else if (band < -0.82) { b = Math.max(0, b - 16); g = Math.max(0, g - 10); }
+        } else if (kind === 'sand' || kind === 'wetSand') {    // wind-blown grains + ripple lines
+          const grain = Math.sin(x * 17.3 + y * 9.1) * Math.sin(x * 5.1 - y * 13.7);
+          if (grain > 0.78) { g = Math.min(255, g + 24); b = Math.min(255, b + 18); }
+          else if (grain < -0.8) { g = Math.max(0, g - 18); b = Math.max(0, b - 14); }
+          const ripple = Math.sin(ny * 6 * TAU + nx * 2 * TAU);
+          if (Math.abs(ripple) < 0.12 && (x + y) % 7 < 4) { g = Math.min(255, g + 30); b = Math.min(255, b + 22); }
+          if (kind === 'wetSand') {
+            // damp sheen streaks toward the water side
+            const sheen = Math.sin((nx * 4 + ny * 7 + vseed) * TAU);
+            if (sheen > 0.55) { b = Math.min(255, b + 16); g = Math.min(255, g + 6); }
+          }
+        } else if (kind === 'cliff') {   // rock strata + light facets + cracks
+          const strata = Math.sin(ny * 9 * TAU + nx * 3 * TAU);
+          if (strata > 0.7) { r = Math.min(255, r + 30); g = Math.min(255, g + 26); b = Math.min(255, b + 24); }
+          else if (strata < -0.72) { r = Math.max(0, r - 28); g = Math.max(0, g - 26); b = Math.max(0, b - 22); }
+          const crack = Math.sin((x * 5 + y * 7) * 2.1) * Math.sin((x - y) * 3.3);
+          if (crack > 0.86) { r = Math.max(0, r - 22); g = Math.max(0, g - 20); b = Math.max(0, b - 18); }
+        } else if (kind === 'forest') {  // mossy organic tufts (richer, darker)
+          const tuft = Math.sin((x * 3.7 + y * 2.9) * 1.9) * Math.sin((x - y) * 2.7);
+          if (tuft > 0.68) { g = Math.min(255, g + 32); b = Math.min(255, b + 12); }
+          else if (tuft < -0.74) { g = Math.max(0, g - 24); b = Math.max(0, b - 10); }
         }
         const i = (y * S + x) * 4;
         d[i] = Math.max(0, Math.min(255, r)) | 0;
@@ -249,10 +319,11 @@ function buildSmoothGround() {
     });
   };
   return {
-    grassA: tile('grass'), grassB: tile('grass'), grassC: tile('grass'),
-    grassD: tile('grass'), grassE: tile('grass'), grassF: tile('grass'),
-    path: tile('path'), soil: tile('soil'), soilB: tile('soil'),
-    water: tile('water', 0), water2: tile('water', 2),
+    grassA: tile('grass', 0, 0), grassB: tile('grass', 0, 1), grassC: tile('grass', 0, 2),
+    grassD: tile('grass', 0, 3), grassE: tile('grass', 0, 4), grassF: tile('grass', 0, 5),
+    path: tile('path'), soil: tile('soil'), soilB: tile('soil', 0, 1),
+    water: tile('water', 0, 0), water2: tile('water', 2, 1), water3: tile('water', 4, 2),
+    sand: tile('sand'), wetSand: tile('wetSand'), cliff: tile('cliff'), forest: tile('forest'),
     tilled: cropTile('tilled'), seeded: cropTile('seeded'),
     growing: cropTile('growing'), mature: cropTile('mature'),
   };
@@ -293,9 +364,10 @@ const COLONY_PLAZA = (() => {
       const seamY = (y % 16) === 0 || (y % 16) === 15;
       if (seamX || seamY) {
         const i = (y * S + x) * 4;
-        d[i] = Math.min(255, d[i] * 0.62 + 18);
-        d[i + 1] = Math.min(255, d[i + 1] * 0.62 + 42);
-        d[i + 2] = Math.min(255, d[i + 2] * 0.62 + 66);
+        // recessed groove: darker, with a teal-tinted highlight edge → machined deck
+        d[i] = Math.min(255, d[i] * 0.52 + 12);
+        d[i + 1] = Math.min(255, d[i + 1] * 0.52 + 34);
+        d[i + 2] = Math.min(255, d[i + 2] * 0.52 + 58);
       }
     }
     // teal corner rivets where plates meet (subtle colony signature)
@@ -638,35 +710,70 @@ function paintSurface(W, H, draw) {
   });
 }
 const makePaint32 = (draw) => paintSurface(32, 32, draw);
+// scale a smooth-shaded sprite up 2× (bilinear) so small buildings match the
+// hero house's 64px size — keeps the colony's structures the same visual scale
+function scale2x(cv) {
+  return createSurface(cv.width * 2, cv.height * 2, (s) => {
+    const ctx = s.canvas.getContext('2d');
+    if (typeof ctx.drawImage === 'function') {
+      // browser: smooth bilinear 2×
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(cv, 0, 0, cv.width, cv.height, 0, 0, cv.width * 2, cv.height * 2);
+    } else {
+      // headless stub (tests): nearest-neighbour pixel scale, preserving alpha
+      for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+        const p = px(cv, x, y);
+        if (p[3] === 0) continue; // leave transparent (avoids opaque black backdrop)
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++)
+          s.rect(x * 2 + dx, y * 2 + dy, 1, 1, [p[0], p[1], p[2]]);
+      }
+    }
+  });
+}
 
 // Supply Depot (shop) — slate colony kiosk: holo sign, glass display bay,
 // rooftop antenna + panel seams so it reads as *built space*.
-const shopSprite = makePaint32((P) => {
+const shopSprite = scale2x(makePaint32((P) => {
   // dark slate kiosk hull with a glowing holo sign and a glass display bay
   P.box(4, 8, 28, 30, 6, [44, 56, 74], [26, 34, 50]);            // hull
   P.box(3, 3, 29, 8, 1, [30, 38, 54], [22, 30, 44]);            // sign housing
-  P.ell(16, 5, 12, 2, [90, 228, 216], [40, 140, 160]);          // teal holo sign
+  P.ell(16, 5, 12, 2, [120, 240, 232], [52, 158, 170]);          // teal holo sign (brighter)
   P.box(6, 11, 26, 20, 3, [20, 28, 44], [14, 20, 34]);          // glass display bay
   P.ell(16, 15, 9, 4, [120, 202, 212], [60, 132, 162]);         // bay teal glow
+  // QA 0904 2.5 — the lit-window RULE: a warm window means "open for business".
+  // These used to be painted BEFORE the display bay, which is drawn over them,
+  // so the shop shipped with ZERO warm window pixels — the one building that
+  // should always read 'open' read as dark. They now sit ON TOP of the bay
+  // glass, where lamps-behind-display-glass actually belongs.
+  P.ell(8, 13, 1.8, 2.3, [255, 224, 160], [220, 168, 108]);    // warm window (left)
+  P.ell(24, 13, 1.8, 2.3, [255, 228, 170], [214, 182, 132]);   // warm window (right)
   P.ell(10, 15, 1.5, 1.5, [255, 218, 158], [220, 168, 110]);   // warm goods glint
   P.ell(21, 15, 1.5, 1.5, [255, 226, 180], [210, 180, 130]);
   P.box(13, 21, 19, 30, 3, [30, 42, 60], [20, 30, 44]);         // portal door
   P.ell(16, 25, 3, 4, [100, 224, 220], [60, 160, 170]);         // door glow
   P.box(3, 30, 29, 32, 1, [60, 72, 90], [40, 52, 68]);          // base plate
-  // rooftop antenna mast + teal beacon (colony signature)
-  P.box(21, 1, 23, 4, 1, [110, 124, 148], [70, 82, 104]);
-  P.ell(22, 1.6, 1.4, 1.4, [255, 200, 110], [226, 160, 80]);
+  // rooftop antenna mast + teal beacon (colony signature) — QA 2.4: the beacon
+  // used to float on a bare stalk; it now sits in a mount collar with a strut
+  P.box(21, 1, 23, 4, 1, [110, 124, 148], [70, 82, 104]);        // mast
+  P.box(20, 4, 24, 5, 1, [86, 98, 120], [56, 68, 90]);           // mount ring
+  P.box(23, 3, 26, 4, 0.5, [96, 108, 130], [64, 76, 98]);        // guy strut
+  P.ell(22, 1.6, 1.4, 1.4, [255, 200, 110], [226, 160, 80]);    // warm beacon
   // vertical panel seams on the hull (machined, not flat paint)
   P.box(10, 12, 11, 28, 1, [36, 46, 62], [24, 32, 46]);
   P.box(21, 12, 22, 28, 1, [36, 46, 62], [24, 32, 46]);
   // side vent slots (cool teal)
   P.box(6, 9, 8, 10, 1, [56, 68, 86], [40, 50, 66]);
   P.box(24, 9, 26, 10, 1, [56, 68, 86], [40, 50, 66]);
-});
+}));
 const shopGlow = createSurface(32, 24, (s) => {
   const y = [255, 200, 110];
-  s.rect(7, 5, 18, 4, [Math.round(y[0] * 0.5), Math.round(y[1] * 0.38), Math.round(y[2] * 0.18)]);
-  s.rect(9, 14, 14, 5, [Math.round(y[0] * 0.35), Math.round(y[1] * 0.26), Math.round(y[2] * 0.12)]);
+  // QA 0904 2.5: the ADD-blend halo must land exactly on the lit windows, not
+  // on a generic band — the halo IS the window-light rule read from far away.
+  // Rects below mirror the two warm windows at (8,13) and (24,13) in the hull.
+  s.rect(5, 10, 6, 6, [Math.round(y[0] * 0.5), Math.round(y[1] * 0.38), Math.round(y[2] * 0.18)]);
+  s.rect(21, 10, 6, 6, [Math.round(y[0] * 0.5), Math.round(y[1] * 0.38), Math.round(y[2] * 0.18)]);
+  // holo sign band keeps a faint cool wash (it glows on its own texture)
+  s.rect(7, 4, 18, 3, [Math.round(y[0] * 0.3), Math.round(y[1] * 0.3), Math.round(y[2] * 0.22)]);
 });
 
 // Round Trading Post (Exchange) — a cozy kiosk pod with a glowing orb window
@@ -691,8 +798,8 @@ function drawExchange(s, frame) {
   ell(16, 26, 3, 1.6, [40, 52, 68], [28, 38, 52]);              // base seam
   ctx.putImageData(img, 0, 0);
 }
-const exchangeA = createSurface(32, 32, (s) => drawExchange(s, 0));
-const exchangeB = createSurface(32, 32, (s) => drawExchange(s, 1));
+const exchangeA = scale2x(createSurface(32, 32, (s) => drawExchange(s, 0)));
+const exchangeB = scale2x(createSurface(32, 32, (s) => drawExchange(s, 1)));
 const exchangeGlow = createSurface(32, 24, (s) => {
   const bl = [95, 165, 255];
   s.rect(9, 6, 12, 10, [Math.round(bl[0] * 0.4), Math.round(bl[1] * 0.32), Math.round(bl[2] * 0.2)]);
@@ -711,10 +818,22 @@ function drawTavern(s, frame) {
   const box = (x0, y0, x1, y1, r, top, deep) => { for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const a = Math.max(0, Math.min(1, 0.5 - sdfRound(x, y, x0, y0, x1, y1, r))); if (a > 0) { const t = Math.max(0, Math.min(1, (y - y0) / (y1 - y0))); const col = t > 0.5 ? [top[0] + (deep[0] - top[0]) * (t - 0.5) / 0.5, top[1] + (deep[1] - top[1]) * (t - 0.5) / 0.5, top[2] + (deep[2] - top[2]) * (t - 0.5) / 0.5] : top; blend((y * W + x) * 4, col, a); } } };
   const ell = (cx, cy, rx, ry, top, deep) => { for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const a = Math.max(0, Math.min(1, 0.5 - sdfEll(x, y, cx, cy, rx, ry))); if (a > 0) { const t = Math.max(0, Math.min(1, (y - (cy - ry)) / (2 * ry))); const col = t > 0.5 ? [top[0] + (deep[0] - top[0]) * (t - 0.5) / 0.5, top[1] + (deep[1] - top[1]) * (t - 0.5) / 0.5, top[2] + (deep[2] - top[2]) * (t - 0.5) / 0.5] : top; blend((y * W + x) * 4, col, a); } } };
   ell(16, 30, 12, 3, [40, 50, 66], [30, 38, 52]);               // ground shadow
-  box(5, 9, 27, 29, 7, [52, 64, 84], [32, 42, 60]);             // slate hull
-  box(8, 14, 24, 24, 6, [70, 42, 30], [34, 22, 16]);            // warm lit interior
-  ell(11, 18, 3, 4, [255, 220, 150], [220, 168, 108]);          // warm lamp
-  ell(22, 18, 3, 4, [255, 228, 170], [214, 182, 132]);
+  box(4, 8, 28, 29, 7, [52, 64, 84], [32, 42, 60]);             // slate hull (dominant mass)
+  // Glass-front lounge, built the way glass actually reads at dusk: a DARK teal
+  // pane with a few BRIGHT light cores behind it — not a solid amber rectangle.
+  // QA 0904 round 1 replaced the rust slab with a filled amber box, which still
+  // photographed as a brown timber hut: the warm mass covered ~18% of the sprite
+  // with no glass or frame over it. Warmth must arrive as EMISSION, small and
+  // bright, over cool glass — so the building stays slate-dominant and the
+  // warmth reads as "lit from inside", which is the whole point of a cantina.
+  box(8, 13, 24, 24, 5, [26, 46, 62], [14, 30, 44]);             // recessed dark glass pane
+  ell(11, 20, 2.1, 2.6, [255, 228, 168], [228, 172, 96]);          // lamp core seen through glass
+  ell(21, 20, 2.1, 2.6, [255, 236, 186], [222, 186, 128]);       // lamp core b
+  box(9, 22, 23, 23, 0, [120, 232, 226], [56, 158, 168]);         // bar counter gleam (teal line)
+  box(15, 13, 16, 24, 0, [46, 58, 78], [30, 40, 56]);             // mullion post (frame, not fill)
+  box(8, 17, 24, 18, 0, [46, 58, 78], [30, 40, 56]);             // mullion rail
+  box(7, 24, 25, 25, 0, [70, 84, 104], [44, 56, 74]);            // sill (slate)
+  box(7, 12, 25, 13, 0, [70, 84, 104], [44, 56, 74]);            // head (slate)
   // glowing sign over the entrance
   box(10, 4, 22, 7, 2, [30, 38, 54], [22, 30, 44]);
   ell(16, 5, 5, 1.6, [255, 168, 122], [232, 110, 78]);          // warm 'OPEN' neon glow
@@ -724,15 +843,20 @@ function drawTavern(s, frame) {
   ell(19, 9, 0.9, 0.9, [60, 120, 136], [40, 90, 104]);
   // rooftop exhaust vent (colony machinery detail)
   box(24, 11, 26, 13, 1, [90, 100, 120], [60, 70, 88]);
+  // QA 0904 2.4: the cantina's roof beacon floated on nothing at all — it now
+  // rises from a mast + mount collar like every other building's.
+  box(21, 6, 23, 11, 1, [110, 124, 148], [70, 82, 104]);   // beacon mast
+  box(20, 10, 24, 11, 0.5, [86, 98, 120], [56, 68, 90]);    // mount collar
+  ell(22, 6.4, 1.4, 1.4, [255, 200, 110], [226, 160, 80]);  // warm beacon
   // side panel seam
   box(6, 20, 7, 26, 1, [42, 52, 68], [30, 38, 52]);
   box(14, 21, 18, 29, 3, [38, 50, 68], [26, 36, 50]);           // door
   ell(16, 25, 3.2, 4, [234, 198, 150], [188, 150, 98]);         // warm door glow
   ctx.putImageData(img, 0, 0);
 }
-const tavernA = createSurface(32, 32, (s) => drawTavern(s, 0));
-const tavernB = createSurface(32, 32, (s) => drawTavern(s, 1));
-const tavernC = createSurface(32, 32, (s) => drawTavern(s, 2));
+const tavernA = scale2x(createSurface(32, 32, (s) => drawTavern(s, 0)));
+const tavernB = scale2x(createSurface(32, 32, (s) => drawTavern(s, 1)));
+const tavernC = scale2x(createSurface(32, 32, (s) => drawTavern(s, 2)));
 const tavernGlow = createSurface(32, 24, (s) => {
   const w = [255, 192, 102];
   [8, 21].forEach(wx => s.rect(wx - 1, 6, 7, 4, [Math.round(w[0] * 0.45), Math.round(w[1] * 0.34), Math.round(w[2] * 0.16)]));
@@ -1081,6 +1205,14 @@ function drawVillager(s, dir, frame, C, look) {
   const d = img.data;
   const human = !!(look && look.human);
   const bob = frame === 1 ? -1 : 0;                 // subtle step bob
+  // ── view + gait (QA 0904 Stage 4) — `dir` used to be passed in and then
+  // IGNORED: every direction drew the same front-facing face, and the 3 walk
+  // frames differed only by a 1px bob, so the cast glided on skating shoes.
+  const view = (dir === 'back' || dir === 'left' || dir === 'right') ? dir : 'front';
+  const side = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+  const backView = view === 'back';
+  const sideView = view === 'left' || view === 'right';
+  const gait = dir === 'idle' ? 0 : frame;          // 0 stance, 1 left fwd, 2 right fwd
   const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
   const shade = (c, k) => [c[0] * k | 0, c[1] * k | 0, c[2] * k | 0];
   const blend = (i, c, a) => {
@@ -1121,10 +1253,30 @@ function drawVillager(s, dir, frame, C, look) {
   paint(32, 79, 20, 2, [20, 26, 38], [12, 16, 26]);
   // ── legs + boots (human only — robots draw their own legs in the head/branch) ──
   if (human) {
-    paint(T.lx1, T.ly + bob, 5.5, T.lr, C.pants, shade(C.pants, 0.72));
-    paint(T.lx2, T.ly + bob, 5.5, T.lr, C.pants, shade(C.pants, 0.72));
-    paint(T.lx1, 75 + bob, 5.5, 4, C.bootLt, C.bootSh);
-    paint(T.lx2, 75 + bob, 5.5, 4, C.bootLt, C.bootSh);
+    // gait (QA 0904 4.3): the forward foot plants flat, the trailing foot
+    // lifts its toe and shortens its shin — both feet used to be drawn
+    // identical at every walk frame, which is why walking read as skating.
+    const lead = gait === 1 ? 1 : gait === 2 ? 2 : 0;        // 1=left fwd, 2=right fwd
+    const fwdOff = lead ? 2.5 : 0, backOff = lead ? -2 : 0;
+    const o1 = lead === 1 ? fwdOff : lead === 2 ? backOff : 0;
+    const o2 = lead === 2 ? fwdOff : lead === 1 ? backOff : 0;
+    paint(T.lx1, T.ly + bob + (o1 > 0 ? 0.8 : o1 < 0 ? -1 : 0), 5.5, T.lr, C.pants, shade(C.pants, 0.72));
+    paint(T.lx2, T.ly + bob + (o2 > 0 ? 0.8 : o2 < 0 ? -1 : 0), 5.5, T.lr, C.pants, shade(C.pants, 0.72));
+    // shin fills the gap between trouser hem and boot crown (QA 4.3: detached
+    // capsule feet with a visible daylight gap read as skating stumps)
+    paint(T.lx1 + o1, 70 + bob, 4.2, 7, shade(C.pants, 0.86), shade(C.pants, 0.6));
+    paint(T.lx2 + o2, 70 + bob, 4.2, 7, shade(C.pants, 0.86), shade(C.pants, 0.6));
+    paint(T.lx1 + o1, 75 + bob, 5.5, 4, C.bootLt, C.bootSh);
+    paint(T.lx2 + o2, 75 + bob, 5.5, 4, C.bootLt, C.bootSh);
+    // boot toe caps point the facing — front boots lead, back boots tuck
+    if (sideView) {
+      paint(32 + side * 5 + (o1 || o2), 75 + bob, 3.2, 3, C.bootLt, C.bootSh);
+    }
+    // trailing foot toe raise — the actual "mid-stride" read
+    if (lead) {
+      const tx = (lead === 1 ? T.lx2 : T.lx1) + (lead === 1 ? backOff : fwdOff) - 4.5;
+      paint(tx, 72.5 + bob, 2.4, 1.8, shade(C.bootLt, 0.9), C.bootSh);
+    }
   }
   // ── torso (shoulders → hips), shaped by build ──
   boxu(T.t0, T.tb + bob, T.t1, T.tl + bob, T.tr, C.suitLt, C.suitSh);
@@ -1165,42 +1317,100 @@ function drawVillager(s, dir, frame, C, look) {
     paint(44, 49 + bob, 6, 3, [148, 128, 100], [112, 94, 70]);  // flap
   }
   // ── arms (distinct limbs, not bumps) ──
-  paint(T.ax1, 46 + bob, 3.6, 15, C.suit, C.suitSh);
-  paint(T.ax2, 46 + bob, 3.6, 15, C.suit, C.suitSh);
-  paint(T.hx1, 58 + bob, 3, 3.8, C.faceSh, C.faceSh);
-  paint(T.hx2, 58 + bob, 3, 3.8, C.faceSh, C.faceSh);
+  paint(T.ax1, 46 + bob + (gait === 1 ? -1.2 : gait === 2 ? 0.8 : 0), 3.6, 15, C.suit, C.suitSh);
+  paint(T.ax2, 46 + bob + (gait === 2 ? -1.2 : gait === 1 ? 0.8 : 0), 3.6, 15, C.suit, C.suitSh);
+  // side view (QA 0904 4.3): far arm drawn on the silhouette edge swinging —
+  // near arm hangs its own line — so profile frames read as a walking BODY,
+  // not a frontal sprite rotated. Hands track the swing.
+  if (sideView) {
+    const sw = gait === 1 ? 3 : gait === 2 ? -3 : 0;                    // arm swing px
+    paint(32 - side * 3.5, 46 + bob, 3.2, 15, shade(C.suit, 0.78), shade(C.suit, 0.6));   // far arm
+    paint(32 - side * 3.5, 59 + bob + sw * 0.4, 2.8, 3.4, shade(C.faceSh, 0.8), shade(C.faceSh, 0.65));
+    paint(32 + side * 1, 46 + bob, 3.8, 15, C.suit, C.suitSh);          // near arm
+    paint(32 + side * 1 + sw * 0.5, 59 + bob, 3.2, 3.8, C.faceSh, C.faceSh);
+  } else {
+    paint(T.hx1, 58 + bob, 3, 3.8, C.faceSh, C.faceSh);
+    paint(T.hx2, 58 + bob, 3, 3.8, C.faceSh, C.faceSh);
+  }
   // ── head (approx 1/4.5 of full height — reads human) ──
   if (human) {
+    if (backView) {
+      // QA 0904 4.4: walking away used to show the full front face (eyes,
+      // smile, blush) because `dir` was never decoded. Back view = hair
+      // coverage over an unseen head + nape — no eyes, no mouth, no blush.
+      const hc0 = look.hairC || shade(C.helmet, 0.6);
+      paint(32, 18 + bob, 9.8, 8.4, C.faceSh, shade(C.faceSh, 0.8));   // skull back
+      paint(32, 12 + bob, 14, 10, hc0, shade(hc0, 0.72));               // full hair cap
+      if ((look.hair || 'short') === 'long') {
+        paint(32, 24 + bob, 11, 9, hc0, shade(hc0, 0.66));              // hair falls down the back
+        // backpack on the walking-away silhouette (QA 4.1 back variety)
+        if (look.backpack) {
+          paint(32, 42 + bob, 11, 9, [96, 116, 96], [64, 82, 66]);
+          paint(32, 38 + bob, 7, 2.4, [128, 150, 124], [96, 116, 96]);
+        }
+      }
+    } else {
     paint(32, 18 + bob, 9.8, 8.4, C.face, C.faceSh);             // face / neck
     const hc = look.hairC || shade(C.helmet, 0.6);
     const hs = look.hair || 'short';
     if (hs === 'buzz') {
-      paint(32, 6 + bob, 13, 4, hc, shade(hc, 0.8));
+      paint(32, 7 + bob, 12.5, 3.4, hc, shade(hc, 0.8));
     } else {
-      paint(32, 10 + bob, 14, 9, hc, shade(hc, 0.72));            // hair volume
+      paint(32, 10.5 + bob, 13.2, 7.6, hc, shade(hc, 0.72));          // hair volume (trimmed 1.5px so head:body reads 1:3, not chibi)
       if (hs === 'long') {
-        paint(20, 17 + bob, 4, 10, hc, shade(hc, 0.8));
-        paint(44, 17 + bob, 4, 10, hc, shade(hc, 0.8));
+        paint(20, 16 + bob, 4, 9, hc, shade(hc, 0.8));
+        paint(44, 16 + bob, 4, 9, hc, shade(hc, 0.8));
       } else if (hs === 'bun') {
-        paint(32, 6 + bob, 5, 5, hc, shade(hc, 0.76));
+        paint(32, 7 + bob, 4.6, 4.4, hc, shade(hc, 0.76));
       }
     }
     // expressive eyes: bigger, open, with a glint highlight + arched brows
+    // (side view: features ride the leading cheek, eyes pull toward profile)
     const eyC = look.eyes || [46, 38, 30];
-    paint(25, 19 + bob, 3.8, 4.2, eyC, [16, 12, 10]);
-    paint(39, 19 + bob, 3.8, 4.2, eyC, [16, 12, 10]);
-    paint(23.6, 16.4 + bob, 1.3, 1.6, [255, 252, 244], [255, 244, 220]);   // glint
-    paint(37.6, 16.4 + bob, 1.3, 1.6, [255, 252, 244], [255, 244, 220]);
-    // arched brows (a little personality arc)
-    paint(24, 14.5 + bob, 4, 1.2, shade(hc, 0.55), shade(hc, 0.42));
-    paint(40, 14.5 + bob, 4, 1.2, shade(hc, 0.55), shade(hc, 0.42));
+    const fx = sideView ? side * 3.2 : 0;
+    if (sideView) {
+      paint(32 + fx, 19 + bob, 3.2, 4.2, eyC, [16, 12, 10]);            // single visible eye
+      paint(32 + fx + side * 1.2, 16.4 + bob, 1.3, 1.6, [255, 252, 244], [255, 244, 220]);
+      paint(32 + side * 1, 14.5 + bob, 3.6, 1.2, shade(hc, 0.55), shade(hc, 0.42));
+    } else {
+      paint(25, 19 + bob, 3.8, 4.2, eyC, [16, 12, 10]);
+      paint(39, 19 + bob, 3.8, 4.2, eyC, [16, 12, 10]);
+      paint(23.6, 16.4 + bob, 1.3, 1.6, [255, 252, 244], [255, 244, 220]);   // glint
+      paint(37.6, 16.4 + bob, 1.3, 1.6, [255, 252, 244], [255, 244, 220]);
+      // arched brows (a little personality arc)
+      paint(24, 14.5 + bob, 4, 1.2, shade(hc, 0.55), shade(hc, 0.42));
+      paint(40, 14.5 + bob, 4, 1.2, shade(hc, 0.55), shade(hc, 0.42));
+    }
     // mouth: closed smile vs talking (frame 2) — real expression
     const mouthOpen = frame === 2;
-    paint(32, mouthOpen ? 25 : 24 + bob, mouthOpen ? 7 : 4.4, mouthOpen ? 2.6 : 1.6,
+    paint(32 + fx, mouthOpen ? 25 : 24 + bob, mouthOpen ? 7 : 4.4, mouthOpen ? 2.6 : 1.6,
           mouthOpen ? [210, 120, 96] : shade(C.face, 0.8), mouthOpen ? [150, 78, 60] : [40, 24, 16]);
-    // blush
-    paint(20, 21 + bob, 2.2, 1.7, [214, 122, 110], [150, 80, 70]);
-    paint(44, 21 + bob, 2.2, 1.7, [214, 122, 110], [150, 80, 70]);
+    // blush — only where the mood reads warm; the two identical 2px dots on
+    // every face were one of the 'same face in nine wigs' tells (QA 4.2)
+    if (['kind', 'bright', 'dreamy', 'calm'].includes(look.mood)) {
+      paint(20 + fx, 21 + bob, 2.2, 1.7, [214, 122, 110], [150, 80, 70]);
+      paint(44 + fx, 21 + bob, 2.2, 1.7, [214, 122, 110], [150, 80, 70]);
+    }
+    // ── outline prop (QA 0904 4.1): a per-NPC SILHOUETTE prop so the cast
+    //    differs by shape against the bright floor, not just by colour ──
+    const out = look.outline;
+    if (out === 'bedroll') {
+      paint(45, 34 + bob, 5, 8, [124, 138, 110], [86, 100, 78]);      // shoulder bed-roll
+      paint(45, 30 + bob, 4.2, 2.4, [150, 164, 134], [112, 126, 100]);
+    } else if (out === 'cratelid') {
+      paint(18, 38 + bob, 6, 6, [126, 106, 80], [92, 76, 56]);          // hip crate + lid
+      paint(18, 32 + bob, 7, 2, [150, 128, 98], [112, 94, 70]);
+    } else if (out === 'oiltank') {
+      paint(46, 44 + bob, 5, 9, [112, 122, 138], [78, 88, 104]);       // back oil tank
+      paint(46, 35 + bob, 2, 2, [240, 190, 96], [200, 150, 70]);       // valve
+    } else if (out === 'seedbasket') {
+      paint(18, 42 + bob, 7, 7, [150, 122, 78], [110, 86, 54]);         // seed basket
+      paint(18, 37 + bob, 8, 2.4, [172, 144, 96], [132, 106, 68]);
+      paint(16, 40 + bob, 2, 2, [126, 180, 122], [92, 132, 92]);        // sprig
+    } else if (out === 'lamp') {
+      paint(47, 42 + bob, 3.4, 5.5, [96, 104, 122], [66, 74, 92]);     // hand-lamp on hip
+      paint(47, 37 + bob, 3.4, 3, [250, 214, 140], [210, 160, 80]);
+    }
     // ── accessories — per-character gear so every villager has a distinct
     //    silhouette, not the same body in a different colour ──
     const acc = look.acc;
@@ -1239,6 +1449,7 @@ function drawVillager(s, dir, frame, C, look) {
       paint(32, 9 + bob, 3, 3, [150, 208, 196], [110, 168, 158]);   // knot
       paint(36, 11 + bob, 4, 3, [120, 176, 164], [84, 136, 126]);   // trailing tail
     }
+    }
   } else {
     // ── ROBOTS as individuals with their OWN bodies (not a human in a shell) ──
     const ro = look.robot || {};
@@ -1257,9 +1468,17 @@ function drawVillager(s, dir, frame, C, look) {
       paint(32, 30 + bob, 4, 2, [255, 168, 88], [236, 120, 48]);                                     // welder spark light
       paint(46, 12 + bob, 2, 5, C.helmet, C.helmetSh);                                               // antenna
       paint(47, 10 + bob, 1.6, 1.6, [255, 200, 90], [230, 140, 40]);
-      // heavy legs (armor plates, not suit legs)
+      // heavy legs (armor plates, not suit legs) — carried all the way down to
+      // boot plates so NOVA stands ON the ground; the old version ended the
+      // greaves mid-shin, which is why the tall droid visibly floated.
       paint(T.lx1, T.ly + bob, 6, T.lr, shade(C.helmet, 0.85), shade(C.helmet, 0.55));
       paint(T.lx2, T.ly + bob, 6, T.lr, shade(C.helmet, 0.85), shade(C.helmet, 0.55));
+      paint(T.lx1, 70 + bob, 5.6, 5, shade(C.helmet, 0.72), shade(C.helmet, 0.45));   // shin greave
+      paint(T.lx2, 70 + bob, 5.6, 5, shade(C.helmet, 0.72), shade(C.helmet, 0.45));
+      paint(T.lx1, 75 + bob, 6, 4.2, C.bootLt, C.bootSh);                              // boot plate
+      paint(T.lx2, 75 + bob, 6, 4.2, C.bootLt, C.bootSh);
+      paint(T.lx1, 73.5 + bob, 6, 1.2, C.metalHi || C.bootLt, C.bootLt);               // knee trim
+      paint(T.lx2, 73.5 + bob, 6, 1.2, C.metalHi || C.bootLt, C.bootLt);
     } else {
       // CORA — round teal-moss prop-top bot: soft spherical body, short stubby
       // legs, propeller fin, glowing prop jewel, snack pin
@@ -1309,16 +1528,19 @@ const NPC_SKIN = {
 };
 
 // Per-NPC look: humans are exposed-faced with hair & eyes; nova/cora are robots.
+// `mood` = the resting expression (kept in lockstep with PORTRAIT_CFG.expr — the
+// face in the world and the face in the dialogue box are the SAME character).
+// `outline` = a silhouette prop so the cast differs by SHAPE, not only colour.
 const LOOK = {
-  player: { human: true, build: 'stocky', acc: 'sunhat',   gear: 'toolbelt', hair: 'short', hairC: [88, 60, 40], eyes: [52, 42, 32] },
-  luna:   { human: true, build: 'slim',   acc: 'scarf',    gear: 'pin',      hair: 'long',  hairC: [24, 20, 30], eyes: [52, 44, 34] },
-  zephyr: { human: true, build: 'tall',   acc: 'beanie',   gear: 'seedband', hair: 'bun',   hairC: [92, 66, 40], eyes: [50, 42, 34] },
-  vega:   { human: true, build: 'slim',   acc: 'apron',                   hair: 'long',  hairC: [136, 96, 58], eyes: [58, 46, 36] },
-  quasar: { human: true, build: 'tall',   acc: 'pilotcap', gear: 'pouches',  hair: 'buzz',  hairC: [212, 204, 196], eyes: [34, 30, 46] },
-  rhea:   { human: true, build: 'stocky', acc: 'bandana',  gear: 'apron',    hair: 'short', hairC: [46, 30, 18], eyes: [52, 44, 34] },
-  astra:  { human: true, build: 'slim',   acc: 'headband', gear: 'book',     hair: 'bun',   hairC: [82, 56, 34], eyes: [48, 40, 30] },
-  orion:  { human: true, build: 'tall',   acc: 'hood',     gear: 'plasma',   hair: 'short', hairC: [14, 12, 10], eyes: [56, 46, 36] },
-  comet:  { human: true, build: 'slim',   acc: 'ribbon',   gear: 'satchel',  hair: 'long',  hairC: [128, 88, 46], eyes: [50, 42, 32] },
+  player: { human: true, build: 'stocky', acc: 'sunhat',   gear: 'toolbelt', hair: 'short', hairC: [88, 60, 40], eyes: [52, 42, 32], mood: 'calm',   outline: 'seedbasket' },
+  luna:   { human: true, build: 'slim',   acc: 'scarf',    gear: 'pin',      hair: 'long',  hairC: [24, 20, 30], eyes: [52, 44, 34], backpack: true, mood: 'kind',   outline: 'bedroll' },
+  zephyr: { human: true, build: 'tall',   acc: 'beanie',   gear: 'seedband', hair: 'bun',   hairC: [92, 66, 40], eyes: [50, 42, 34], mood: 'bright', outline: 'seedbasket' },
+  vega:   { human: true, build: 'slim',   acc: 'apron',                     hair: 'long',  hairC: [136, 96, 58], eyes: [58, 46, 36], mood: 'sharp',  outline: 'cratelid' },
+  quasar: { human: true, build: 'tall',   acc: 'pilotcap', gear: 'pouches',  hair: 'buzz',  hairC: [212, 204, 196], eyes: [34, 30, 46], mood: 'gruff', outline: 'oiltank' },
+  rhea:   { human: true, build: 'stocky', acc: 'bandana',  gear: 'apron',    hair: 'short', hairC: [46, 30, 18], eyes: [52, 44, 34], mood: 'worry',  outline: 'cratelid' },
+  astra:  { human: true, build: 'slim',   acc: 'headband', gear: 'book',     hair: 'bun',   hairC: [82, 56, 34], eyes: [48, 40, 30], mood: 'clever', outline: 'lamp' },
+  orion:  { human: true, build: 'tall',   acc: 'hood',     gear: 'plasma',   hair: 'short', hairC: [14, 12, 10], eyes: [56, 46, 36], mood: 'sharp',  outline: 'oiltank' },
+  comet:  { human: true, build: 'slim',   acc: 'ribbon',   gear: 'satchel',  hair: 'long',  hairC: [128, 88, 46], eyes: [50, 42, 32], backpack: true, mood: 'dreamy', outline: 'bedroll' },
   nova:   { human: false, robot: { tall: true } },   // chrome welder — tall, amber forge-heart, spark antenna
   cora:   { human: false, robot: { tall: false } },  // teal-moss prop-top bot — snack pin, cheerful rounder
 };
@@ -1394,26 +1616,32 @@ const SHIP_SPRITES = {
     P.ell(9, 9, 2, 2, [70, 178, 176], [40, 120, 120]);           // teal rivet
     P.ell(23, 23, 2, 2, [70, 178, 176], [40, 120, 120]);
   }),
-  // hull wall — dark metal with a recessed panel + glowing teal light strip
+  // hull wall — dark slate bulkhead: recessed panel, glowing teal light strip,
+  // a bright top beam so it reads as a RAISED surface (distinct from the deck)
   wall: paintSurface(32, 32, (P) => {
-    P.box(0, 0, 31, 31, 1, [64, 76, 90], [44, 54, 66]);
-    P.box(4, 8, 27, 24, 3, [70, 82, 96], [52, 62, 74]);        // panel
-    P.box(4, 26, 27, 27, 1, [56, 168, 166], [34, 120, 122]);    // teal light strip
-    P.ell(16, 6, 4, 3, [90, 200, 196], [50, 150, 150]);         // indicator
-    // vertical seam lines so repeated wall tiles read as metal plates,
-    // not a flat continuous grid
-    P.box(0, 8, 1, 27, 1, [44, 52, 64], [32, 38, 48]);
-    P.box(30, 8, 31, 27, 1, [44, 52, 64], [32, 38, 48]);
-    // top edge highlight to read as lit metal
-    P.box(6, 8, 25, 8, 1, [84, 96, 110], [72, 82, 96]);
+    P.box(0, 0, 31, 31, 1, [40, 50, 62], [26, 34, 44]);            // dark slate bulkhead (clearly darker than deck)
+    P.box(4, 8, 27, 24, 3, [48, 58, 72], [36, 44, 54]);            // recessed panel
+    P.box(4, 26, 27, 27, 1, [56, 168, 166], [34, 120, 122]);        // teal light strip
+    P.ell(16, 6, 4, 3, [90, 200, 196], [50, 150, 150]);             // indicator
+    // top bulkhead beam — bright lit edge so the wall reads as raised, not floor
+    P.box(0, 0, 31, 4, 1, [92, 104, 118], [70, 80, 92]);
+    P.box(0, 3, 31, 3, 1, [64, 74, 86], [48, 56, 66]);
+    // vertical seam lines so repeated wall tiles read as metal plates
+    P.box(0, 8, 1, 27, 1, [32, 40, 50], [24, 30, 38]);
+    P.box(30, 8, 31, 27, 1, [32, 40, 50], [24, 30, 38]);
   }),
-  // cryo-pod — glass tube with teal life-fluid, warm frame
+  // cryo-pod — glass tube with teal life-fluid, dark amber veneer cradle
+  // QA fix: the old frame [120,104,84] read as bare cardboard stuck on a metal
+  // hull. Dark amber veneer is a plausible habitat material and carries warmth
+  // against the slate instead of looking like packaging.
   cryopod: paintSurface(32, 30, (P) => {
-    P.box(4, 4, 28, 27, 5, [120, 104, 84], [80, 66, 52]);        // frame
+    P.box(4, 4, 28, 27, 5, [96, 62, 34], [58, 38, 20]);         // amber veneer frame
+    P.box(4, 4, 28, 6, 2, [210, 160, 92], [140, 100, 52]);      // lit veneer top edge
     P.box(8, 7, 24, 24, 2, [20, 40, 64], [10, 22, 40]);           // glass dark
     P.ell(16, 18, 7, 8, [44, 160, 170], [18, 100, 120]);          // teal fluid
     P.ell(16, 12, 7, 2, [120, 214, 214], [60, 170, 172]);     // tube glow
     P.ell(13, 8, 1, 1, [255, 250, 210], [230, 210, 150]);         // console light
+    P.ell(16, 26, 4, 1.2, [90, 228, 216], [40, 140, 160]);        // teal base seam
   }),
   // console — sleek control deck, teal screen + amber toggles
   console: paintSurface(32, 22, (P) => {
@@ -1537,29 +1765,33 @@ function makeHUDSprite(text, color = '#9ddd72', bg = '#000000') {
 // camelCase name (grassA, soilB) → snake_case key (grass_a, soil_b) so scene refs match
 const toSnake = k => k.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 
-// ── House interior furniture (warm 2000s JRPG cozy palette) ──
-// ══ HOME INTERIOR — painterly furniture in the colony palette (warm dark
-//    wood + teal accents), replacing the old 16px pixel grids. ══
+// ── House interior furniture — colony habitat language. Everything matches
+//    the room shell: slate + teal + cream + amber. No warm wood, no rust.
+//    (Old JRPG-cozy wood palette removed — it clashed with the slate room.)
+// ══ HOME INTERIOR — painterly furniture in the colony palette ══
 const INT_BED = paintSurface(48, 30, (P) => {
   P.box(1, 6, 47, 11, 4, [80, 92, 112], [56, 66, 84]);           // slate headboard
+  P.box(1, 10, 47, 11, 1, [90, 228, 216], [40, 140, 160]);       // headboard teal trim
   P.box(3, 12, 45, 28, 4, [66, 76, 94], [48, 56, 72]);           // metal frame base
   P.box(2, 11, 46, 12, 1, [90, 228, 216], [40, 140, 160]);       // teal frame trim
-  P.box(19, 11, 45, 26, 6, [198, 150, 118], [150, 112, 84]);     // mattress
-  P.ell(34, 17, 9, 5, [236, 220, 202], [198, 180, 162]);         // pillow
-  P.ell(30, 23, 13, 5, [60, 172, 170], [38, 128, 126]);          // teal blanket accent
+  P.box(19, 11, 45, 26, 6, [236, 228, 206], [200, 190, 170]);    // cream mattress
+  P.ell(34, 17, 9, 5, [246, 240, 228], [214, 204, 190]);         // cream pillow
+  P.ell(30, 23, 13, 5, [90, 228, 216], [40, 140, 160]);          // teal blanket
+  P.box(28, 21, 42, 22, 1, [255, 176, 96], [220, 140, 70]);      // amber blanket stripe
 });
 const INT_TABLE = paintSurface(44, 26, (P) => {
   P.box(0, 14, 8, 24, 3, [66, 76, 94], [48, 56, 72]);            // leg l (metal)
   P.box(36, 14, 44, 24, 3, [66, 76, 94], [48, 56, 72]);          // leg r (metal)
-  P.box(2, 24, 42, 26, 3, [66, 76, 94], [48, 56, 72]);           // leg base (guard)
-  P.box(3, 6, 41, 12, 3, [150, 110, 70], [100, 70, 46]);         // tabletop
+  P.box(2, 24, 42, 26, 3, [66, 76, 94], [48, 56, 72]);           // leg base
+  P.box(3, 6, 41, 12, 3, [96, 110, 130], [64, 76, 94]);          // slate tabletop
   P.box(3, 7, 41, 8, 1, [90, 228, 216], [40, 140, 160]);         // teal tabletop trim
-  P.ell(22, 14, 11, 4, [70, 160, 104], [48, 128, 80]);           // little plant on table (moss)
-  P.ell(33, 14, 4, 3, [220, 182, 120], [180, 142, 88]);       // cup (warm)
+  P.ell(22, 14, 11, 4, [70, 160, 104], [48, 128, 80]);           // plant on table (moss)
+  P.ell(33, 14, 4, 3, [255, 176, 96], [220, 140, 70]);           // amber cup
 });
 const INT_WINDOW = paintSurface(36, 28, (P) => {
-  P.box(1, 1, 35, 27, 2, [120, 84, 54], [78, 52, 34]);           // wooden frame
-  P.box(3, 3, 33, 25, 0, [16, 22, 40], [8, 12, 24]);             // deep-space pane
+  P.box(1, 1, 35, 27, 2, [96, 110, 130], [64, 76, 94]);          // slate frame
+  P.box(2, 2, 34, 26, 1, [90, 228, 216], [40, 140, 160]);        // teal inner rim
+  P.box(4, 4, 32, 24, 0, [16, 22, 40], [8, 12, 24]);             // deep-space pane
   P.ell(22, 8, 5, 5, [150, 90, 60], [120, 70, 50]);              // planet
   P.ell(10, 14, 3, 2, [90, 210, 205], [40, 150, 150]);           // teal star glint
   P.ell(29, 20, 1.5, 1.5, [255, 240, 200], [220, 190, 140]);     // star
@@ -1567,30 +1799,134 @@ const INT_WINDOW = paintSurface(36, 28, (P) => {
 const INT_BOOKCASE = paintSurface(44, 30, (P) => {
   P.box(2, 2, 42, 28, 2, [72, 84, 104], [50, 60, 78]);           // metal case body
   P.box(2, 2, 42, 3, 1, [90, 228, 216], [40, 140, 160]);         // teal top trim
-  P.box( 2, 8, 42, 11, 0, [110, 76, 50], [90, 62, 42]);   // shelf 2
-  P.box(2, 18, 42, 21, 0, [110, 76, 50], [90, 62, 42]);          // shelf 3
-  // books (muted spines) on shelves
-  P.box(5, 4, 9, 8, 1, [170, 96, 72], [130, 70, 54]);
-  P.box(12, 4, 16, 8, 1, [90, 150, 92], [66, 116, 70]);
-  P.box(19, 4, 23, 8, 1, [82, 140, 182], [60, 110, 150]);
-  P.box(6, 12, 10, 17, 1, [210, 160, 90], [170, 120, 66]);
-  P.box(13, 12, 17, 17, 1, [92, 150, 92], [68, 116, 70]);
-  // small teal lamp on top shelf
+  P.box(2, 8, 42, 11, 0, [56, 66, 84], [44, 52, 66]);            // shelf 2
+  P.box(2, 18, 42, 21, 0, [56, 66, 84], [44, 52, 66]);           // shelf 3
+  // books (colony palette spines)
+  P.box(5, 4, 9, 8, 1, [70, 190, 200], [40, 130, 150]);          // teal book
+  P.box(12, 4, 16, 8, 1, [236, 228, 206], [200, 190, 170]);      // cream book
+  P.box(19, 4, 23, 8, 1, [255, 176, 96], [220, 140, 70]);        // amber book
+  P.box(6, 12, 10, 17, 1, [110, 124, 148], [70, 82, 104]);       // slate book
+  P.box(13, 12, 17, 17, 1, [70, 190, 200], [40, 130, 150]);      // teal book
+  // teal lamp on top shelf
   P.ell(34, 5, 5, 3, [90, 214, 210], [44, 150, 150]);
 });
 const INT_RUG = paintSurface(48, 20, (P) => {
-  P.ell(24, 10, 22, 9, [182, 116, 92], [140, 88, 70]);           // warm rust rug
-  P.ell(24, 10, 17, 6.5, [208, 182, 148], [156, 130, 104]);      // inner weave
-  P.ell(24, 10, 6, 2.4, [64, 156, 150], [42, 120, 116]);         // teal centre medallion
+  P.ell(24, 10, 22, 9, [90, 228, 216], [40, 140, 160]);          // teal rug
+  P.ell(24, 10, 17, 6.5, [236, 228, 206], [200, 190, 170]);      // cream weave
+  P.ell(24, 10, 6, 2.4, [255, 176, 96], [220, 140, 70]);         // amber medallion
 });
 const INT_PLANT = paintSurface(40, 32, (P) => {
-  P.box(10, 22, 30, 30, 4, [120, 84, 54], [78, 52, 34]);       // pot
+  P.box(10, 22, 30, 30, 4, [96, 110, 130], [64, 76, 94]);        // slate pot
+  P.box(10, 22, 30, 23, 1, [90, 228, 216], [40, 140, 160]);      // teal pot rim
   P.ell(20, 24, 7, 4, [110, 200, 170], [70, 150, 120]);          // soil glow
   // bioluminescent fronds
   P.ell(20, 8, 9, 6, [100, 210, 190], [60, 160, 150]);
   P.ell(14, 14, 6, 9, [90, 190, 170], [50, 130, 120]);
-  P.ell(26, 14, 6, 9, [90, 190, 170], [50, 130, 120]);       // right frond
-  P.ell(20, 3, 2, 2, [180, 255, 235], [130, 220, 200]);           // glowing tip
+  P.ell(26, 14, 6, 9, [90, 190, 170], [50, 130, 120]);           // right frond
+  P.ell(20, 3, 2, 2, [180, 255, 235], [130, 220, 200]);          // glowing tip
+});
+
+// colony galley stove + cargo pod chest + teal airlock door — replace the old
+// flat debug rectangles in the scene with proper sprite props (same language).
+const INT_STOVE = paintSurface(44, 30, (P) => {
+  P.box(0, 6, 44, 28, 4, [66, 76, 94], [48, 56, 72]);            // slate body
+  P.box(2, 4, 42, 6, 1, [90, 228, 216], [40, 140, 160]);         // teal top strip
+  P.box(5, 12, 39, 28, 2, [236, 228, 206], [200, 190, 170]);     // cream front panel
+  P.ell(14, 12, 4, 2.5, [255, 176, 96], [220, 140, 70]);         // amber burner l
+  P.ell(30, 12, 4, 2.5, [255, 176, 96], [220, 140, 70]);         // amber burner r
+  P.ell(22, 20, 2.5, 1.8, [90, 228, 216], [40, 140, 160]);       // teal control
+});
+const INT_CHEST = paintSurface(44, 30, (P) => {
+  P.box(0, 0, 44, 28, 4, [66, 76, 94], [48, 56, 72]);            // slate hull
+  P.box(0, 0, 44, 4, 2, [90, 228, 216], [40, 140, 160]);         // teal lid trim
+  P.box(18, 12, 26, 18, 2, [236, 228, 206], [200, 190, 170]);    // cream latch
+  P.ell(8, 9, 3, 3, [255, 176, 96], [220, 140, 70]);             // amber indicator
+});
+const INT_DOOR = paintSurface(36, 44, (P) => {
+  P.box(0, 0, 36, 44, 3, [96, 110, 130], [64, 76, 94]);          // slate frame
+  P.box(4, 4, 32, 40, 2, [70, 190, 200], [40, 130, 150]);        // teal door
+  P.box(8, 10, 28, 26, 1, [40, 60, 80], [24, 40, 56]);           // window slit
+  P.box(4, 40, 32, 41, 1, [90, 228, 216], [40, 140, 160]);       // teal glow seam
+  P.ell(26, 22, 3, 4, [255, 176, 96], [220, 140, 70]);           // amber handle
+});
+// shop counter / tavern bar / exchange counter — colony service counter
+const INT_COUNTER = paintSurface(56, 26, (P) => {
+  P.box(0, 0, 56, 24, 3, [66, 76, 94], [48, 56, 72]);            // slate counter body
+  P.box(2, 2, 54, 4, 1, [90, 228, 216], [40, 140, 160]);         // teal top trim
+  P.box(2, 18, 54, 24, 1, [90, 228, 216], [40, 140, 160]);       // teal base trim
+  P.box(8, 6, 48, 18, 1, [236, 228, 206], [200, 190, 170]);      // cream service panel
+  P.ell(20, 9, 2.5, 2, [255, 176, 96], [220, 140, 70]);          // amber indicator
+  P.ell(38, 9, 2.5, 2, [90, 228, 216], [40, 140, 160]);          // teal indicator
+});
+// ranch barn stall — slate pen with teal railing + feed door
+const INT_STALL = paintSurface(48, 30, (P) => {
+  P.box(2, 2, 46, 28, 3, [66, 76, 94], [48, 56, 72]);            // slate stall
+  P.box(2, 4, 46, 5, 1, [90, 228, 216], [40, 140, 160]);         // teal railing top
+  P.box(2, 12, 46, 13, 1, [90, 228, 216], [40, 140, 160]);       // teal railing mid
+  P.box(2, 20, 46, 21, 1, [90, 228, 216], [40, 140, 160]);       // teal railing low
+  P.box(20, 8, 28, 18, 1, [110, 124, 148], [70, 82, 104]);       // slate feed door
+});
+// exchange console / terminal — slate monolith with teal screen
+const INT_TERMINAL = paintSurface(32, 30, (P) => {
+  P.box(0, 0, 32, 28, 2, [66, 76, 94], [48, 56, 72]);            // slate body
+  P.box(4, 4, 28, 20, 1, [40, 60, 80], [24, 40, 56]);            // teal screen
+  P.box(8, 8, 24, 16, 1, [70, 190, 200], [40, 130, 150]);        // screen glow
+  P.ell(28, 24, 2, 2, [255, 176, 96], [220, 140, 70]);           // amber power light
+});
+// ── Per-kind interior identity props ──
+// QA verdict: all five rooms read as the SAME room with glyphs swapped (one
+// counter, two chests, two tables at the same anchors). These give the tavern,
+// shop, exchange and ranch furniture that is unmistakably THEIRS.
+// tavern bar-back — bottle shelf + taps: the room reads as a cantina instantly
+const INT_BARBACK = paintSurface(56, 34, (P) => {
+  P.box(2, 6, 52, 32, 3, [56, 68, 86], [36, 46, 62]);             // back cabinet
+  P.box(2, 4, 52, 6, 1, [90, 228, 216], [40, 140, 160]);         // teal valance
+  P.box(4, 12, 50, 13, 1, [110, 124, 148], [70, 82, 104]);       // shelf 1
+  P.box(4, 22, 50, 23, 1, [110, 124, 148], [70, 82, 104]);       // shelf 2
+  // bottles (amber/cream/teal glass) on both shelves
+  [[8, 6], [16, 9], [24, 7], [32, 10], [40, 8], [46, 11]].forEach(([bx, bv], i) => {
+    const col = i % 3 === 0 ? [255, 190, 110] : i % 3 === 1 ? [236, 228, 206] : [100, 224, 218];
+    P.box(bx, 7 + (bv % 2), bx + 2, 11, 1, col, [Math.round(col[0] * 0.6), Math.round(col[1] * 0.6), Math.round(col[2] * 0.6)]);
+    P.box(bx, 17 + (bv % 2), bx + 2, 21, 1, col, [Math.round(col[0] * 0.6), Math.round(col[1] * 0.6), Math.round(col[2] * 0.6)]);
+  });
+  P.box(2, 28, 52, 32, 2, [66, 78, 96], [44, 54, 70]);           // bar rail
+  P.ell(28, 25, 3, 1.4, [255, 208, 140], [220, 160, 90]);         // warm counter lamp
+});
+// bar stool — pairs with the bar so the tavern seats people
+const INT_STOOL = paintSurface(14, 18, (P) => {
+  P.ell(7, 3, 5, 2.4, [210, 150, 80], [150, 100, 52]);            // amber seat pad
+  P.box(6, 5, 8, 15, 0, [110, 124, 148], [70, 82, 104]);          // stem
+  P.box(3, 15, 11, 17, 1, [90, 104, 126], [56, 66, 84]);          // footring
+  P.ell(7, 5, 1.4, 1, [90, 228, 216], [40, 140, 160]);           // teal collar
+});
+// shop shelf-wall — stocked crate rows: the shop looks like commerce, not storage
+const INT_SHELF = paintSurface(48, 38, (P) => {
+  P.box(2, 2, 44, 36, 2, [58, 70, 88], [38, 48, 64]);            // slate frame
+  [8, 17, 26].forEach(sy => P.box(3, sy + 8, 43, sy + 9, 0, [110, 124, 148], [70, 82, 104])); // boards
+  // merchandise: produce crates + tins in colony warm/cream
+  [[5, 10], [12, 11], [19, 10], [26, 11], [33, 10], [5, 19], [14, 20], [23, 19], [32, 20], [5, 28], [12, 28], [19, 29]].forEach(([mx, my], i) => {
+    const c = i % 3 === 0 ? [255, 200, 120] : i % 3 === 1 ? [230, 224, 204] : [150, 226, 150];
+    P.box(mx, my, mx + 4, my + 5, 1, c, [Math.round(c[0] * 0.55), Math.round(c[1] * 0.55), Math.round(c[2] * 0.55)]);
+  });
+  P.box(2, 34, 44, 36, 1, [90, 228, 216], [40, 140, 160]);      // teal base glow strip
+});
+// ranch livestock pen — low teal rails + feed trough; ranch reads as animal space
+const INT_PEN = paintSurface(52, 26, (P) => {
+  P.box(1, 4, 50, 5, 1, [90, 228, 216], [40, 140, 160]);         // top rail
+  P.box(1, 12, 50, 13, 1, [90, 228, 216], [40, 140, 160]);       // mid rail
+  [4, 16, 30, 46].forEach(px => P.box(px, 2, px + 2, 18, 1, [78, 90, 110], [50, 60, 78])); // posts
+  P.box(18, 15, 34, 22, 2, [110, 124, 148], [70, 82, 104]);      // feed trough
+  P.box(19, 16, 33, 18, 0, [226, 196, 130], [180, 150, 90]);     // feed grain
+});
+// exchange holo-table — a trade board projection: distinct from the shop counter
+const INT_HOLOTABLE = paintSurface(44, 30, (P) => {
+  P.box(6, 14, 38, 28, 3, [62, 74, 92], [42, 52, 68]);            // slate pedestal
+  P.box(4, 12, 40, 14, 1, [90, 228, 216], [40, 140, 160]);       // teal rim
+  P.ell(22, 6, 14, 6, [58, 160, 190], [30, 90, 130]);            // holo projection disc
+  P.ell(22, 6, 9, 3.4, [120, 230, 235], [60, 160, 180]);          // inner holo
+  P.ell(22, 6, 4, 1.6, [236, 250, 252], [150, 220, 230]);         // market glyph core
+  P.ell(14, 5, 1.2, 1.2, [255, 200, 110], [220, 150, 70]);        // amber buy tick
+  P.ell(30, 5, 1.2, 1.2, [90, 228, 216], [40, 140, 160]);         // teal sell tick
 });
 
 
@@ -1707,12 +2043,47 @@ const INT_FLOOR = paintSurface(96, 24, (P) => {
   P.box(84, 0, 85, 24, 0, [56, 66, 84], [42, 50, 64]);
 });
 
+// ── QA 0904 Stage 3.3: the light-fixture housing ──
+// Interior light pools used to be generic grey ellipses hovering on the deck
+// with nothing casting them — light without a visible source reads as a
+// rendering artifact. Every pool in buildRoom now hangs under one of these: a
+// ceiling stem + trapezoid shade + hot emitter disc, in the colony's
+// slate+teal+amber language, so the eye traces the pool back to a lamp.
+const INT_CEILING_LIGHT = paintSurface(20, 14, (P) => {
+  // Round-3: the shade housing was slate-on-slate (70,82,102 vs wall 58,73,89)
+  // and the whole fixture dissolved into the wall band at room scale — the
+  // emitter dots floated with no visible lamp. Housing now reads ~2.5x the
+  // wall luminance so the silhouette is seen, not inferred.
+  P.box(9, 0, 11, 3, 0, [128, 142, 166], [92, 106, 128]);           // ceiling stem
+  P.box(4, 3, 16, 6, 1, [150, 166, 190], [110, 126, 150]);          // shade housing
+  P.box(3, 6, 17, 7, 0.5, [176, 192, 214], [128, 144, 168]);        // shade rim
+  P.box(4, 3, 16, 4, 0.35, [214, 228, 246], [150, 166, 190]);        // housing highlight
+  P.ell(10, 8.6, 5.4, 1.8, [255, 226, 164], [226, 168, 96]);       // hot emitter
+  P.ell(10, 8.2, 2.4, 1, [255, 248, 224], [255, 226, 164]);        // filament core
+});
+
+// ── QA 0904 Stage 3.4: per-room wall dressing ──
+// A named holosign plate that goes over each room's service point (SHOP over
+// the counter, BAR over the bar, …). Rooms used to be legible only by prop
+// archaeology; a lit sign over the trade point is how a real colony marks
+// itself. The WORD itself is drawn as real text by the scene over this plate,
+// so the plate carries only the housing: slate backing, teal bezel, hang stem,
+// and a teal status pip (reads 'open'). No glyph bars — they collided with
+// the text label and read as noise.
+const INT_SIGNPLATE = paintSurface(44, 14, (P) => {
+  P.box(21, 0, 23, 2, 0, [84, 96, 116], [58, 68, 88]);            // hang stem
+  P.box(1, 2, 43, 13, 2, [34, 42, 58], [22, 30, 44]);            // slate plate
+  P.box(2, 3, 42, 4, 0.5, [70, 200, 200], [40, 140, 160]);       // teal bezel top
+  P.box(2, 12, 42, 13, 0.5, [58, 170, 176], [34, 110, 130]);     // teal bezel foot
+  P.ell(40, 8, 1.6, 1.6, [120, 224, 216], [60, 150, 158]);       // status pip (teal = open)
+});
+
 
 // ── Ranch / barn building (livestock) ──
 // Colony Ranch Module — a slate ranch pod in the SAME building language as the
 // kiosk, cantina, and habitat: dark rounded slate hull, signature teal seam trim,
 // warm life-glow windows, a sliding ranch door, base plate, and roof beacon.
-const BLD_BARN = makePaint32((P) => {
+const BLD_BARN = scale2x(makePaint32((P) => {
   P.ell(16, 30, 13, 3, [30, 40, 56], [22, 30, 44]);                  // ground shadow
   P.box(4, 9, 28, 30, 5, [44, 56, 74], [26, 34, 50]);                // slate ranch hull
   P.box(4, 11, 28, 14, 4, [52, 64, 84], [32, 42, 60]);              // lit cabin band
@@ -1725,11 +2096,33 @@ const BLD_BARN = makePaint32((P) => {
   P.box(4, 30, 28, 32, 1, [60, 72, 90], [40, 52, 68]);              // base plate
   P.ell(16, 4.5, 1.7, 1.7, [255, 200, 110], [226, 160, 80]);        // roof beacon
   // silo mast + panel seams (ranch pod reads as a working structure)
-  P.box(22, 1, 24, 4, 1, [110, 124, 148], [70, 82, 104]);
-  P.ell(23, 1.6, 1.4, 1.4, [255, 224, 160], [226, 168, 108]);
+  // QA 0904 2.4: beacons no longer float on bare stalks — each rises from a
+  // mount collar so it reads as bolted hardware, not a glowing dot on a wire.
+  P.box(22, 1, 24, 4, 1, [110, 124, 148], [70, 82, 104]);           // mast
+  P.box(21, 4, 25, 5, 1, [86, 98, 120], [56, 68, 90]);              // mount collar
+  P.ell(23, 1.6, 1.4, 1.4, [255, 224, 160], [226, 168, 108]);       // mast light
   P.box(8, 16, 9, 28, 1, [36, 46, 62], [24, 32, 46]);
   P.box(22, 16, 23, 28, 1, [36, 46, 62], [24, 32, 46]);
-});
+}));
+
+// Colony Barracks — dormitory pod where the villagers live. Same building
+// language as the others: slate dormitory hull, a row of warm bunk windows,
+// teal seam trim, sliding barracks door, roof beacon. Reads as housing.
+const BLD_BARRACKS = scale2x(makePaint32((P) => {
+  P.box(3, 8, 29, 31, 5, [44, 56, 74], [26, 34, 50]);            // dormitory hull
+  P.box(4, 3, 28, 8, 1, [30, 38, 54], [22, 30, 44]);            // sign housing
+  P.ell(16, 5, 8, 2, [120, 240, 232], [52, 158, 170]);          // teal holo sign
+  [7, 12, 17, 22, 27].forEach(wx => P.ell(wx, 15, 1.6, 2.2, [255, 224, 160], [220, 168, 108])); // bunk windows
+  P.box(12, 22, 20, 31, 2, [30, 42, 60], [20, 30, 44]);         // sliding door
+  P.ell(16, 26, 2.5, 3, [100, 224, 220], [60, 160, 170]);       // door glow
+  P.box(3, 30, 29, 32, 1, [60, 72, 90], [40, 52, 68]);          // base plate
+  // QA 0904 2.4: the beacon used to hover at the very top of the frame with no
+  // mast under it — it now rises off the hull on a strut with a mount collar.
+  P.box(28, 2, 30, 9, 0.5, [96, 108, 130], [64, 76, 98]);       // beacon strut
+  P.box(26, 8, 32, 9, 0.5, [86, 98, 120], [56, 68, 90]);        // mount collar
+  P.ell(29, 1.6, 1.4, 1.4, [255, 200, 110], [226, 160, 80]);    // roof beacon
+  P.box(5, 9, 7, 10, 1, [56, 68, 86], [40, 50, 66]);            // vent slot
+}));
 
 // ── stardust pond (fishing spot) ──
 const DECOR_POND = mkSprite(`
@@ -1809,17 +2202,21 @@ const PMOUTH_T = [232, 168, 118];
 const PMETAL = [206, 214, 230];
 const PMETAL_S = [166, 178, 200];
 
+// `expr` drives the brow ANGLE + eye SHAPE + mouth CURVE (QA 0904 Stage 5):
+// every portrait used to share one identical eye/brow/mouth geometry, so the
+// whole cast read as the same flat face wearing different wigs. Each value is
+// a real mood the character's dialogue is written in.
 const PORTRAIT_CFG = {
-  nova:  { robot: true, visor: [96, 232, 226], glow: [214, 255, 252] },
-  luna:  { skin: NPC_SKIN.luna, hair: [110, 98, 150], style: 'long' },
-  zephyr:{ skin: NPC_SKIN.zephyr, hair: [108, 150, 84],  style: 'spiky' },
-  vega:  { skin: NPC_SKIN.vega, hair: [166, 106, 138], style: 'bob', star: true },
-  quasar:{ skin: NPC_SKIN.quasar, hair: [190, 192, 200], style: 'bald', beard: true },
-  rhea:  { skin: NPC_SKIN.rhea, hair: [150, 100, 76],  style: 'bun' },
-  astra: { skin: NPC_SKIN.astra, hair: [94, 116, 168],  style: 'short', glasses: true },
-  orion: { skin: NPC_SKIN.orion, hair: [196, 108, 72],  style: 'spiky' },
-  comet: { skin: NPC_SKIN.comet, hair: [106, 168, 164], style: 'long', patch: true },
-  cora:  { robot: true, visor: [128, 255, 136], glow: [226, 255, 216], pin: true },
+  nova:  { robot: true, bot: 'welder', visor: [255, 168, 88], glow: [255, 232, 190] },
+  luna:  { skin: NPC_SKIN.luna, hair: [110, 98, 150], style: 'long', expr: 'kind' },
+  zephyr:{ skin: NPC_SKIN.zephyr, hair: [108, 150, 84],  style: 'spiky', expr: 'bright' },
+  vega:  { skin: NPC_SKIN.vega, hair: [166, 106, 138], style: 'bob', star: true, expr: 'sharp' },
+  quasar:{ skin: NPC_SKIN.quasar, hair: [190, 192, 200], style: 'bald', beard: true, expr: 'gruff' },
+  rhea:  { skin: NPC_SKIN.rhea, hair: [150, 100, 76],  style: 'bun', expr: 'worry' },
+  astra: { skin: NPC_SKIN.astra, hair: [94, 116, 168],  style: 'short', glasses: true, expr: 'clever' },
+  orion: { skin: NPC_SKIN.orion, hair: [196, 108, 72],  style: 'spiky', expr: 'sharp' },
+  comet: { skin: NPC_SKIN.comet, hair: [106, 168, 164], style: 'long', patch: true, expr: 'dreamy' },
+  cora:  { robot: true, bot: 'propbot', visor: [128, 255, 136], glow: [226, 255, 216], pin: true },
 };
 
 // hairstyle drawer takes (s, P) — called over the skin head, so later rects
@@ -1863,9 +2260,11 @@ function mkPortraitCFG(id, baseRGB) {
     eye: shade(skin, 0.22), eyeHi: [255, 255, 255],
     brow: shade(skin, 0.48), browDark: shade(c.hair || [120, 100, 90], 0.55),
     blush: [240, 150, 150],
-    robot: !!c.robot, visor: c.visor || [120, 240, 240], glow: c.glow || [230, 255, 255],
+    robot: !!c.robot, bot: c.bot || null,
+    visor: c.visor || [120, 240, 240], glow: c.glow || [230, 255, 255],
     metal: PMETAL, metalS: PMETAL_S, metalHi: [240, 246, 255],
     beard: c.beard ? [206, 206, 214] : null,
+    expr: c.expr || (LOOK[id] && LOOK[id].mood) || 'calm',   // lockstep with the world sprite face
     star: c.star, patch: c.patch, pin: c.pin, glasses: c.glasses,
   };
   return P;
@@ -1887,18 +2286,58 @@ function drawPortrait(s, frame, P) {
   s.rect(5, 9, 3, 8, headCol); s.rect(32, 9, 3, 8, headCol); // ears
 
   if (P.robot) {
-    // antenna
-    s.rect(19, 0, 2, 5, P.visor); s.rect(17, 0, 6, 3, P.glow);
-    // glowing visor eyes
-    s.rect(11, 12, 19, 6, P.visor);
-    s.rect(11, 12, 22, 2, P.glow);
-    s.rect(14, 18, 4, 1, PMETAL_S); s.rect(22, 18, 4, 1, PMETAL_S);
-    // speaker mouth — animates per frame
-    s.rect(15, 21, 10, 6, PMETAL_S);
-    if (frame === 0) { s.rect(17, 22, 6, 1, P.metal); s.rect(17, 24, 6, 1, P.metal); s.rect(17, 26, 6, 1, P.metal); }
-    else if (frame === 1) { s.rect(17, 22, 6, 2, PMOUTH); s.rect(17, 24, 6, 3, P.metal); }
-    else { s.rect(16, 21, 8, 6, PMOUTH); s.rect(18, 24, 4, 2, P.glow); }
-    if (P.pin) { s.rect(27, 39, 5, 3, [250, 210, 80]); }
+    if (P.bot === 'welder') {
+      // NOVA — industrial head: wide armoured helmet plate, single hot amber
+      // welding visor slit, side intakes, spark antenna, forge glow on the jaw
+      s.rect(8, 4, 24, 2, P.metalHi);                       // helmet crown highlight
+      s.rect(6, 6, 28, 20, P.metal);
+      s.rect(6, 6, 28, 2, P.metalHi);
+      s.rect(6, 22, 28, 4, P.metalS);                        // chin plate
+      s.rect(3, 12, 3, 10, P.metalS); s.rect(34, 12, 3, 10, P.metalS); // intakes
+      s.rect(4, 14, 1, 6, PMETAL_S); s.rect(35, 14, 1, 6, PMETAL_S);
+      // hot single visor slit with a scalar pupil bar — reads as a welder mask
+      s.rect(9, 13, 22, 7, [40, 26, 18]);
+      s.rect(10, 14, 20, 5, P.visor);
+      s.rect(10, 14, 20, 2, P.glow);
+      s.rect(22, 15, 3, 3, [255, 244, 210]);                // hot core
+      s.rect(12, 16, 4, 1, [120, 60, 26]);                   // slit shutter bars
+      s.rect(17, 16, 4, 1, [120, 60, 26]);
+      // spark antenna (off-centre, live spark)
+      s.rect(26, 0, 2, 5, P.metalS); s.rect(25, 0, 4, 2, P.visor);
+      s.rect(26, 1, 1, 1, [255, 236, 170]);
+      // forge glow bleeding onto the cheek plates
+      s.rect(8, 21, 4, 2, [180, 96, 44]); s.rect(28, 21, 4, 2, [180, 96, 44]);
+      // rivet row along the jaw plate
+      for (let i = 0; i < 4; i++) s.rect(10 + i * 6, 24, 1, 1, P.metalHi);
+      // vent grill mouth — animates per frame
+      s.rect(15, 20, 10, 5, [30, 34, 48]);
+      if (frame === 0) { for (let i = 0; i < 3; i++) s.rect(16, 21 + i * 2, 8, 1, P.metalS); }
+      else if (frame === 1) { s.rect(16, 21, 8, 2, P.visor); s.rect(16, 23, 8, 2, [30, 34, 48]); }
+      else { s.rect(16, 21, 8, 4, P.visor); s.rect(18, 23, 4, 2, P.glow); }
+      return;
+    }
+    // CORA — soft companion bot: rounded dome shell, twin friendly optics,
+    // propeller fin, cheek lights, snack pin — deliberately NOT the same head as nova
+    s.rect(9, 4, 22, 22, P.metal);
+    s.rect(12, 3, 16, 2, P.metal); s.rect(14, 2, 12, 1, P.metalHi);      // dome top
+    s.rect(9, 4, 22, 2, P.metalHi);                                        // dome highlight
+    s.rect(9, 22, 22, 3, P.metalS);                                        // soft chin band
+    // propeller fin
+    s.rect(18, 0, 3, 3, P.metalS); s.rect(13, 0, 5, 2, P.visor); s.rect(21, 0, 5, 2, P.glow);
+    // twin round optics with irises + glints (friendly, alive — not a slit)
+    s.rect(11, 11, 7, 8, [26, 44, 40]); s.rect(22, 11, 7, 8, [26, 44, 40]);
+    s.rect(12, 12, 5, 6, P.visor);  s.rect(23, 12, 5, 6, P.visor);
+    s.rect(13, 13, 3, 4, P.glow);   s.rect(24, 13, 3, 4, P.glow);
+    s.rect(13, 13, 2, 2, [255, 255, 255]); s.rect(24, 13, 2, 2, [255, 255, 255]);
+    s.rect(13, 15, 2, 2, [20, 60, 54]);  s.rect(24, 15, 2, 2, [20, 60, 54]); // pupils
+    // cheek status lights
+    s.rect(8, 18, 2, 2, [255, 168, 96]); s.rect(30, 18, 2, 2, P.visor);
+    // smile grille — animates per frame (open happy mouth, not a slot)
+    s.rect(15, 20, 10, 4, [22, 40, 38]);
+    if (frame === 0) { s.rect(16, 22, 8, 2, P.visor); s.rect(17, 21, 6, 1, P.glow); }
+    else if (frame === 1) { s.rect(16, 21, 8, 3, P.visor); s.rect(17, 22, 6, 1, P.glow); }
+    else { s.rect(16, 21, 8, 4, P.visor); s.rect(17, 22, 6, 2, [255, 255, 255]); }
+    if (P.pin) { s.rect(27, 39, 5, 3, [250, 210, 80]); s.rect(28, 40, 3, 1, [255, 240, 170]); }
     return;
   }
 
@@ -1906,12 +2345,34 @@ function drawPortrait(s, frame, P) {
   (HUMAN_STYLES[P.style] || HUMAN_STYLES.short)(s, P);
   if (P.star) { s.rect(24, 2, 8, 8, [250, 214, 84]); s.rect(27, 4, 2, 4, [250, 244, 180]); }
   if (P.beard) { s.rect(15, 24, 10, 4, P.beard); s.rect(17, 27, 6, 3, P.beard); }
-  // brows + eyes
-  s.rect(12, 11, 5, 1, P.brow); s.rect(23, 11, 5, 1, P.brow);
-  s.rect(12, 13, 5, 5, P.eye); s.rect(23, 13, 5, 5, P.eye);
-  s.rect(13, 14, 3, 3, P.eyeHi); s.rect(24, 14, 3, 3, P.eyeHi);
+  // ── eyes + brows + mouth, all shaped by P.expr (QA 0904 Stage 5) ──
+  // one geometry shared by the whole cast = a flat, dead cast; the mood is now
+  // drawn, not implied by a hair-colour swap.
+  const E = P.expr;
+  // brows: angle + height carry most of the read (inner-up = worried,
+  // inner-down/low = gruff or stern, high + arched = bright/dreamy)
+  const brow = (x, innerHi, lift) => {
+    const y = 11 - lift;
+    if (innerHi > 0) { s.rect(x, y + 1, 5, 1, P.browDark); s.rect(x + 2, y, 3, 1, P.browDark); }
+    else if (innerHi < 0) { s.rect(x, y, 5, 1, P.browDark); s.rect(x + 2, y + 1, 3, 1, P.browDark); }
+    else { s.rect(x, y, 5, 1, P.browDark); }
+  };
+  if (E === 'worry')  { brow(11, 1, 1); brow(24, 1, 1); }
+  else if (E === 'gruff' || E === 'sharp') { brow(11, -1, 1); brow(24, -1, 1); }
+  else if (E === 'bright' || E === 'dreamy') { brow(11, 0, 2); brow(24, 0, 2); }
+  else if (E === 'clever') { brow(11, 0, 0); brow(24, 1, 2); }
+  else { brow(11, 0, 0); brow(24, 0, 0); }
+  // eyes: size + openness per mood
+  const eh = E === 'bright' ? 7 : E === 'dreamy' ? 7 : E === 'sharp' ? 4 : E === 'gruff' ? 4 : 6;
+  const ew = E === 'sharp' ? 6 : 5;
+  const ey = 12 + (6 - eh);
+  s.rect(12, ey, ew, eh, P.eye); s.rect(23, ey, ew, eh, P.eye);
+  s.rect(13, ey + 1, 2, 2, P.eyeHi); s.rect(24, ey + 1, 2, 2, P.eyeHi);
+  if (E === 'bright' || E === 'dreamy') { s.rect(13, ey + 4, 1, 1, [210, 226, 255]); s.rect(24, ey + 4, 1, 1, [210, 226, 255]); }
+  if (E === 'worry') { s.rect(12, ey - 1, ew, 1, P.skinSh); s.rect(23, ey - 1, ew, 1, P.skinSh); } // tired lid
+  if (E === 'clever') { s.rect(23, ey, ew, 1, P.skinSh); }                                          // one narrowed eye
   s.rect(19, 16, 2, 2, P.skinSh);              // nose
-  s.rect(10, 17, 3, 2, P.blush); s.rect(27, 17, 3, 2, P.blush); // blush
+  if (E !== 'gruff') { s.rect(10, 17, 3, 2, P.blush); s.rect(27, 17, 3, 2, P.blush); } // blush
   if (P.glasses) {
     s.rect(9, 12, 12, 7, [198, 204, 216]);
     s.rect(20, 12, 12, 7, [198, 204, 216]);
@@ -1921,17 +2382,28 @@ function drawPortrait(s, frame, P) {
     s.rect(23, 12, 9, 9, [212, 208, 196]);       // eyepatch over right eye
     s.rect(20, 16, 5, 2, [96, 100, 112]);        // strap across face
   }
-  // mouth — the "blab" frames
+  // mouth — the "blab" frames, plus an expression-specific resting shape so
+  // the closed-mouth frame is not one geometry for the whole cast.
   if (frame === 0) {
-    s.rect(18, 22, 4, 1, PMOUTH);                // closed line
-    s.rect(17, 23, 6, 1, P.skinSh);
+    if (E === 'kind' || E === 'bright') {                 // warm curved smile
+      s.rect(17, 22, 1, 1, PMOUTH); s.rect(18, 23, 5, 1, PMOUTH); s.rect(22, 22, 1, 1, PMOUTH);
+    } else if (E === 'sharp' || E === 'gruff') {           // deadpan flat line
+      s.rect(17, 22, 6, 1, PMOUTH);
+    } else if (E === 'worry') {                            // tight, off-centre
+      s.rect(18, 22, 5, 1, PMOUTH); s.rect(18, 23, 2, 1, PMOUTH);
+    } else if (E === 'clever') {                           // asymmetric smirk
+      s.rect(18, 23, 4, 1, PMOUTH); s.rect(22, 22, 2, 1, PMOUTH);
+    } else {
+      s.rect(18, 22, 4, 1, PMOUTH);                        // calm neutral
+      s.rect(17, 23, 6, 1, P.skinSh);
+    }
   } else if (frame === 1) {
-    s.rect(16, 21, 8, 1, P.skinSh);              // top lip
-    s.rect(17, 22, 6, 3, PMOUTH);                // open
+    s.rect(16, 21, 8, 1, P.skinSh);                        // top lip
+    s.rect(17, 22, 6, E === 'bright' ? 4 : 3, PMOUTH);    // open
   } else {
     s.rect(16, 21, 8, 1, P.skinSh);
-    s.rect(16, 22, 8, 4, PMOUTH);                // wide open
-    s.rect(18, 24, 4, 2, PMOUTH_T);              // tongue
+    s.rect(16, 22, 8, 4, PMOUTH);                          // wide open
+    s.rect(18, 24, 4, 2, PMOUTH_T);                         // tongue
   }
 }
 
@@ -2065,6 +2537,19 @@ const TEXTURES = {
   'int.plant': INT_PLANT,
   'int.wall': INT_WALL,
   'int.floor': INT_FLOOR,
+  'int.stove': INT_STOVE,
+  'int.chest': INT_CHEST,
+  'int.door': INT_DOOR,
+  'int.counter': INT_COUNTER,
+  'int.stall': INT_STALL,
+  'int.terminal': INT_TERMINAL,
+  'int.barback': INT_BARBACK,
+  'int.stool': INT_STOOL,
+  'int.shelf': INT_SHELF,
+  'int.pen': INT_PEN,
+  'int.holotable': INT_HOLOTABLE,
+  'int.ceilingLight': INT_CEILING_LIGHT,
+  'int.signplate': INT_SIGNPLATE,
   // colony festival kit (Earth Day / Hearthnight plaza)
   'fest.stage': FEST_STAGE,
   'fest.stall': FEST_STALL,
@@ -2078,6 +2563,7 @@ const TEXTURES = {
   'tool.rod': TOOL_ROD,
   // ranch + fishing
   'bld.barn': BLD_BARN,
+  'bld.barracks': BLD_BARRACKS,
   'decor.pond': DECOR_POND,
   // ground (every GROUND variant auto-registered as tile.<key snake_cased>)
   ...Object.fromEntries(Object.entries(GROUND).map(([k, c]) => [`tile.${toSnake(k)}`, c])),
