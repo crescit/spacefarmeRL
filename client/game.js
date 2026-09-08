@@ -89,25 +89,42 @@ function init() {
       want === 'spaceship' || want === 'ship' ? 'SpaceshipScene' :
       want === 'intro' ? 'IntroScene' : null;
     if (sceneKey) {
-      const startIt = () => {
-        // Stop the auto-advancing intro/shipping scene if it's running,
-        // so the deep-linked target scene stays active.
-        const running = game.scene.getScenes(true);
-        for (const sc of running) {
-          if (sc.key !== sceneKey) sc.scene.stop();
+      // QA 0904B.1 root cause, two-fold: (1) the sibling stop() calls land in
+      // Phaser's operation queue, and (2) when the TARGET itself was still
+      // auto-booted/active, game.scene.start() took the "already active →
+      // restart()" branch, whose queued restart was swallowed by those pending
+      // shutdowns — leaving every scene inactive with 0 children (black canvas,
+      // create() never ran). The reliable recovery (verified live): stop ALL
+      // scenes INCLUDING the target, wait for the queue to settle to an empty
+      // active list, then start once — the "not active, not transitioning"
+      // branch runs sys.start() immediately. Retry the whole cycle if the
+      // target still never activates.
+      const startIt = (attempt) => {
+        for (const sc of game.scene.getScenes(true)) {
+          if (sc && sc.scene) sc.scene.stop();
         }
-        const data = { credits: 100 };
-        game.scene.start(sceneKey, data);
-        const sc = game.scene.getScene(sceneKey);
-        if (params.get('night') === '1' && sc && sc.isNight !== undefined) {
-          sc._nightOverride = true;   // screenshot debug: keep night even though the clock says day
-          sc.isNight = true; sc.updateNightVisuals?.(); sc.nightOverlay?.setAlpha(0.42);
-          (sc.glowRegistry || []).forEach(g => g.setVisible(true));
-          (sc.lampGlows || []).forEach(g => g.setVisible(true));
-        }
+        const settle = (n) => {
+          if (game.scene.getScenes(true).some(s => s && s.sys.isActive()) && n < 40) {
+            setTimeout(() => settle(n + 1), 20);
+            return;
+          }
+          const data = { credits: 100 };
+          game.scene.start(sceneKey, data);
+          setTimeout(() => {
+            const sc = game.scene.getScene(sceneKey);
+            if (sc && !sc.sys.isActive() && attempt < 3) { startIt(attempt + 1); return; }
+            if (params.get('night') === '1' && sc && sc.isNight !== undefined) {
+              sc._nightOverride = true;   // screenshot debug: keep night even though the clock says day
+              sc.isNight = true; sc.updateNightVisuals?.(); sc.nightOverlay?.setAlpha(0.42);
+              (sc.glowRegistry || []).forEach(g => g.setVisible(true));
+              (sc.lampGlows || []).forEach(g => g.setVisible(true));
+            }
+          }, 80);
+        };
+        settle(0);
       };
       // let the first scene boot, then swap cleanly to the target
-      setTimeout(startIt, 150);
+      setTimeout(() => startIt(0), 150);
     }
   });
 

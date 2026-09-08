@@ -63,9 +63,25 @@ def parse_horizon(value: str) -> int:
 
 
 def fetch_tools():
-    """The tool schema lives once, in Node — read it from the bridge spec."""
+    """The tool schema lives once, in Node — wrap into OpenAI function format.
+
+    Node stores {name, description, parameters} (consumed by MCP + eval too);
+    the OpenAI chat API requires {type: 'function', function: {...}} — without
+    the wrapper the endpoint 500s with 'Missing tool type'.
+    """
     with SimBridge() as bridge:
-        return bridge.spec.get("tools") or []
+        raw = bridge.spec.get("tools") or []
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("parameters", {"type": "object", "properties": {}}),
+            },
+        }
+        for t in raw
+    ]
 
 
 def make_policy(args) -> ToolDialogPolicy:

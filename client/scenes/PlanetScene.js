@@ -127,15 +127,29 @@ const NPCS = Object.values(NPC_DATA).map(n => ({
   color: n.color, role: n.role, data: n,
 }));
 
+import { tex, texAt, resolveKey } from '../systems/AssetTheme.js';
+
+// ground variant name → texture key (resolved through the active theme)
+// entries accept optional (x,y) so a role can carry per-position variation.
 const GROUND_TEX = {
-  grass_a: 'tile.grass_a', grass_b: 'tile.grass_b', grass_c: 'tile.grass_c',
-  grass_d: 'tile.grass_d', grass_e: 'tile.grass_e', grass_f: 'tile.grass_f',
-  path: 'tile.path', water: 'tile.water', soil: 'tile.soil', soil_b: 'tile.soil_b',
+  grass_a: () => texAt('ground.grass', 0), grass_b: () => texAt('ground.grass', 1),
+  grass_c: () => texAt('ground.grass', 2), grass_d: () => texAt('ground.grass', 3),
+  grass_e: () => texAt('ground.grass', 4), grass_f: () => texAt('ground.grass', 5),
+  path: () => tex('ground.path'), plaza: () => tex('ground.plaza'),
+  // water picks one of 3 caustic families per tile position (stable hash) so a
+  // still frame already shows structure instead of a flat cyan slab
+  water: (x = 0, y = 0) => texAt('ground.water', (x * 3 + y * 7) % 3),
+  sand: () => tex('ground.sand'),
+  wet_sand: () => tex('ground.wetSand'),
+  cliff: () => tex('ground.cliff'),
+  forest: () => tex('ground.forest'),
+  soil: () => tex('ground.soil'), soil_b: () => tex('ground.soilB'),
 };
 // farm state → tile key (overrides ground once farmed)
 const TILE_FOR_STATE = {
-  empty: 'tile.soil', tilled: 'tile.tilled', seeded: 'tile.seeded',
-  growing: 'tile.growing', mature: 'tile.mature',
+  empty: () => tex('farm.empty'), tilled: () => tex('farm.tilled'),
+  seeded: () => tex('farm.seeded'), growing: () => tex('farm.growing'),
+  mature: () => tex('farm.mature'),
 };
 
 class PlanetScene extends Phaser.Scene {
@@ -231,7 +245,7 @@ class PlanetScene extends Phaser.Scene {
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
         const g = ground[y][x];
-        const gKey = GROUND_TEX[g] || GROUND_TEX.grass_a;
+        const gKey = (GROUND_TEX[g] || GROUND_TEX.grass_a)(x, y);
         const img = this.add.image(x * T + T / 2, y * T + T / 2, gKey);
         if (g === 'soil' || g === 'soil_b') {
           this.farmTiles.push({
@@ -239,7 +253,9 @@ class PlanetScene extends Phaser.Scene {
             state: { x, y, type: 'empty', crop: '', growth: 0, watered: false },
           });
         } else if (g === 'water') {
-          this.waterTiles.push(img);
+          // carry the caustic family so the shimmer animates WITHOUT flattening
+          // the per-position variety (each family shimmers on its own offset)
+          this.waterTiles.push({ img, f: (x * 3 + y * 7) % 3 });
           this.tiles.push(img);
         } else {
           this.tiles.push(img);
@@ -251,24 +267,55 @@ class PlanetScene extends Phaser.Scene {
     // Raised agri-decks unify the farm tiles into two intentional fields.
     // This is presentation-only: the simulation and its 8x8 RL farm state
     // keep exactly the same coordinates and semantics.
+    // QA 0904B.12: the rects/furrows/labels used to be hardcoded tile coords
+    // (rows 16..29) — when FARM moved to rows 4..15 the overlay orphaned over
+    // empty grass and read as floating CAD wireframes. Geometry is now DERIVED
+    // from the ground grid (MapData ground = the single source of truth), so a
+    // future farm relocation can never desync it again.
+    const soilAt = (x, y) => ground[y][x] === 'soil' || ground[y][x] === 'soil_b';
+    let sbx0 = 1e9, sby0 = 1e9, sbx1 = -1e9, sby1 = -1e9;
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        if (!soilAt(x, y)) continue;
+        if (x < sbx0) sbx0 = x; if (y < sby0) sby0 = y;
+        if (x > sbx1) sbx1 = x; if (y > sby1) sby1 = y;
+      }
+    }
+    // Split into two decks at an interior non-soil column (a gate path cuts
+    // the field), else at the midpoint so the pair always tiles over soil.
+    let splitX = -1;
+    for (let x = sbx0 + 2; x <= sbx1 - 2; x++) {
+      let hasSoil = false;
+      for (let y = sby0; y <= sby1; y++) if (soilAt(x, y)) { hasSoil = true; break; }
+      if (!hasSoil) { splitX = x; break; }
+    }
+    if (splitX < 0) splitX = Math.floor((sbx0 + sbx1) / 2);
+    const decks = [
+      { x0: sbx0, x1: splitX - 1, label: 'AGRI-DECK 01' },
+      { x0: splitX + 1, x1: sbx1, label: 'AGRI-DECK 02' },
+    ].filter(function (d) { return d.x1 >= d.x0; });
     this.fieldDeck = this.add.graphics().setDepth(0.12);
     this.fieldDeck.lineStyle(3, 0x263d35, 0.82);
-    this.fieldDeck.strokeRoundedRect(7 * T + 3, 16 * T + 3, 11 * T - 6, 13 * T - 6, 9);
-    this.fieldDeck.strokeRoundedRect(19 * T + 3, 16 * T + 3, 13 * T - 6, 13 * T - 6, 9);
+    for (const d of decks) {
+      this.fieldDeck.strokeRoundedRect(
+        d.x0 * T + 3, sby0 * T + 3,
+        (d.x1 - d.x0 + 1) * T - 6, (sby1 - sby0 + 1) * T - 6, 9);
+    }
     this.fieldDeck.lineStyle(1, 0xd6b477, 0.18);
-    for (let fy = 16; fy <= 28; fy++) {
-      this.fieldDeck.lineBetween(7 * T + 8, fy * T + T / 2, 18 * T - 8, fy * T + T / 2);
-      this.fieldDeck.lineBetween(19 * T + 8, fy * T + T / 2, 32 * T - 8, fy * T + T / 2);
+    for (const d of decks) {
+      for (let fy = sby0; fy <= sby1; fy++) {
+        this.fieldDeck.lineBetween(
+          d.x0 * T + 8, fy * T + T / 2, (d.x1 + 1) * T - 8, fy * T + T / 2);
+      }
     }
     this.world.add(this.fieldDeck);
     const deckLabelStyle = {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '8px', fontStyle: 'bold',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold',
       color: '#f1d69b', stroke: '#17231f', strokeThickness: 3,
     };
-    this.fieldDeckLabels = [
-      this.add.text(7 * T + 10, 16 * T + 8, 'AGRI-DECK 01', deckLabelStyle).setDepth(0.2),
-      this.add.text(19 * T + 10, 16 * T + 8, 'AGRI-DECK 02', deckLabelStyle).setDepth(0.2),
-    ];
+    this.fieldDeckLabels = decks.map(function (d) {
+      return this.add.text(d.x0 * T + 10, sby0 * T + 8, d.label, deckLabelStyle).setDepth(0.2);
+    }, this);
     this.world.add(this.fieldDeckLabels);
     // ── fence line ──
     this.fenceBeams = [];
@@ -291,23 +338,24 @@ class PlanetScene extends Phaser.Scene {
     this.lampGlows = [];
     this.lightPools = [];   // Task 4: ground light pools (lamps, doors)
     for (const d of DECOR) {
-      const img = this.add.image(d.x * T + T / 2, d.y * T + T / 2, d.tex);
+      const decKey = resolveKey(d.tex);
+      const img = this.add.image(d.x * T + T / 2, d.y * T + T / 2, decKey);
       img.setDepth(d.y);
       this.world.add(img);
       this.decorSprites.push({ img, d });
       // soft cast shadow under natural decor (trees, flora) — grounds the scene
-      if (d.tex !== 'decor.lamp' && d.tex !== 'decor.pond') {
-        const sh = this.add.image(d.x * T + T / 2 + 3, d.y * T + 4, 'fx.bld_shadow')
+      if (decKey !== resolveKey('decor.lamp') && decKey !== resolveKey('decor.pond')) {
+        const sh = this.add.image(d.x * T + T / 2 + 3, d.y * T + 4, tex('fx.bldShadow'))
           .setScale(0.42, 0.5).setDepth(d.y - 0.05).setAlpha(0.5);
         this.world.add(sh);
       }
-      if (d.tex === 'decor.lamp') {
-        const glow = this.add.image(d.x * T + T / 2, d.y * T - 2, 'fx.lamp_glow')
+      if (decKey === resolveKey('decor.lamp')) {
+        const glow = this.add.image(d.x * T + T / 2, d.y * T - 2, tex('fx.lampGlow'))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(1000).setVisible(false);
         this.world.add(glow);
         this.lampGlows.push(glow);
         // Task 4: warm pool of light cast on the ground beneath the lamp
-        const pool = this.add.image(d.x * T + T / 2, d.y * T + 12, 'fx.pool_warm')
+        const pool = this.add.image(d.x * T + T / 2, d.y * T + 12, tex('fx.poolWarm'))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(902).setVisible(false).setAlpha(0);
         this.world.add(pool);
         this.lightPools.push({ img: pool, base: 0.55, phase: Math.random() * 6.283, speed: 0.0011 + Math.random() * 0.0006 });
@@ -319,23 +367,29 @@ class PlanetScene extends Phaser.Scene {
     this.glowRegistry = [];
     this.buildingGlows = [];
     for (const b of [...BUILDINGS].sort((a, c) => (a.y + a.h) - (c.y + c.h))) {
-      const img = this.add.image(
-        b.x * T, b.y * T,
-        b.key === 'tavern' ? 'bld.tavern_a' : b.key === 'exchange' ? 'bld.exchange_a' : b.tex
-      );
+      const bldKey = b.key === 'tavern' ? texAt('bld.tavern', 0)
+        : b.key === 'exchange' ? tex('bld.exchange') : resolveKey(b.tex);
+      const img = this.add.image(b.x * T, b.y * T, bldKey);
       img.setDepth(b.y + b.h);
       this.world.add(img);
       // long soft cast shadow under the structure (light from upper-left)
-      const bs = this.add.image(b.x * T + 6, (b.y + b.h) * T + 2, 'fx.bld_shadow')
+      const bs = this.add.image(b.x * T + 6, (b.y + b.h) * T + 2, tex('fx.bldShadow'))
         .setScale(Math.max(0.6, (b.w || 3) * 0.5), 0.55)
         .setDepth(b.y - 0.05).setAlpha(0.55);
       this.world.add(bs);
       this.buildingSprites.push({ b, img });
       if (b.glow) {
-        const glow = this.add.image(b.x * T, b.y * T, b.glow)
+        const glow = this.add.image(b.x * T, b.y * T, resolveKey(b.glow))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(1001).setVisible(false);
         this.world.add(glow);
         glow.phase = Math.random() * Math.PI * 2;   // each landmark breathes on its own beat
+        // QA 0904 2.5 — the learnable window-light RULE:
+        //   warm windows lit by DAY  = "open for business" (shop/tavern/exchange)
+        //   warm windows lit by NIGHT = "someone is home" (house/barracks/ranch)
+        // Players can read the colony's state from across the map without a UI:
+        // a dark depot at noon means the shutters are down; a lit bunk at noon
+        // is off-duty. This is why the glow is no longer night-only for all.
+        glow.litWhen = (b.key === 'shop' || b.key === 'tavern' || b.key === 'exchange') ? 'day' : 'night';
         this.glowRegistry.push(glow);
         this.buildingGlows.push(glow);
         if (b.key === 'house') this.houseGlow = glow;
@@ -397,6 +451,7 @@ class PlanetScene extends Phaser.Scene {
       const marker = this.add.text(ax, ay + 38, "FIRST CONTACT", { fontFamily: "system-ui, sans-serif", fontSize: "6px", color: "#f3d99b", stroke: "#000", strokeThickness: 2 }).setOrigin(0.5).setDepth(alien.y + 0.8);
       this.world.add([aura, spr, label, marker]);
       spr.alienId = alien.id; spr._aura = aura; spr._marker = marker; spr._label = label;
+      spr._baseY = ay;
       this.alienSprites.push(spr);
       this._applyContactAftermath(alien, false);
     }
@@ -418,6 +473,11 @@ class PlanetScene extends Phaser.Scene {
     ).setScale(0.68).setDepth(PLAYER_START.y + 1);
     this.playerSpeed = 4.4;
     this.world.add(this.playerSpr);
+    // held tool — the equipped hoe/can/pickaxe/rod drawn beside the player so
+    // every craft reads as a held tool, not an invisible press (swung on use).
+    this.toolSpr = this.add.image(this.playerSpr.x, this.playerSpr.y, tex('tool.hoe'))
+      .setVisible(false).setDepth(PLAYER_START.y + 1.2);
+    this.world.add(this.toolSpr);
     // cool rim-light under the player so night keeps their silhouette readable
     // warm pool at the player's feet so night keeps their silhouette readable
     this.playerRim = this.add.image(this.playerSpr.x, this.playerSpr.y + 12, 'fx.pool_player')
@@ -485,8 +545,9 @@ class PlanetScene extends Phaser.Scene {
     this._bindSavedBlip();
     this._bindReflection();
 
-    // ── House interior (hidden until you walk in) ──
-    this.buildInterior(width, height);
+    // ── Interior rooms (built lazily on first entry, one per building) ──
+    this.intRooms = {};
+    this.intKind = null;
     this.inInterior = false;
 
     // ── input ──
@@ -595,27 +656,32 @@ class PlanetScene extends Phaser.Scene {
   buildHUD(width, height) {
     const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', fontStyle: 'bold' };
     const y = height - 48;
+    // Screen-fixed (scrollFactor 0): the HUD is viewport furniture. Without this
+    // the strips scroll with the camera and the dark bars drift into the middle
+    // of the world (QA 0904B.2). Every buildHUD element gets sf0 via the list.
+    const screenFix = [];
     // Floating glass telemetry keeps status scannable without hiding the world.
     this.hudBar = this.add.rectangle(width / 2, y, width - 24, 44, 0x081a20, 0.88)
-      .setStrokeStyle(1, 0x6be7d0, 0.7).setDepth(997);
-    this.hudAccent = this.add.rectangle(24, y, 4, 28, 0xf3bd67, 1).setDepth(998);
+      .setStrokeStyle(1, 0x6be7d0, 0.7).setDepth(997); screenFix.push(this.hudBar);
+    this.hudAccent = this.add.rectangle(24, y, 4, 28, 0xf3bd67, 1).setDepth(998); screenFix.push(this.hudAccent);
     this.hudText = this.add.text(38, y - 7, '', {
       ...f, color: '#effff9', stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(0, 0.5).setDepth(1000);
-    this.energyTrack = this.add.rectangle(38, y + 11, 170, 5, 0x16363a, 1).setOrigin(0, 0.5).setDepth(999);
-    this.energyFill = this.add.rectangle(38, y + 11, 170, 5, 0x6be7d0, 1).setOrigin(0, 0.5).setDepth(1000);
+    }).setOrigin(0, 0.5).setDepth(1000); screenFix.push(this.hudText);
+    this.energyTrack = this.add.rectangle(38, y + 11, 170, 5, 0x16363a, 1).setOrigin(0, 0.5).setDepth(999); screenFix.push(this.energyTrack);
+    this.energyFill = this.add.rectangle(38, y + 11, 170, 5, 0x6be7d0, 1).setOrigin(0, 0.5).setDepth(1000); screenFix.push(this.energyFill);
     this.hudDay = this.add.text(width - 34, y, '', {
       ...f, fontSize: '11px', color: '#f8d797', align: 'right', stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(1, 0.5).setDepth(1000);
+    }).setOrigin(1, 0.5).setDepth(1000); screenFix.push(this.hudDay);
     this.colonyMark = this.add.text(width - 34, 12, 'B-612  /  FRONTIER AGRICULTURE', {
       ...f, fontSize: '9px', color: '#8dc9c0',
       stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(1, 0).setDepth(1000);
+    }).setOrigin(1, 0).setDepth(1000); screenFix.push(this.colonyMark);
     this.questPlate = this.add.rectangle(12, 8, Math.min(430, width * 0.54), 38, 0x081a20, 0.78)
-      .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997);
+      .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997); screenFix.push(this.questPlate);
     this.questChip = this.add.text(24, 18, '', {
       ...f, fontSize: '10px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
-    }).setOrigin(0, 0).setDepth(1000);
+    }).setOrigin(0, 0).setDepth(1000); screenFix.push(this.questChip);
+    screenFix.forEach(o => o.setScrollFactor(0));
   }
   buildDialogue(width, height) {
     const bw = width - 96, bh = 158, cx = width / 2, cy = height - 92;
@@ -685,16 +751,16 @@ class PlanetScene extends Phaser.Scene {
   }
 
   buildContactUI(width, height) {
-    this.contactPanel = this.add.container(width / 2, height / 2).setDepth(1200).setVisible(false);
+    this.contactPanel = this.add.container(width / 2, height / 2).setDepth(1200).setScrollFactor(0).setVisible(false);
     const panelWidth = Math.min(720, width - 40);
     const bg = this.add.rectangle(0, 0, panelWidth, 500, 0x07121c, 0.98).setStrokeStyle(2, 0x7adfd5);
     this.contactTitle = this.add.text(0, -220, "FIRST CONTACT COUNCIL", { fontFamily: "system-ui, sans-serif", fontSize: "16px", color: "#f2d99a", fontStyle: "bold" }).setOrigin(0.5);
-    this.contactPremise = this.add.text(0, -182, "", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#e9f3f4", align: "center", wordWrap: { width: panelWidth - 70 }, lineSpacing: 4 }).setOrigin(0.5, 0);
+    this.contactPremise = this.add.text(0, -182, "", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#e9f3f4", align: "center", wordWrap: { enable: true, width: panelWidth - 70 }, lineSpacing: 4 }).setOrigin(0.5, 0);
     this.contactPanel.add([bg, this.contactTitle, this.contactPremise]);
     this.contactRows = CONTACT_DOCTRINES.map((doctrine, index) => {
       const y = -55 + index * 62;
       const row = this.add.rectangle(0, y, panelWidth - 70, 52, 0x132432, 0.96).setStrokeStyle(1, doctrine.color).setInteractive({ useHandCursor: true });
-      const copy = this.add.text(-panelWidth / 2 + 52, y, "[" + (index + 1) + "] " + doctrine.label + " — " + doctrine.description, { fontFamily: "system-ui, sans-serif", fontSize: "10px", color: "#e9f3f4", wordWrap: { width: panelWidth - 110 } }).setOrigin(0, 0.5);
+      const copy = this.add.text(-panelWidth / 2 + 52, y, "[" + (index + 1) + "] " + doctrine.label + " — " + doctrine.description, { fontFamily: "system-ui, sans-serif", fontSize: "10px", color: "#e9f3f4", wordWrap: { enable: true, width: panelWidth - 110 } }).setOrigin(0, 0.5);
       row.on("pointerdown", () => this.chooseContactDoctrine(doctrine.id));
       row.on("pointerover", () => row.setFillStyle(0x244154, 1));
       row.on("pointerout", () => row.setFillStyle(0x132432, 0.96));
@@ -708,7 +774,7 @@ class PlanetScene extends Phaser.Scene {
   }
 
   buildPanels(width, height) {
-    this.gePanel = this.add.container(width / 2, height / 2).setDepth(1002).setVisible(false);
+    this.gePanel = this.add.container(width / 2, height / 2).setDepth(1002).setScrollFactor(0).setVisible(false);
     const geBg = this.add.rectangle(0, 0, 480, 340, 0x070714, 0.95).setStrokeStyle(3, 0x39c5bb);
     const geTitle = this.add.text(0, -134, 'GRAND EXCHANGE', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#7ef0ff',
@@ -723,7 +789,7 @@ class PlanetScene extends Phaser.Scene {
     this.gePanel.add([geBg, geTitle, geContent, geClose]);
     this.geTitle = geTitle; this.geContent = geContent; this.geClose = geClose;
 
-    this.shopPanel = this.add.container(width / 2, height / 2).setDepth(1002).setVisible(false);
+    this.shopPanel = this.add.container(width / 2, height / 2).setDepth(1002).setScrollFactor(0).setVisible(false);
     const shopBg = this.add.rectangle(0, 0, 480, 340, 0x070714, 0.95).setStrokeStyle(3, 0x9ddd72);
     const shopTitle = this.add.text(0, -134, "SUPPLY DEPOT", {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9ddd72',
@@ -738,7 +804,7 @@ class PlanetScene extends Phaser.Scene {
     this.shopPanel.add([shopBg, shopTitle, shopContent, shopClose]);
     this.shopTitle = shopTitle; this.shopContent = shopContent; this.shopClose = shopClose;
 
-    this.ranchPanel = this.add.container(width / 2, height / 2).setDepth(1002).setVisible(false);
+    this.ranchPanel = this.add.container(width / 2, height / 2).setDepth(1002).setScrollFactor(0).setVisible(false);
     const ranchBg = this.add.rectangle(0, 0, 480, 340, 0x070714, 0.95).setStrokeStyle(3, 0xd8a05a);
     const ranchTitle = this.add.text(0, -134, "RANCH - STARDUST LIVESTOCK", {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
@@ -754,7 +820,7 @@ class PlanetScene extends Phaser.Scene {
     this.ranchTitle = ranchTitle; this.ranchContent = ranchContent; this.ranchClose = ranchClose;
 
     // storage chest panel (interior)
-    this.chestPanel = this.add.container(width / 2, height / 2).setDepth(1003).setVisible(false);
+    this.chestPanel = this.add.container(width / 2, height / 2).setDepth(1003).setScrollFactor(0).setVisible(false);
     const chestBg = this.add.rectangle(0, 0, 360, 300, 0x070714, 0.95).setStrokeStyle(3, 0xd8a05a);
     const chestTitle = this.add.text(0, -120, "HOME STORAGE", {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
@@ -767,7 +833,7 @@ class PlanetScene extends Phaser.Scene {
     this.chestContent = chestContent;
 
     // ── Recipe book (M4 kitchen) — [C] at the stove ──
-    this.recipePanel = this.add.container(width / 2, height / 2).setDepth(1003).setVisible(false);
+    this.recipePanel = this.add.container(width / 2, height / 2).setDepth(1003).setScrollFactor(0).setVisible(false);
     const recipeBg = this.add.rectangle(0, 0, 440, 360, 0x070714, 0.96).setStrokeStyle(3, 0xd8a05a);
     const recipeTitle = this.add.text(0, -146, 'KITCHEN — RECIPE BOOK', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
@@ -780,7 +846,7 @@ class PlanetScene extends Phaser.Scene {
     this.recipeContent = recipeContent;
 
     // ── 'The Stardust Story' quest log (Q key) — the arc's readable spine ──
-    this.questPanel = this.add.container(width / 2, height / 2).setDepth(1004).setVisible(false);
+    this.questPanel = this.add.container(width / 2, height / 2).setDepth(1004).setScrollFactor(0).setVisible(false);
     const qBg = this.add.rectangle(0, 0, 520, 380, 0x070714, 0.96).setStrokeStyle(3, 0x7ef0ff);
     const qTitle = this.add.text(0, -158, 'THE STARDUST STORY', {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '15px', color: '#7ef0ff', fontStyle: 'bold',
@@ -797,7 +863,7 @@ class PlanetScene extends Phaser.Scene {
     // ── Backpack (Slice 3) — equip tools, read the tank, see your cargo. Rows
     //    are tap targets (mobile) AND 1-5 keys (desktop); _renderBackpack() fills
     //    the dynamic rows below the static title/close. ──
-    this.backpackPanel = this.add.container(width / 2, height / 2).setDepth(1012).setVisible(false);
+    this.backpackPanel = this.add.container(width / 2, height / 2).setDepth(1012).setScrollFactor(0).setVisible(false);
     const bkBg = this.add.rectangle(0, 0, 480, 420, 0x070714, 0.96).setStrokeStyle(3, 0x67e1cd);
     const bkTitle = this.add.text(0, -178, 'BACKPACK - TOOLS & CARGO', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9dffec',
@@ -812,7 +878,7 @@ class PlanetScene extends Phaser.Scene {
     // ── Smithy (Slice 4) — spend credits to upgrade each tool's tier. Rows are
     //    tap targets (mobile) AND 1-4 keys (desktop); _renderSmithy() fills the
     //    dynamic rows. U and the hub's SMITHY row both land here. ──
-    this.smithyPanel = this.add.container(width / 2, height / 2).setDepth(1012).setVisible(false);
+    this.smithyPanel = this.add.container(width / 2, height / 2).setDepth(1012).setScrollFactor(0).setVisible(false);
     const smBg = this.add.rectangle(0, 0, 480, 420, 0x070714, 0.96).setStrokeStyle(3, 0xd8a05a);
     const smTitle = this.add.text(0, -178, 'SMITHY - UPGRADE TOOLS', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#ffe9a0',
@@ -852,7 +918,7 @@ class PlanetScene extends Phaser.Scene {
     this.festivalDecor = [];
     const add = (o) => { o.setVisible(false); this.world.add(o); this.festivalDecor.push(o); return o; };
 
-    // bunting garlands between the lamp posts — sagging rows of pennants
+    // bunting garlands between the lamp posts — sagging rows of colony pennants
     for (const s of FEST_BUNTING) {
       const x1 = px(s.x1), x2 = px(s.x2), y = py(s.y) - 26;
       const n = 9;
@@ -860,12 +926,11 @@ class PlanetScene extends Phaser.Scene {
         const bx = x1 + (x2 - x1) * (i / n);
         const sag = Math.sin((i / n) * Math.PI) * 7;          // catenary-ish dip
         const by = y + sag;
-        const c = EARTH_PALETTE[i % 3];
-        const flag = this.add.rectangle(bx, by, 4, 7, c, 0.95).setOrigin(0.5, 0);
+        const flag = this.add.image(bx, by, texAt('fest.pennant', i)).setOrigin(0.5, 0).setScale(1.1);
         add(flag);
         if (i % 2 === 0) {                                    // string-light bulbs
-          const bulb = this.add.circle(bx, by + 9, 2, 0xfff2c8, 0.95)
-            .setBlendMode(Phaser.BlendModes.ADD);
+          const bulb = this.add.image(bx, by + 9, tex('fest.bulb'))
+            .setBlendMode(Phaser.BlendModes.ADD).setScale(0.8).setAlpha(0.9);
           add(bulb);
         }
       }
@@ -876,28 +941,21 @@ class PlanetScene extends Phaser.Scene {
       add(gx);
     }
 
-    // the stage — a raised platform facing the crowd, with the day's sign
-    const st = this.add.rectangle(px(FEST_STAGE.x), py(FEST_STAGE.y) + 8, 5.2 * T, 1.4 * T, 0x2a2f45, 0.92)
-      .setStrokeStyle(2, 0xd8a05a);
+    // the stage — a colony platform facing the crowd, with a teal edge-glow
+    const st = this.add.image(px(FEST_STAGE.x), py(FEST_STAGE.y) + 8, tex('fest.stage')).setScale(1.9);
     add(st);
     const stageGlow = this.add.rectangle(px(FEST_STAGE.x), py(FEST_STAGE.y) + 14, 5.6 * T, 0.8 * T, 0x2e7d4f, 0.18);
     add(stageGlow);
-    const sign = this.add.text(px(FEST_STAGE.x), py(FEST_STAGE.y) - 4, '★ EARTH DAY ★', {
+    const sign = this.add.text(px(FEST_STAGE.x), py(FEST_STAGE.y) - 12, '★ EARTH DAY ★', {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#ffe9a0', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(12.4);
     add(sign);
 
-    // two food stalls — striped awnings + a table of dishes
+    // two colony food stalls — holo awnings + a glowing counter of dishes
     for (const s of FEST_STALLS) {
       const tx = px(s.x), ty = py(s.y);
-      const table = this.add.rectangle(tx, ty + 4, 1.4 * T, 0.7 * T, 0x6a4a2a, 0.95).setStrokeStyle(1, 0xd8a05a);
-      add(table);
-      const awning = this.add.rectangle(tx, ty - 10, 1.6 * T, 0.5 * T, 0xc0392b, 0.95);
-      add(awning);
-      for (let i = 0; i < 3; i++) {                          // dishes on the table
-        const dish = this.add.circle(tx - 24 + i * 24, ty + 2, 5, EARTH_PALETTE[i % 3], 0.95);
-        add(dish);
-      }
+      const stall = this.add.image(tx, ty - 6, tex('fest.stall')).setOrigin(0.5, 0.5).setScale(1.4);
+      add(stall);
     }
 
     // the visiting crowd — festival guests (reused villager art), hidden unless festival
@@ -948,9 +1006,8 @@ class PlanetScene extends Phaser.Scene {
     for (let i = 0; i < 90; i++) {
       const x = px + (Math.random() - 0.5) * 40;
       const y = py - 30 - Math.random() * 20;
-      const c = EARTH_PALETTE[i % 3];
-      const bit = this.add.rectangle(x, y, 3 + Math.random() * 3, 5 + Math.random() * 4, c, 0.95)
-        .setDepth(600).setRotation(Math.random() * Math.PI);
+      const bit = this.add.image(x, y, texAt('fest.confetti', i % 3))
+        .setDepth(600).setRotation(Math.random() * Math.PI).setScale(0.8 + Math.random() * 0.6);
       this.tweens.add({
         targets: bit,
         x: x + (Math.random() - 0.5) * 160,
@@ -1410,7 +1467,7 @@ rations, and your name on the manifest.
   _fishCatch(item, worth, note) {
     const { width, height } = this.game.config;
     const label = item.replace(/-/g, ' ');
-    const c = this.add.container(width / 2, height / 2 - 90).setDepth(999);
+    const c = this.add.container(width / 2, height / 2 - 90).setDepth(999).setScrollFactor(0);
     const panel = this.add.rectangle(0, 0, 340, 104, 0x101a26, 0.92).setStrokeStyle(2, 0x39c5bb);
     const title = this.add.text(0, -32, 'CAUGHT', { fontFamily: "system-ui,'Segoe UI'", fontSize: '13px', color: '#39c5bb' }).setOrigin(0.5);
     const fishTxt = this.add.text(0, -6, label, { fontFamily: "system-ui,'Segoe UI'", fontSize: '19px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
@@ -1506,7 +1563,7 @@ rations, and your name on the manifest.
   _oreCatch(item, worth, note) {
     const { width, height } = this.game.config;
     const label = item.replace(/-/g, ' ');
-    const c = this.add.container(width / 2 - 90, height / 2 - 90).setDepth(999);
+    const c = this.add.container(width / 2 - 90, height / 2 - 90).setDepth(999).setScrollFactor(0);
     const panel = this.add.rectangle(0, 0, 340, 104, 0x101a26, 0.92).setStrokeStyle(2, 0xd8a05a);
     const title = this.add.text(0, -32, 'MINED', { fontFamily: "system-ui,'Segoe UI'", fontSize: '13px', color: '#d8a05a' }).setOrigin(0.5);
     const oreTxt = this.add.text(0, -6, label, { fontFamily: "system-ui,'Segoe UI'", fontSize: '19px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
@@ -1624,137 +1681,283 @@ rations, and your name on the manifest.
     if (key) this.cook(key);
   }
 
-  // ── House interior — a cozy room where you go to bed to end the day ──
-  buildInterior(width, height) {
+  // ── Interior rooms (Harvest Moon quarters) — one room per building kind:
+  //    home / shop / tavern / exchange / ranch each get a real room behind the
+  //    door. Built lazily on first entry, cached per kind.
+  buildRoom(kind) {
+    const { width, height } = this.game.config;
     const stage = this.add.container(0, 0).setDepth(500).setVisible(false);
     stage.setScrollFactor(0);          // fixed to the screen, not the world
-    this.intStage = stage;
-
     const cx = width / 2, cy = height / 2;
     const W = 480, H = 340, wallH = 104;
     const top = cy - H / 2;
 
     // backdrop (full-viewport dim to mask the world behind)
     stage.add(this.add.rectangle(cx, cy, width, height, 0x000000, 0.82));
-
-    // ── ROOM: a real space, not a card. Back wall band + floor with depth ──
-    // back wall: warm panelled habitat wall
-    stage.add(this.add.rectangle(cx, top + wallH / 2, W, wallH, 0x6e553c)
-      .setStrokeStyle(3, 0x8a6c4a));
-    // wall panel seams (vertical ribs so the repeat reads as plating, not flat)
-    for (let i = 1; i < 6; i++) {
-      const wx = cx - W / 2 + i * (W / 6);
-      stage.add(this.add.rectangle(wx, top + wallH / 2, 2, wallH - 6, 0x5a442e, 0.85));
-    }
-    // warm skirting where wall meets floor (depth cue)
-    stage.add(this.add.rectangle(cx, top + wallH, W, 5, 0x8a6c4a));
-    // floor: warm wood with a soft vertical gradient (lighter at the wall, darker near you)
-    const fg = this.add.graphics();
-    fg.fillGradientStyle(0x6e5538, 0x6e5538, 0x40301e, 0x40301e);
-    fg.fillRect(cx - W / 2, top + wallH, W, H - wallH);
-    stage.add(fg);
-    // floorboard seams
-    for (let i = 1; i < 5; i++) {
-      const ly = top + wallH + i * ((H - wallH) / 5);
-      stage.add(this.add.rectangle(cx, ly, W - 6, 1, 0x3c2d1c, 0.55));
-    }
-    // warm light pool from the window (the room is LIT)
-    stage.add(this.add.image(cx - 30, top + wallH + 26, 'fx.lamp_glow')
-      .setBlendMode(Phaser.BlendModes.ADD).setScale(2.6, 1.6).setAlpha(0.20));
-
+    // room shell — slate panelled wall (teal trim) + machined metal deck floor
+    stage.add(this.add.image(cx, top + wallH / 2, tex('int.wall')).setScale(W / 96, wallH / 24));
+    stage.add(this.add.image(cx, top + wallH + (H - wallH) / 2, tex('int.floor')).setScale(W / 96, (H - wallH) / 24));
+    // QA 0904 Stage 3.3: every light pool gets a VISIBLE SOURCE. A pool with no
+    // fixture over it reads as a grey blob on the floor (the QA complaint), so
+    // each pool now hangs under a drawn ceiling lamp — stem, shade, hot emitter.
+    // Round-2 lesson: a lamp 80px above a 150px-wide pool does not READ as its
+    // source either — association is geometry. The fixture rides on the wall
+    // band, the pool centre sits one pool-height under the emitter, and the
+    // pool is narrow enough that a vertical line from lamp lands inside it.
+    // Scale note: the shell draws its textures ~5x (W/96), so fx.lamp_glow's
+    // 16 native px must ride at ~5x too — at 1.9 it was a 30px dot in a 480px
+    // room and read as nothing. Pool ≈ 83x54, TOP EDGE meeting the fixture's
+    // emitter so the vertical lamp→pool line never breaks. WARM TINT matters:
+    // fx.lamp_glow's own core over the blue-slate deck composites near-neutral
+    // at low alpha (measured [107,115,116] — grey!), so the pool is tinted
+    // amber [255,190,90] and pushed to an alpha that measurably flips r>b.
+    const hang = (px_, poolCy) => {
+      stage.add(this.add.image(px_, top + wallH - 26, 'int.ceilingLight').setScale(4.3));
+      stage.add(this.add.image(px_, top + wallH - 4, 'fx.lamp_glow')
+        .setBlendMode(Phaser.BlendModes.ADD).setScale(2.6, 1.2).setTint(0xffbe5a).setAlpha(0.30));
+      stage.add(this.add.image(px_, poolCy, 'fx.lamp_glow')
+        .setBlendMode(Phaser.BlendModes.ADD).setScale(5.2, 3.4).setTint(0xffbe5a).setAlpha(0.32));
+    };
+    hang(cx - 30, top + wallH + 22);
+    hang(cx + 90, top + wallH + 34);
     // window (against far wall) — glows with the sky
-    const windowImg = this.add.image(cx, top + 44, 'int.window').setScale(0.9);
-    stage.add(windowImg);
-    this.intWindow = windowImg;
-    // soft sky-light breathing behind the glass (the room never sits still)
+    stage.add(this.add.image(cx, top + 44, 'int.window').setScale(0.9));
     const windowGlow = this.add.image(cx, top + 46, 'fx.lamp_glow')
       .setBlendMode(Phaser.BlendModes.ADD).setScale(2.3, 1.2).setAlpha(0.10).setDepth(-1);
     stage.add(windowGlow);
-    this.intWindowGlow = windowGlow;
 
-    // rug center, plant + bookcase side
-    stage.add(this.add.image(cx, cy + 30, 'int.rug').setScale(1));
-    stage.add(this.add.image(cx - W / 2 + 55, cy - 40, 'int.bookcase').setScale(0.9));
-    const plantImg = this.add.image(cx + W / 2 - 55, cy + 20, 'int.plant').setScale(0.9);
-    stage.add(plantImg);
-    this.intPlant = plantImg;
-    this._intPlantBaseY = cy + 20;
-    stage.add(this.add.image(cx, cy - H / 2 + 90, 'int.table').setScale(0.9));
+    const room = { stage, W, H, cx, cy, windowGlow, points: [] };
 
-    // ── spouse: moves in when you marry (sits near the table) ──
-    const spouse = this.add.image(cx + 95, cy + 42, 'player.front').setDepth(8);
-    spouse.setVisible(false);
-    stage.add(spouse);
-    this.intSpouse = spouse;
-    this._intSpouseBaseY = cy + 42;
-    const spouseName = this.add.text(cx + 95, cy + 14, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#ffe9a0',
-    }).setOrigin(0.5);
-    stage.add(spouseName);
-    this.intSpouseName = spouseName;
-
-    // the bed — your sleep spot (lower-left corner)
-    const bedImg = this.add.image(cx - W / 2 + 65, cy + H / 2 - 55, 'int.bed').setScale(1.1);
-    stage.add(bedImg);
-    this.intBed = { x: cx - W / 2 + 65, y: cy + H / 2 - 55 };
-    this.intBedImg = bedImg;
-
-    // kitchen stove (cook 2 crops → 1 cooked-food)
-    const stove = this.add.rectangle(cx + W / 2 - 55, cy - H / 2 + 40, 70, 34, 0x3a2a20)
-      .setStrokeStyle(2, 0xd8a05a);
-    stage.add(stove);
-    stage.add(this.add.text(cx + W / 2 - 55, cy - H / 2 + 32, 'STOVE (recipes)', {
+    // the door (exit) — teal airlock sprite on the bottom edge
+    const doorImg = this.add.image(cx + W / 2 - 30, cy + H / 2 - 24, 'int.door').setScale(0.8);
+    stage.add(doorImg);
+    room.door = { x: cx + W / 2 - 30, y: cy + H / 2 - 24 };
+    room.points.push({ x: room.door.x, y: room.door.y, action: 'exit' });
+    stage.add(this.add.text(cx + W / 2 - 30, cy + H / 2 - 58, 'DOOR', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', color: '#ffe9a0',
-    }).setOrigin(0.5));
-    this.intStove = { x: cx + W / 2 - 55, y: cy - H / 2 + 40 };
-
-    // storage chest (deposit/withdraw harvests) — beside the bookcase
-    const chest = this.add.rectangle(cx - W / 2 + 22, cy - 40, 44, 30, 0x4a3322)
-      .setStrokeStyle(2, 0xd8a05a);
-    stage.add(chest);
-    stage.add(this.add.text(cx - W / 2 + 22, cy - 56, 'CHEST', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#ffe9a0',
-    }).setOrigin(0.5));
-    this.intChest = { x: cx - W / 2 + 22, y: cy - 40 };
-
-    // the door (exit) — warm glow marker on the bottom edge
-    const doorRect = this.add.rectangle(cx + W / 2 - 30, cy + H / 2 - 24, 50, 24, 0x2e2118)
-      .setStrokeStyle(2, 0xe0a860);
-    stage.add(doorRect);
-    stage.add(this.add.text(cx + W / 2 - 30, cy + H / 2 - 36, 'DOOR', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', color: '#ffe9a0',
-    }).setOrigin(0.5));
-    this.intDoor = { x: cx + W / 2 - 30, y: cy + H / 2 - 24 };
-
-    // hint labels
-    stage.add(this.add.text(cx, cy - H / 2 + 78, 'SLEEP IN YOUR BED (SPACE)', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '8px', color: '#b8c0e0',
-      stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5));
 
     // interior player (drawn inside the room)
     const ip = this.add.image(cx, cy + H / 2 - 65, 'player.front').setScale(0.5);
     ip.setDepth(10);
     stage.add(ip);
-    this.intPlayer = ip;
-    this.intShadow = this.add.image(ip.x, ip.y + 14, 'fx.shadow').setDepth(9);
-    stage.add(this.intShadow);
+    room.player = ip;
+    room.shadow = this.add.image(ip.x, ip.y + 14, 'fx.shadow').setDepth(9);
+    stage.add(room.shadow);
 
-    // geometry stored for movement clamping
-    this.intW = W; this.intH = H; this.intCx = cx; this.intCy = cy;
+    // kind-specific props (colony habitat language, grounded + interaction points)
+    this._decorateRoom(kind, room, stage);
+
+    this.intRooms[kind] = room;
+    return room;
   }
 
-  enterHouse() {
+  // decorate a room kind with its props + interaction points
+  _decorateRoom(kind, room, stage) {
+    const { cx, cy, W, H } = room;
+    const put = (x, y, key, scale, action) => {
+      // QA fix: props used to hover on the deck with nothing beneath them and
+      // read as floating cards. Every placed prop now gets a soft contact
+      // shadow at its footprint (light reads from the window, upper-left),
+      // so furniture sits ON the floor.
+      const img = this.add.image(x, y, key).setScale(scale);
+      const w = (img.width || 32) * scale, h = (img.height || 32) * scale;
+      const sh = this.add.image(x + Math.round(w * 0.06), y + Math.round(h * 0.5) - 2, 'fx.shadow')
+        .setScale(Math.max(0.55, (w / 34) * 0.9), Math.max(0.35, (h / 60) * 0.8))
+        .setAlpha(0.55).setDepth(img.depth - 0.2);
+      stage.add(sh);
+      img.setData({ contactShadow: sh });
+      stage.add(img);
+      if (action) room.points.push({ x, y, action });
+      return img;
+    };
+    // same grounding as put() for props placed without an interaction point
+    const putG = (x, y, key, scale = 1) => put(x, y, key, scale);
+    const label = (x, y, text, size) => stage.add(this.add.text(x, y, text, {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: size, color: '#ffe9a0',
+    }).setOrigin(0.5));
+    // QA 0904 Stage 3.4: every room gets a named holosign over its service
+    // point — a lit plate housing + the room's WORD as real text, so a player
+    // reads SHOP/BAR/TRADE at a glance instead of guessing from furniture.
+    // Round 1 shipped fake amber glyph bars on the plate that COLLIDED with
+    // the label text underneath and read as noise; the plate now carries only
+    // the housing + a teal 'open' pip, and this helper draws the word itself.
+    const sign = (x, y, name) => {
+      stage.add(this.add.image(x, y, 'int.signplate').setScale(1));
+      stage.add(this.add.text(x - 2, y, name, {
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', fontStyle: 'bold',
+        color: '#f2d9a2', stroke: '#061116', strokeThickness: 2,
+      }).setOrigin(0.5));
+    };
+    if (kind === 'home') {
+      // rug, bookcase, plant, table — the one room that gets a hearthome feel
+      stage.add(this.add.image(cx, cy + 30, 'int.rug').setScale(1));
+      sign(cx, cy - H / 2 + 66, 'HOME');                    // lit sign over the galley wall
+      putG(cx - W / 2 + 55, cy - 40, 'int.bookcase', 0.9);
+      const plant = put(cx + W / 2 - 55, cy + 20, 'int.plant', 0.9);
+      room.plant = plant; room.plantBaseY = cy + 20;
+      putG(cx, cy - H / 2 + 90, 'int.table', 0.9);
+      // two stools at the kitchen table so the room reads lived-in
+      putG(cx - 34, cy - H / 2 + 116, 'int.stool', 0.85);
+      putG(cx + 34, cy - H / 2 + 116, 'int.stool', 0.85);
+      // stove (cook 2 crops → 1 cooked-food) — colony galley
+      put(cx + W / 2 - 55, cy - H / 2 + 40, 'int.stove', 1, 'recipes');
+      label(cx + W / 2 - 55, cy - H / 2 + 6, 'STOVE (recipes)', '7px');
+      // chest (deposit/withdraw harvests) — colony cargo pod
+      put(cx - W / 2 + 22, cy - 40, 'int.chest', 0.9, 'chest');
+      label(cx - W / 2 + 22, cy - 68, 'CHEST', '6px');
+      // bed — your sleep spot (lower-left)
+      put(cx - W / 2 + 65, cy + H / 2 - 55, 'int.bed', 1.1, 'sleep');
+      label(cx - W / 2 + 65, cy + H / 2 - 88, 'SLEEP (SPACE)', '8px');
+      // spouse: moves in when you marry (sits near the table)
+      const spouse = this.add.image(cx + 95, cy + 42, 'player.front').setDepth(8);
+      spouse.setVisible(false);
+      stage.add(spouse);
+      room.spouse = spouse; room.spouseBaseY = cy + 42;
+      stage.add(this.add.text(cx + 95, cy + 14, '', {
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#ffe9a0',
+      }).setOrigin(0.5));
+      stage.add(this.add.text(cx, cy - H / 2 + 78, 'SLEEP IN YOUR BED (SPACE)', {
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '8px', color: '#b8c0e0',
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5));
+    } else if (kind === 'shop') {
+      // GROCER layout: counter front-left, a stocked shelf WALL on the right,
+      // produce crates fanning toward the door — reads as commerce, not storage.
+      sign(cx - W / 2 + 55, cy - 82, 'SHOP');                 // lit sign over the counter
+      put(cx - W / 2 + 55, cy - 40, 'int.counter', 1, 'shop');
+      label(cx - W / 2 + 55, cy - 68, 'COUNTER (BUY)', '6px');
+      putG(cx + W / 2 - 46, cy - 52, 'int.shelf', 1.05);       // merchandise wall
+      putG(cx + W / 2 - 58, cy + 26, 'int.chest', 0.85);       // overstock pod
+      putG(cx - W / 2 + 24, cy + 30, 'int.chest', 0.8);        // produce crate
+      putG(cx - W / 2 + 62, cy + 34, 'int.plant', 0.8);        // door greening
+    } else if (kind === 'tavern') {
+      // CANTINA layout: bar runs across the back wall with a bottle shelf behind
+      // it, stools at the bar, two seated tables forward — the room is for people.
+      putG(cx - W / 2 + 118, cy - 74, 'int.barback', 1.0);      // bottle shelf behind the bar
+      sign(cx - W / 2 + 118, cy - 108, 'TAVERN');               // lit sign over the bar
+      put(cx - W / 2 + 118, cy - 40, 'int.counter', 1, 'talk_rhea'); // bar
+      label(cx - W / 2 + 118, cy - 96, 'BAR (RHEA)', '6px');
+      putG(cx - W / 2 + 86, cy - 14, 'int.stool', 0.9);
+      putG(cx - W / 2 + 150, cy - 14, 'int.stool', 0.9);
+      putG(cx - 52, cy + 38, 'int.table', 0.85);
+      putG(cx - 78, cy + 58, 'int.stool', 0.85);
+      putG(cx - 26, cy + 58, 'int.stool', 0.85);
+      putG(cx + 62, cy + 30, 'int.table', 0.85);
+      putG(cx + 36, cy + 50, 'int.stool', 0.85);
+      putG(cx + 88, cy + 50, 'int.stool', 0.85);
+    } else if (kind === 'exchange') {
+      // TRADE-HUB layout: terminal left, a holo market board centre-floor,
+      // intake counter right — visibly distinct from the grocer's counter room.
+      put(cx - W / 2 + 55, cy - 40, 'int.terminal', 1, 'exchange');
+      sign(cx - W / 2 + 55, cy - 82, 'TRADE');               // lit sign over the terminal
+      label(cx - W / 2 + 55, cy - 68, 'TERMINAL (TRADE)', '6px');
+      putG(cx + 10, cy - 6, 'int.holotable', 1.0);              // market board centrepiece
+      put(cx + W / 2 - 55, cy - 44, 'int.counter', 0.95);       // intake counter
+      label(cx + W / 2 - 55, cy - 70, 'INTAKE', '6px');
+      putG(cx - W / 2 + 26, cy + 34, 'int.chest', 0.85);        // valuation crates
+      putG(cx - W / 2 + 64, cy + 40, 'int.chest', 0.8);
+    } else if (kind === 'ranch') {
+      // RANCH layout: service stall left, two livestock pens right with the
+      // actual animals standing in them — the room cannot be mistaken for a shop.
+      put(cx - W / 2 + 55, cy - 40, 'int.stall', 1, 'ranch');
+      sign(cx - W / 2 + 55, cy - 82, 'RANCH');               // lit sign over the service stall
+      label(cx - W / 2 + 55, cy - 68, 'STALL (RANCH)', '6px');
+      putG(cx + W / 2 - 62, cy - 56, 'int.pen', 1.0);           // back pen
+      putG(cx + W / 2 - 74, cy - 70, 'ranch.chicken', 0.8);     // pen occupant
+      putG(cx + W / 2 - 34, cy - 66, 'ranch.sheep', 0.62);      // pen occupant
+      putG(cx + 40, cy + 26, 'int.pen', 1.05);                  // front pen
+      putG(cx + 40, cy + 8, 'ranch.cow', 0.8);                  // the cow
+      putG(cx - W / 2 + 26, cy + 30, 'int.chest', 0.9);         // feed store
+      label(cx - W / 2 + 26, cy + 6, 'FEED', '6px');
+    } else if (kind === 'barracks') {
+      // dormitory bunks — the villagers live here (rows of colony beds)
+      sign(cx - W / 2 + 55, cy - 68, 'BUNKS');           // lit sign over the bunk row
+      put(cx - W / 2 + 55, cy - 40, 'int.bed', 1);
+      label(cx - W / 2 + 55, cy - 68, 'BUNK', '6px');
+      put(cx + W / 2 - 55, cy - 40, 'int.bed', 1);
+      put(cx - W / 2 + 20, cy + 20, 'int.bed', 1);
+      put(cx + W / 2 - 20, cy + 20, 'int.bed', 1);
+      stage.add(this.add.image(cx, cy + 20, 'int.table').setScale(0.9)); // mess table
+      stage.add(this.add.image(cx - W / 2 + 22, cy + 20, 'int.chest').setScale(0.9)); // footlockers
+    }
+  }
+
+  enterInterior(kind) {
     if (this.inInterior) return;
+    const room = this.intRooms[kind] || this.buildRoom(kind);
     this.inInterior = true;
+    this.intKind = kind;
+    this.intStage = room.stage;
+    this.intPlayer = room.player;
+    this.intShadow = room.shadow;
+    this.intDoor = room.door;
+    this.intPoints = room.points;
+    this.intWindowGlow = room.windowGlow;
+    this.intPlant = room.plant;
+    this.intSpouse = room.spouse;
+    this._intPlantBaseY = room.plantBaseY;
+    this._intSpouseBaseY = room.spouseBaseY;
+    this.intW = room.W; this.intH = room.H; this.intCx = room.cx; this.intCy = room.cy;
     this.world.setVisible(false);
-    this.intStage.setVisible(true);
+    room.stage.setVisible(true);
     // place player inside near the door
     this.intPlayer.setPosition(this.intDoor.x + 10, this.intDoor.y + 40);
     if (this.intShadow) this.intShadow.setPosition(this.intPlayer.x, this.intPlayer.y + 14);
     this.refreshInteriorSpouse();
-    this.showToast(this.marriedTo ? 'Welcome home. Your spouse is here.' : 'You step inside your cozy dome.');
+    this.showToast(this._roomToast(kind));
     this.updateHUD();
+  }
+
+  _roomToast(kind) {
+    return {
+      home: this.marriedTo ? 'Welcome home. Your spouse is here.' : 'You step inside your cozy dome.',
+      shop: 'The Supply Depot hums — shelves of colony goods.',
+      tavern: 'Stardust Tavern — Rhea waves you in.',
+      exchange: 'The Grand Exchange — trade terminals flicker.',
+      ranch: 'The ranch barn — animals low softly.',
+    }[kind] || '';
+  }
+
+  exitInterior() {
+    if (!this.inInterior) return;
+    this.inInterior = false;
+    this.intStage.setVisible(false);
+    this.world.setVisible(true);
+    // back at the building door
+    const act = this.intKind === 'home' ? 'sleep'
+      : this.intKind === 'tavern' ? 'talk_rhea'
+      : this.intKind || 'sleep';
+    const bld = BUILDINGS.find(b => b.action === act);
+    const door = bld ? bld.door : BUILDINGS[0].door;
+    this.playerSpr.setPosition(door.x * T + T / 2, door.y * T + T / 2);
+    this.playerShadow.setPosition(this.playerSpr.x, this.playerSpr.y + 14);
+    this.showToast('Back outside. The colony hums.');
+    this.updateHUD();
+  }
+
+  // back-compat aliases
+  enterHouse() { this.enterInterior('home'); }
+  exitHouse() { this.exitInterior(); }
+
+  // dispatch an interior interaction point's action
+  _roomAction(action) {
+    if (!action) return;
+    switch (action) {
+      case 'exit': this.exitInterior(); break;
+      case 'sleep': this.sleep(); break;
+      case 'recipes': this.openRecipeBook(); break;
+      case 'chest': this.openChest(); break;
+      case 'shop': this.openShop(); break;
+      case 'exchange': this.openGrandExchange(); break;
+      case 'ranch': this.openRanch(); break;
+      case 'talk_rhea': {
+        const rhea = NPCS.find(n => n.id === 'rhea');
+        if (rhea) this.startNPCDialogue(rhea);
+        break;
+      }
+      default: this.showToast(this._roomToast(this.intKind));
+    }
   }
 
   // ── If married, the spouse lives here: sit them by the table + label ──
@@ -1765,19 +1968,6 @@ rations, and your name on the manifest.
     this.intSpouse.setVisible(true);
     const data = NPC_DATA[married] || {};
     if (this.intSpouseName) this.intSpouseName.setText(data.name ? data.name.toUpperCase() : 'SPOUSE');
-  }
-
-  exitHouse() {
-    if (!this.inInterior) return;
-    this.inInterior = false;
-    this.intStage.setVisible(false);
-    this.world.setVisible(true);
-    // back at the house door
-    const door = BUILDINGS[0].door;
-    this.playerSpr.setPosition(door.x * T + T / 2, door.y * T + T / 2);
-    this.playerShadow.setPosition(this.playerSpr.x, this.playerSpr.y + 14);
-    this.showToast('Back outside. The colony hums.');
-    this.updateHUD();
   }
 
   isBlocked(tx, ty) {
@@ -1823,6 +2013,37 @@ rations, and your name on the manifest.
     this.handleInteract();
   }
 
+  // ── Held tool sprite: follow the player, show the equipped tool's texture,
+  //    and tuck it to the side the player faces (so it reads as "in hand"). ──
+  _updateToolSprite() {
+    if (!this.toolSpr) return;
+    const e = this.equipped;
+    this.toolSpr.setVisible(!!e);
+    if (!e) return;
+    this.toolSpr.setTexture(tex(`tool.${e}`));
+    const dx = this.playerDir === 'left' ? -1 : this.playerDir === 'right' ? 1 : 0;
+    // QA 0904 Stage 6.3: the held tool used to anchor around the BODY CENTRE at
+    // head height (dy 7 with a -3 lift), so a swing rotated the can's spout over
+    // the HAT. It now anchors to the HAND ROW — the sprite's hot spot is the
+    // lower handle grip (~x30,y44 of 48) and the hand row of a 80px villager is
+    // +18 from centre — so swings arc through the hand, never the head.
+    this.toolSpr.setPosition(this.playerSpr.x + (dx ? dx * 11 : 7), this.playerSpr.y + 18);
+    this.toolSpr.setDepth(this.playerSpr.depth + 0.4);
+    this.toolSpr.setFlipX(dx < 0);
+    this.toolSpr.setOrigin(0.62, 0.9);
+    this.toolSpr.setScale(0.78);
+  }
+
+  // ── Swing the held tool: a quick raise-and-settle so a press visibly uses it.
+  //    The tilt is POSITIVE (head tips away) so the raised head never crosses the
+  //    brow line while the tool rides above the body during the arc. ──
+  _swingTool() {
+    if (!this.toolSpr || !this.toolSpr.visible) return;
+    this.tweens.killTweensOf(this.toolSpr);
+    this.toolSpr.setAngle(26);
+    this.tweens.add({ targets: this.toolSpr, angle: 0, duration: 130, ease: 'Back.easeOut' });
+  }
+
   // ── Equipped-tool action: only when the tool has a target in range, so a
   //    rod never hijacks talking to an NPC. Field work (hoe/can/harvest) is
   //    handled inside handleTileAction; the shore tap refill lives in
@@ -1834,11 +2055,13 @@ rations, and your name on the manifest.
     if (e === 'rod') {
       const atShore = Math.hypot(px - 27, py - 22) <= 3.5 || Math.hypot(px - 38, py - 21) <= 3.5;
       if (!atShore) return false;
+      this._swingTool();
       this.fish();
       return true;
     }
     if (e === 'pickaxe') {
       if (Math.hypot(px - this.mineX, py - this.mineY) > 4) return false;
+      this._swingTool();
       this.mine();
       return true;
     }
@@ -1921,18 +2144,22 @@ rations, and your name on the manifest.
       }
     }
     // fence beam flicker
-    const beamTex = Math.floor(time / 500) % 2 === 0 ? 'decor.fence_beam_a' : 'decor.fence_beam_b';
+    const beamTex = Math.floor(time / 500) % 2 === 0 ? tex('decor.fenceBeamA') : tex('decor.fenceBeamB');
     for (const b of this.fenceBeams) b.setTexture(beamTex);
-    // water shimmer (2-frame)
-    const waterTex = Math.floor(time / 600) % 2 === 0 ? 'tile.water' : 'tile.water2';
-    for (const wt of this.waterTiles) wt.setTexture(waterTex);
+    // water shimmer — each caustic family cycles with its own phase offset so
+    // neighbouring tiles never snap to the same frame across the whole lake
+    const waterFamily = [0, 1, 2].map((i) => texAt('ground.water', i));
+    const waterPhase = Math.floor(time / 600);
+    for (const wt of this.waterTiles) wt.img.setTexture(waterFamily[(waterPhase + wt.f) % waterFamily.length]);
     // building animation frames
     for (const bs of this.buildingSprites) {
-      if (bs.b.key === 'exchange') bs.img.setTexture(Math.floor(time / 400) % 2 === 0 ? 'bld.exchange_a' : 'bld.exchange_b');
-      if (bs.b.key === 'tavern') bs.img.setTexture(['bld.tavern_a', 'bld.tavern_b', 'bld.tavern_c'][Math.floor(time / 300) % 3]);
+      if (bs.b.key === 'exchange') bs.img.setTexture(Math.floor(time / 400) % 2 === 0 ? tex('bld.exchange') : tex('bld.exchangeAlt'));
+      if (bs.b.key === 'tavern') bs.img.setTexture(texAt('bld.tavern', Math.floor(time / 300) % 3));
     }
-    // buildings breathe at night — windows/doors/signs pulse on their own beat
-    if (this.isNight && this.buildingGlows.length) {
+    // buildings breathe — windows/doors/signs pulse on their own beat. Day-lit
+    // commercial glows breathe too (a lit 'OPEN' facade should still feel alive),
+    // so the gate is on the glow's own visibility, not on the night flag.
+    if (this.buildingGlows.length) {
       for (let i = 0; i < this.buildingGlows.length; i++) {
         const g = this.buildingGlows[i];
         if (!g.visible) continue;
@@ -1944,6 +2171,24 @@ rations, and your name on the manifest.
     this._lastT = time;
     for (const b of Object.values(this.npcBrains)) {
       this.tickNpc(b, dt, time);
+    }
+    // ── Alien idle animation — bioluminescent envoys breathe and their aura
+    //    pulses on their own phase, so first contact reads as alive, not a sticker.
+    if (this.alienSprites) {
+      for (const a of this.alienSprites) {
+        const ph = (a.alienId || 'a').length * 1.7;
+        a.y = (a._baseY || a.y) + Math.sin(time * 0.0012 + ph) * 2;
+        if (a.setScale) a.setScale(0.9 + 0.02 * Math.sin(time * 0.0016 + ph));
+        if (a._aura && a._aura.setAlpha) a._aura.setAlpha(0.24 + 0.12 * Math.sin(time * 0.0016 + ph));
+      }
+    }
+    // ── Festival crowd idle sway — guests bob on their own phase (the singer
+    //    keeps its dedicated tween), so the plaza reads as a living crowd.
+    if (this.festivalGuests && this._festActive()) {
+      for (const g of this.festivalGuests) {
+        if (g.singing) continue;
+        g.spr.y = g.baseY + Math.sin(time * 0.0016 + g.phase) * 2;
+      }
     }
 
     if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack || this.showingSmithy) {
@@ -2086,16 +2331,15 @@ rations, and your name on the manifest.
       this.intPlayer.setTexture(`${this.playerDir}_${fKey}`);
       if (this.intShadow) this.intShadow.setPosition(this.intPlayer.x, this.intPlayer.y + 14);
 
-      // interact inside: chest → storage, stove → cook, bed → sleep, door → exit
+      // interact inside: route to the room's interaction points
       if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.eKey)) {
-        const dBed = Math.hypot(this.intPlayer.x - this.intBed.x, this.intPlayer.y - this.intBed.y);
-        const dDoor = Math.hypot(this.intPlayer.x - this.intDoor.x, this.intPlayer.y - this.intDoor.y);
-        const dStove = this.intStove ? Math.hypot(this.intPlayer.x - this.intStove.x, this.intPlayer.y - this.intStove.y) : 999;
-        const dChest = this.intChest ? Math.hypot(this.intPlayer.x - this.intChest.x, this.intPlayer.y - this.intChest.y) : 999;
-        if (dChest < 64) { this.openChest(); }
-        else if (dStove < 64) { this.openRecipeBook(); }
-        else if (dBed < 60) { this.sleep(); }
-        else if (dDoor < 60) { this.exitHouse(); }
+        const pts = this.intPoints || [];
+        for (const pt of pts) {
+          if (Math.hypot(this.intPlayer.x - pt.x, this.intPlayer.y - pt.y) < 60) {
+            this._roomAction(pt.action);
+            break;
+          }
+        }
       }
 
       // ── the room is alive: window light breathes, the plant sways, and a
@@ -2126,6 +2370,7 @@ rations, and your name on the manifest.
     const moving = !!dx || !!dy;
     const fKey = moving ? Math.floor(time / 110) % 3 : 0;
     this.playerSpr.setTexture(`${this.playerDir}_${fKey}`);
+    this._updateToolSprite();
 
     // camera target follows player (world-local → scene coords)
     this.camTarget.setPosition(this.playerSpr.x + this.worldX, this.playerSpr.y + this.worldY);
@@ -2257,6 +2502,9 @@ rations, and your name on the manifest.
         this._pickErrand(b);
       }
       spr.setTexture(`npc.${b.id}_0`);
+      // idle "breath" — a gentle scale bob so the colony never sits frozen
+      // (guarded: the headless test harness may expose a sprite without setScale)
+      if (spr.setScale) spr.setScale(1 + 0.02 * Math.sin(time * 0.0018 + (b.id.length * 1.3)));
       if (spr._label) spr._label.setPosition(b.x, b.y - 16);
       return;
     }
@@ -2526,7 +2774,7 @@ rations, and your name on the manifest.
         local.state.crop = tile.crop || '';
         local.state.watered = watered;
         local.state.growth = tile.growthDay || 0;
-        local.img.setTexture(TILE_FOR_STATE[type] || local.baseKey || 'tile.soil');
+        local.img.setTexture((TILE_FOR_STATE[type] || (() => local.baseKey))() || local.baseKey || tex('farm.empty'));
       }
     }
   }
@@ -2543,18 +2791,15 @@ rations, and your name on the manifest.
       else this.closeAllPanels();
       return;
     }
-    // Inside the house: A-near-chest opens storage, A-near-stove cooks, A-near-bed sleeps, A-near-door exits.
-    if (this.inInterior && this.intPlayer && this.intBed && this.intDoor) {
-      const dBed = Math.hypot(this.intPlayer.x - this.intBed.x, this.intPlayer.y - this.intBed.y);
-      const dDoor = Math.hypot(this.intPlayer.x - this.intDoor.x, this.intPlayer.y - this.intDoor.y);
-      const dStove = this.intStove ? Math.hypot(this.intPlayer.x - this.intStove.x, this.intPlayer.y - this.intStove.y) : 999;
-      const dChest = this.intChest ? Math.hypot(this.intPlayer.x - this.intChest.x, this.intPlayer.y - this.intChest.y) : 999;
-      if (dChest < 64) { this.openChest(); }
-      else if (dStove < 60) { this.openRecipeBook(); }
-      else if (dBed < 60) { this.sleep(); }
-      else if (dDoor < 60) { this.exitHouse(); }
-      else this.showToast('The chest, stove, bed, or door?');
-      return;
+    // Inside a room: A-near-a-point triggers it (chest/stove/bed/counter/door/exit)
+    if (this.inInterior && this.intPlayer) {
+      const pts = this.intPoints || [];
+      for (const pt of pts) {
+        if (Math.hypot(this.intPlayer.x - pt.x, this.intPlayer.y - pt.y) < 60) {
+          this._roomAction(pt.action);
+          return;
+        }
+      }
     }
 
     const ptx = Math.floor(this.playerSpr.x / T);
@@ -2588,15 +2833,12 @@ rations, and your name on the manifest.
 
   buildingAction(b) {
     switch (b.action) {
-      case 'shop': this.openShop(); break;
-      case 'exchange': this.openGrandExchange(); break;
-      case 'ranch': this.openRanch(); break;
-      case 'sleep': this.enterHouse(); break;
-      case 'talk_rhea': {
-        const rhea = NPCS.find(n => n.id === 'rhea');
-        if (rhea) this.startNPCDialogue(rhea);
-        break;
-      }
+      case 'shop': this.enterInterior('shop'); break;
+      case 'exchange': this.enterInterior('exchange'); break;
+      case 'ranch': this.enterInterior('ranch'); break;
+      case 'sleep': this.enterInterior('home'); break;
+      case 'talk_rhea': this.enterInterior('tavern'); break;
+      case 'barracks': this.enterInterior('barracks'); break;
       default: this.showToast(b.label);
     }
   }
@@ -2633,7 +2875,8 @@ rations, and your name on the manifest.
       },
     });
     // Wake up still in bed (interior) — player stays where they slept.
-    if (this.intPlayer) this.intPlayer.setPosition(this.intBed.x + 10, this.intBed.y + 24);
+    const bedPt = (this.intPoints || []).find(p => p.action === 'sleep');
+    if (this.intPlayer && bedPt) this.intPlayer.setPosition(bedPt.x + 10, bedPt.y + 24);
   }
 
   // ── farm actions ──
@@ -2706,9 +2949,10 @@ rations, and your name on the manifest.
         const tillCost = this._energyCost('till', 5);   // hoe tier scales the till
         s.type = 'tilled';
         this._burnEnergy(tillCost);
-        ft.img.setTexture('tile.tilled');
+        ft.img.setTexture(tex('farm.tilled'));
         const netTill = window.SpaceFarmer.net;
         if (netTill && netTill.connected) netTill.send('till', { tileX: s.x, tileY: s.y });
+        this._swingTool();                            // the hoe swings as it tills
         this._tileFX(s.x, s.y, 'till');               // dust rings off the hoe
         if (this.audio) this.audio.sfx('bounce');
         this.showToast('Tilled the cosmic soil');
@@ -2736,6 +2980,7 @@ rations, and your name on the manifest.
           this._burnEnergy(wcost);
           const net2 = window.SpaceFarmer.net;
           if (net2 && net2.connected) net2.send('water', { tileX: s.x, tileY: s.y });
+          this._swingTool();                          // the can tips as it waters
           this._tileFX(s.x, s.y, 'water');            // a dew-ring on the shoot
           if (this.audio) this.audio.sfx('glow');
           this.showToast('Watered with stardust dew');
@@ -2755,7 +3000,7 @@ rations, and your name on the manifest.
         if (cs.regrow) {
           // continuous crop stays planted & regrows (needs watering again)
           s.type = 'growing'; s.growth = 0; s.watered = false; s.crop = s.crop;
-          ft.img.setTexture('tile.growing');
+          ft.img.setTexture(tex('farm.growing'));
           const tag = 'it will regrow';
           const net3 = window.SpaceFarmer.net;
           if (net3 && net3.connected) net3.send('harvest', { tileX: s.x, tileY: s.y });
@@ -2763,7 +3008,7 @@ rations, and your name on the manifest.
           this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR — ${tag}`);
         } else {
           s.type = 'empty'; s.crop = ''; s.growth = 0; s.watered = false;
-          ft.img.setTexture(ft.baseKey || 'tile.soil');
+          ft.img.setTexture(ft.baseKey || tex('farm.empty'));
           const net4 = window.SpaceFarmer.net;
           if (net4 && net4.connected) net4.send('harvest', { tileX: s.x, tileY: s.y });
           if (this.audio) this.audio.sfx('harvest', { volume: 0.4 });
@@ -2781,7 +3026,7 @@ rations, and your name on the manifest.
     s.crop = key; s.type = 'seeded';
     this.inventory.seeds--;
     this._burnEnergy(this._energyCost('plant', 5));        // planting is bare-handed
-    ft.img.setTexture('tile.seeded');
+    ft.img.setTexture(tex('farm.seeded'));
     this._tileFX(s.x, s.y, 'plant');                   // a gold glint in the soil
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('plant', { tileX: s.x, tileY: s.y, crop: key });
@@ -2797,7 +3042,7 @@ rations, and your name on the manifest.
     const entries = Object.keys(CROPS);
     const panelW = 360, rowH = 48, headH = 46;
     const totalH = headH + entries.length * rowH + 16;
-    const c = this.add.container(width / 2, height / 2).setDepth(1005);
+    const c = this.add.container(width / 2, height / 2).setDepth(1005).setScrollFactor(0);
     this.cropMenu = c;
     c.add(this.add.rectangle(0, 0, panelW, totalH, 0x0a0a18, 0.96).setStrokeStyle(2, 0x39c5bb));
     c.add(this.add.text(0, -(totalH / 2 - 20), `PLANT · ${SEASON_NAMES[season]} · ${this.inventory.seeds} seeds`, { fontFamily: "system-ui,'Segoe UI'", fontSize: '13px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5));
@@ -2832,13 +3077,13 @@ rations, and your name on the manifest.
       if (s.type === 'seeded' && s.watered) {
         s.growth++;
         s.type = 'growing';
-        ft.img.setTexture('tile.growing');
+        ft.img.setTexture(tex('farm.growing'));
       } else if (s.type === 'growing' && s.watered) {
         s.growth++;
       }
       if (s.growth >= growTo && s.crop) {
         s.type = 'mature';
-        ft.img.setTexture('tile.mature');
+        ft.img.setTexture(tex('farm.mature'));
       }
       s.watered = false;
     }
@@ -2860,14 +3105,14 @@ rations, and your name on the manifest.
       const entries = this.colonyLore();
       const rowH = 64, headRoom = 50, footRoom = 40;
       const H = Math.max(430, entries.length * rowH + headRoom + footRoom);
-      this._codexGroup = this.add.container(width / 2, height / 2).setDepth(985);
+      this._codexGroup = this.add.container(width / 2, height / 2).setDepth(985).setScrollFactor(0);
       const bx = this.add.rectangle(0, 0, 640, H, 0x0c0f1c, 0.95).setStrokeStyle(2, 0x3ec6c0);
       this._codexGroup.add(bx);
       this._codexGroup.add(this.add.text(0, -(H / 2) + 30, story.codex.title, { fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '24px', color: '#7ff0ff', fontStyle: 'bold' }).setOrigin(0.5));
       entries.forEach(([h, b], i) => {
         const y = -(H / 2) + 70 + i * rowH;
         this._codexGroup.add(this.add.text(-280, y, h.toUpperCase(), { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#ffd98a', fontStyle: 'bold' }));
-        this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#c8d6ff', wordWrap: { width: 560 }, lineSpacing: 4 }));
+        this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#c8d6ff', wordWrap: { enable: true, width: 560 }, lineSpacing: 4 }));
       });
       this._codexGroup.add(this.add.text(0, H / 2 - 22, story.codex.closeHint, { fontFamily: 'system-ui, sans-serif', fontSize: '10px', color: '#8a90b0' }).setOrigin(0.5));
     }
@@ -2896,11 +3141,29 @@ rations, and your name on the manifest.
     this.showToast?.(`DAY ${this.dayCount} :: ${line}`, { duration: 4200, y: 120 });
   }
 
+  // ── Cinematic letterbox: slide the black bars in/out so a cutscene opens and
+  //    closes like a film, not a toggle. ──
+  _cinema(on) {
+    if (!this.cinemaTop || !this.cinemaBottom) return;
+    const dur = 420;
+    const h = this.game.config.height;
+    if (on) {
+      this.cinemaTop.setVisible(true).setY(-34);
+      this.cinemaBottom.setVisible(true).setY(h + 34);
+      this.tweens.add({ targets: this.cinemaTop, y: 34, duration: dur, ease: 'Cubic.easeOut' });
+      this.tweens.add({ targets: this.cinemaBottom, y: h - 34, duration: dur, ease: 'Cubic.easeOut' });
+    } else {
+      this.tweens.killTweensOf([this.cinemaTop, this.cinemaBottom]);
+      this.tweens.add({ targets: this.cinemaTop, y: -34, duration: dur, ease: 'Cubic.easeIn', onComplete: () => this.cinemaTop.setVisible(false) });
+      this.tweens.add({ targets: this.cinemaBottom, y: h + 34, duration: dur, ease: 'Cubic.easeIn', onComplete: () => this.cinemaBottom.setVisible(false) });
+    }
+  }
+
   // ── First contact: cinematic arrival, ambiguous council, persistent aftermath ──
   startAlienContact(alien) {
     this.closeAllPanels();
     this.selectedAlien = alien; this.inAlienContact = true;
-    this.cinemaTop.setVisible(true); this.cinemaBottom.setVisible(true);
+    this._cinema(true);
     const prior = this.contactChoices[alien.scenarioId];
     if (prior) { this.showContactCouncil(alien, prior); return; }
     this.contactPhase = "arrival";
@@ -3035,6 +3298,7 @@ rations, and your name on the manifest.
     ];
     this.eventQueue = heartLines;
     this.eventIdx = 0;
+    this._cinema(true);                     // cinematic letterbox for the payoff
     this._renderEventLine(threshold);
     // heart-event jingle
     if (this.audio) this.audio.sfx('romance', { volume: 0.5 });
@@ -3056,6 +3320,7 @@ rations, and your name on the manifest.
     } else {
       this.eventQueue = null;
       this.eventIdx = 0;
+      this._cinema(false);                      // close the letterbox
       this.startNPCDialogue(this.selectedNPC);  // return to normal dialogue
     }
   }
@@ -3147,8 +3412,7 @@ rations, and your name on the manifest.
     this._diaDone = true;
     this.gePanel.setVisible(false);
     if (this.contactPanel) this.contactPanel.setVisible(false);
-    if (this.cinemaTop) this.cinemaTop.setVisible(false);
-    if (this.cinemaBottom) this.cinemaBottom.setVisible(false);
+    this._cinema(false);
     this.shopPanel.setVisible(false);
     this.ranchPanel.setVisible(false);
     this.chestPanel.setVisible(false);
@@ -3440,7 +3704,7 @@ rations, and your name on the manifest.
     const parts = Object.keys(inv).filter(k => (inv[k] || 0) > 0).map(k => `${ITEM_LABEL[k] || k} ×${inv[k]}`);
     const cargo = this.add.text(0, 152, 'CARGO  ·  ' + (parts.length ? parts.join('   ') : 'empty — plant a field!'), {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae',
-      align: 'center', wordWrap: { width: 440 },
+      align: 'center', wordWrap: { enable: true, width: 440 },
     }).setOrigin(0.5, 0);
     this.backpackPanel.add(cargo);
     this._backpackDynamic.push(cargo);
@@ -3540,8 +3804,13 @@ rations, and your name on the manifest.
     this.nightOverlay.setAlpha(this.isNight ? 0.46 : 0);
     if (this.nightAmbient) this.nightAmbient.setVisible(this.isNight);
     if (this.vignette) this.vignette.setAlpha(this.isNight ? 0.34 : 0.8); // no double-dark corners
-    for (const g of this.glowRegistry) g.setVisible(this.isNight); // incl. character rim-lights
+    // QA 0904 2.5: glows split by the learnable window-light rule — commercial
+    // facades ('day' = open for business) glow through daylight, residential
+    // ones ('night' = someone home) only after dark. Character rim-lights stay
+    // night-only (they live in glowRegistry without a litWhen tag).
+    for (const g of this.glowRegistry) g.setVisible(this.isNight ? g.litWhen !== 'day' : g.litWhen === 'day');
     for (const l of this.lampGlows) l.setVisible(this.isNight);
+    for (const l of this.lampGlows) l.setScale(this.isNight ? 1.7 : 1.0); // lamps bloom bigger at night
     // Task 4: ground light pools switch with the day cycle; their flicker
     // animates in update() (alpha wobble) so lamps feel like real lamps.
     for (const p of this.lightPools) {
@@ -3550,7 +3819,7 @@ rations, and your name on the manifest.
     }
     // buildings LIGHT UP at night — their windows/doors/signs are the world's
     // readable landmarks after dark, so push the glows bigger than day-size
-    for (const g of this.buildingGlows) g.setScale(this.isNight ? 1.5 : 1.0);
+    for (const g of this.buildingGlows) g.setScale(this.isNight ? 1.8 : 1.0);
   }
 }
 

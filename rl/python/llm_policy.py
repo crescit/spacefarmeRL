@@ -357,7 +357,10 @@ class ToolDialogPolicy(OpenAIActionPolicy):
                 "model": self.model,
                 "messages": messages,
                 "temperature": 0,
-                "max_tokens": self.max_output_tokens if self.thinking and attempt == 0 else 96,
+                # Always a generous budget: thinking models emit reasoning first,
+                # so a small max_tokens truncates the tool_call away (finish:
+                # length → we'd wrongly fall back to advance_day).
+                "max_tokens": self.max_output_tokens,
                 "tools": self.tools or None,
                 "tool_choice": "auto",
             }

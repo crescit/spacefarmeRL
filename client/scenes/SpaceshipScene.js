@@ -72,22 +72,24 @@ const SHIP_MAP = [
 ];
 
 // Tile type definitions for the spaceship (new texture registry keys)
+import { tex, resolveKey } from '../systems/AssetTheme.js';
+
 const TILE_TYPES = {
-  0: { tex: 'ship.floor', color: 0xdcc090 },
-  1: { tex: 'ship.wall', color: 0x5a6e6e },
-  2: { tex: 'ship.cryopod', color: 0xaaccaa },
-  3: { tex: 'ship.console', color: 0xaad286 },
-  4: { tex: 'ship.planter', color: 0x5c4a1e },
-  5: { tex: 'ship.door', color: 0xff6b6b },
-  6: { tex: 'ship.airlock', color: 0x82aaac },
+  0: { tex: () => tex('ship.floor'), color: 0xdcc090 },
+  1: { tex: () => tex('ship.wall'), color: 0x5a6e6e },
+  2: { tex: () => tex('ship.cryopod'), color: 0xaaccaa },
+  3: { tex: () => tex('ship.console'), color: 0xaad286 },
+  4: { tex: () => tex('ship.planter'), color: 0x5c4a1e },
+  5: { tex: () => tex('ship.door'), color: 0xff6b6b },
+  6: { tex: () => tex('ship.airlock'), color: 0x82aaac },
 };
 
 // Player texture keys
-const PLAYER_TEX_FRONT = 'player.front';
-const PLAYER_TEX_BACK = 'player.back';
-const PLAYER_TEX_LEFT = 'player.left';
-const PLAYER_TEX_RIGHT = 'player.right';
-const FARM_TEX = { soil: 'tile.soil', tilled: 'tile.tilled', seeded: 'tile.seeded', growing: 'tile.growing', mature: 'tile.mature', empty: 'ship.floor' };
+const PLAYER_TEX_FRONT = () => tex('player.front');
+const PLAYER_TEX_BACK = () => tex('player.back');
+const PLAYER_TEX_LEFT = () => tex('player.left');
+const PLAYER_TEX_RIGHT = () => tex('player.right');
+const FARM_TEX = { soil: () => tex('farm.empty'), tilled: () => tex('farm.tilled'), seeded: () => tex('farm.seeded'), growing: () => tex('farm.growing'), mature: () => tex('farm.mature'), empty: () => tex('ship.floor') };
 
 // NPC dialogue data
 const NPC_DIALOGUES = {
@@ -179,7 +181,7 @@ class SpaceshipScene extends Phaser.Scene {
         const idx = y * MAP_W + x;
         const val = this.mapData[idx];
         const tileInfo = TILE_TYPES[val] || TILE_TYPES[0];
-        const texKey = tileInfo.tex;
+        const texKey = tileInfo.tex();
         const spr = this.add.image(
           x * TILE_SIZE + TILE_SIZE / 2,
           y * TILE_SIZE + TILE_SIZE / 2,
@@ -191,25 +193,33 @@ class SpaceshipScene extends Phaser.Scene {
     }
 
     // ── Player (pixel art) ──
-    this.playerSpr = this.add.image(TILE_SIZE * 4 + TILE_SIZE / 2, TILE_SIZE * 6 + TILE_SIZE / 2, PLAYER_TEX_FRONT);
+    this.playerSpr = this.add.image(TILE_SIZE * 4 + TILE_SIZE / 2, TILE_SIZE * 6 + TILE_SIZE / 2, PLAYER_TEX_FRONT());
+    this.playerSpr.setDepth(2);
     this.playerSpeed = 6;
     this.playerDir = 'front';
+    // soft cast shadow under the player — grounds them in the lit interior
+    this.playerShadow = this.add.image(this.playerSpr.x, this.playerSpr.y + 30, tex('fx.shadow'))
+      .setScale(1.5).setDepth(1).setAlpha(0.9);
+    // held tool — the equipped kit drawn beside the player (swung on use), so
+    // the tutorial teaches "equip → it appears in hand → press to use it".
+    this.toolSpr = this.add.image(this.playerSpr.x, this.playerSpr.y, tex('tool.hoe'))
+      .setVisible(false).setDepth(220);
 
     // ── Camera: zoom in on the action so sprites read clearly (2000s JRPG) ──
     this.cam = this.cameras.main;
     this.cam.setZoom(1.0);
     // follow the player smoothly so the interior stays navigable
-    this.camTarget = this.add.image(this.playerSpr.x, this.playerSpr.y, PLAYER_TEX_FRONT).setVisible(false);
+    this.camTarget = this.add.image(this.playerSpr.x, this.playerSpr.y, PLAYER_TEX_FRONT()).setVisible(false);
     this.cam.startFollow(this.camTarget, false, 0.12, 0.12);
     this.cam.setBounds(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE);
     // counter the zoom so the full-screen dialogue/HUD aren't scaled up
     // (HUD/text created later will use setScrollFactor(0) to stay fixed)
 
     // ── Cinematic depth: vignette frames the interior; a starfield porthole on the hull ──
-    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, 'fx.vignette')
+    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.vignette'))
       .setDepth(960).setScrollFactor(0);
-    this.porthole = this.add.image(696, 184, 'ship.porthole').setDepth(210).setScale(1.6);
-    this.warmGlow = this.add.image(704, 256, 'fx.lamp_glow').setDepth(150)
+    this.porthole = this.add.image(696, 184, tex('ship.porthole')).setDepth(210).setScale(1.6);
+    this.warmGlow = this.add.image(704, 256, tex('fx.lampGlow')).setDepth(150)
       .setScale(2.4).setAlpha(0.22).setBlendMode(Phaser.BlendModes.ADD);
     // living porthole — a drift of stars behind the glass, twinkle + parallax
     this.portholeStars = [];
@@ -226,10 +236,31 @@ class SpaceshipScene extends Phaser.Scene {
       this.portholeStars.push(st);
     }
     // cryo-pod + bridge console breathe softly (the ship is alive, not a diorama)
-    this.consoleGlow = this.add.image(40 * TILE_SIZE + TILE_SIZE / 2, 4 * TILE_SIZE + 12, 'fx.lamp_glow')
+    this.consoleGlow = this.add.image(40 * TILE_SIZE + TILE_SIZE / 2, 4 * TILE_SIZE + 12, tex('fx.lampGlow'))
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(1.1).setAlpha(0.18);
-    this.cryoGlow = this.add.image(12 * TILE_SIZE + TILE_SIZE / 2, 8 * TILE_SIZE + 14, 'fx.lamp_glow')
+    this.cryoGlow = this.add.image(12 * TILE_SIZE + TILE_SIZE / 2, 8 * TILE_SIZE + 14, tex('fx.lampGlow'))
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(205).setScale(0.95).setAlpha(0.14);
+    // warm interior lighting — the deck is lit from the ceiling, so the ship
+    // reads as a warm habitat, not a cold sterile grid.
+    // QA fix: a MULTIPLY amber at 0.25 only DARKENED the slate (multiply can't
+    // add warmth, it subtracts) — that is why "the warm tone did not land".
+    // Same filmic grade the planet uses and it works there: SOFT_LIGHT amber
+    // wash pushes the midtones toward the fixture colour instead of crushing it,
+    // plus a faint ADD sheen so blacks stay open.
+    this.shipAmbient = this.add.rectangle(width / 2, height / 2, width, height, 0xffb46a, 0)
+      .setBlendMode(Phaser.BlendModes.SOFT_LIGHT).setDepth(190).setAlpha(0.34);
+    this.shipSheen = this.add.rectangle(width / 2, height / 2, width, height, 0xffd9a0, 0)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(189).setAlpha(0.05);
+    // warm ceiling light pools so the deck reads lit-from-above, not uniformly cold
+    [[0.28, 0.30], [0.62, 0.62], [0.78, 0.34]].forEach(([fx, fy], i) => {
+      const p = this.add.image(width * fx, height * fy, tex('fx.poolWarm'))
+        .setBlendMode(Phaser.BlendModes.ADD).setDepth(188).setAlpha(0.14)
+        .setScale(1.6 + i * 0.15, 1.0);
+      void p;
+    });
+    // soft cool lift in the corners (ambient occlusion feel — corners fall back)
+    this.shipVignetteCool = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.vignette'))
+      .setDepth(191).setAlpha(0.5).setScrollFactor(0);
 
     // ── Bunk (your bed) — warm PX banner + label, sleep to end the day ──
     const bunkX = 22, bunkY = 4;
@@ -264,7 +295,7 @@ class SpaceshipScene extends Phaser.Scene {
     this.edgeArrow = this.add.graphics().setScrollFactor(0).setDepth(990);
 
     // ── Our little guide droid (BEEP) — flies ahead and shows you what's next ──
-    this.droid = this.add.image(this.playerSpr.x + 22, this.playerSpr.y, 'ship.droid')
+    this.droid = this.add.image(this.playerSpr.x + 22, this.playerSpr.y, tex('ship.droid'))
         .setDepth(220);
     this.droidCue = this.add.text(0, 0, '', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 })
         .setOrigin(0.5).setDepth(221);
@@ -544,6 +575,20 @@ class SpaceshipScene extends Phaser.Scene {
     const moving = !!(this.touchDir || this.moveIntent);
     const f = moving ? Math.floor(time / 120) % 3 : 0;
     this.playerSpr.setTexture(`player.${this.playerDir}_${f}`);
+    // held tool follows the player, tucked to the facing side
+    if (this.toolSpr) {
+      const e = this.equipped || '';
+      this.toolSpr.setVisible(!!e);
+      if (e) {
+        this.toolSpr.setTexture(tex(`tool.${e}`));
+        const dx = this.playerDir === 'left' ? -1 : this.playerDir === 'right' ? 1 : 0;
+        const dy = this.playerDir === 'back' ? -1 : (this.playerDir === 'front' ? 1 : 0);
+        this.toolSpr.setPosition(this.playerSpr.x + dx * 13, this.playerSpr.y + dy * 11 - 4);
+        this.toolSpr.setDepth(this.playerSpr.depth + 1);
+        this.toolSpr.setFlipX(dx < 0);
+        this.toolSpr.setScale(1);
+      }
+    }
 
     // living porthole: stars drift, twinkle, and slide in parallax
     if (this.portholeStars) {
@@ -572,7 +617,7 @@ class SpaceshipScene extends Phaser.Scene {
       const val = this.mapData[i];
       const tileInfo = TILE_TYPES[val] || TILE_TYPES[0];
       // planters (val 4) are handled below; give them a base for now
-      const texKey = val === 4 ? 'ship.floor' : tileInfo.tex;
+      const texKey = val === 4 ? tex('ship.floor') : tileInfo.tex();
       spr.setTexture(texKey);
     }
 
@@ -581,7 +626,7 @@ class SpaceshipScene extends Phaser.Scene {
       const idx = p.y * MAP_W + p.x;
       const spr = this.tileSprites[idx];
       if (!spr) continue;
-      spr.setTexture(FARM_TEX[p.state] || 'tile.soil');
+      spr.setTexture((FARM_TEX[p.state] || FARM_TEX.soil)());
       // sway the living crop — growing/mature plants breathe
       const baseY = p.y * TILE_SIZE + TILE_SIZE / 2;
       const sway = (p.state === 'growing' || p.state === 'mature') ? Math.sin(time * 0.004 + p.x * 0.7) * 1.6 : 0;
@@ -711,7 +756,10 @@ class SpaceshipScene extends Phaser.Scene {
     if (tool && !this.tools[tool]) { this._cueText(`You don't own that tool yet.`); return; }
     this.equipped = tool;
     if (tool === '') { this._cueText('Hands free — harvest & interact.'); }
-    else { this._cueText(`Equipped ${SHIP_KIT[tool].label}.`); }
+    else {
+      this._cueText(`Equipped ${SHIP_KIT[tool].label}.`);
+      this._popToolCard(tool);
+    }
     if (!this.checks.equip) {
       this.checks.equip = true;   // tracker line flips once you've used the menu
     }
@@ -751,7 +799,7 @@ class SpaceshipScene extends Phaser.Scene {
     });
     const foot = this.add.text(0, 150, 'Starter kit — tools are yours. The planet smithy can upgrade them for credits.', {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae', align: 'center',
-      wordWrap: { width: 420 },
+      wordWrap: { enable: true, width: 420 },
     }).setOrigin(0.5);
     this.backpackPanel.add(foot);
     this._backpackDynamic.push(foot);
@@ -802,6 +850,34 @@ class SpaceshipScene extends Phaser.Scene {
     if (best && bestD < 4.5) {
       this._cueText(`Walk closer to the ${best.label}, then press SPACE.`);
     }
+  }
+
+  // pop a tool card above the player — the sprite + label, so the tutorial
+  // teaches "equip → it appears in hand" without a text-only hint
+  _popToolCard(toolId) {
+    if (!this.toolSpr || !this.tools) return;
+    const label = SHIP_KIT[toolId] ? SHIP_KIT[toolId].label : toolId;
+    const card = this.add.container(this.playerSpr.x, this.playerSpr.y - 30).setDepth(230);
+    card.add(this.add.rectangle(0, 0, 58, 24, 0x0d121c, 0.9).setStrokeStyle(1, 0x67e1cd, 0.9));
+    card.add(this.add.image(0, 0, tex(`tool.${toolId}`)).setScale(1.1));
+    card.add(this.add.text(0, 8, label, {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '7px', fontStyle: 'bold',
+      color: '#a8eeff', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5));
+    this.tweens.add({
+      targets: card, y: this.playerSpr.y - 48, alpha: 1, duration: 240, ease: 'Back.easeOut',
+    });
+    this.time.delayedCall(1500, () => {
+      this.tweens.add({ targets: card, y: this.playerSpr.y - 60, alpha: 0, duration: 300, onComplete: () => card.destroy() });
+    });
+  }
+
+  // swing the held tool — a quick raise-and-settle so a press visibly uses it
+  _swingTool() {
+    if (!this.toolSpr || !this.toolSpr.visible) return;
+    this.tweens.killTweensOf(this.toolSpr);
+    this.toolSpr.setAngle(-34);
+    this.tweens.add({ targets: this.toolSpr, angle: 0, duration: 130, ease: 'Back.easeOut' });
   }
 
   // one-shot droid hint bubble that fades (does not clobber the guidance marker)
@@ -933,7 +1009,7 @@ class SpaceshipScene extends Phaser.Scene {
   // a labelled, glowing signpost so every interactable reads as a "building"
   _buildPOIBadge(p) {
     const wx = p.x * TILE_SIZE, wy = p.y * TILE_SIZE;
-    const glow = this.add.image(wx, wy, 'fx.lamp_glow')
+    const glow = this.add.image(wx, wy, tex('fx.lampGlow'))
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(206).setScale(1.05).setAlpha(0.13);
     const badge = { id: p.id, glow, phase: Math.random() * Math.PI * 2 };
     if (p.noLabel) return badge;
@@ -964,6 +1040,7 @@ class SpaceshipScene extends Phaser.Scene {
           return;
         }
         planter.state = 'tilled';
+        this._swingTool();
         this.showDialogue(['[C.O.R.A.]: Tilled the soil. Press SPACE again to plant a seed.']);
         break;
       case 'tilled':
@@ -986,6 +1063,7 @@ class SpaceshipScene extends Phaser.Scene {
         this.waterLevel = Math.max(0, this.waterLevel - SHIP_WATER_COST);
         planter.watered = true;
         planter.state = 'growing';
+        this._swingTool();
         this.showDialogue(['[C.O.R.A.]: Watered! The crop will grow overnight. Sleep to advance the day.']);
         if (!this.checks.plant) {
           this.checks.plant = true;
@@ -1033,6 +1111,7 @@ class SpaceshipScene extends Phaser.Scene {
     const reward = Math.floor(Math.random() * 50) + 50;
     this.credits += reward;
     this.bridgeConsole.mined = true;
+    this._swingTool();
     this.showDialogue([`[Console]: Asteroid mined with the pickaxe! +${reward} credits. Total: ${this.credits} cr.`]);
     if (!this.checks.power) {
       this.checks.power = true;

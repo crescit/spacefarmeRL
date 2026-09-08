@@ -83,7 +83,7 @@ export class DialoguePanel {
     this.text = scene.add.text(textX, textTopY, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
       fontSize: opts.fontSize || '12px', color: '#e8ecff',
-      wordWrap: { width: wrapW }, lineSpacing: 6, align: 'left',
+      wordWrap: { enable: true, width: wrapW }, lineSpacing: 6, align: 'left',
     }).setOrigin(0, 0).setDepth(1001).setVisible(false);
 
     const cTop = opts.clipTop ?? (boxT + 26);
@@ -149,7 +149,8 @@ export class DialoguePanel {
     this.text.setVisible(true);
     this.title.setVisible(true);
     if (this.portrait) { this.portrait.setVisible(true); if (this.portraitPlate) this.portraitPlate.setVisible(true); }
-    if (title !== undefined) this.title.setText(title);
+    if (title !== undefined && title !== null && String(title).trim()) this.title.setText(title);
+    else this.title.setText('');
     if (footer !== undefined) this.hint.setText(footer).setColor('#8a90b0').setVisible(true);
     else this.hint.setVisible(false);
     this.collapseBtn.setVisible(true);

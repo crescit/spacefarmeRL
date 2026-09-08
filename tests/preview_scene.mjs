@@ -24,8 +24,12 @@ const toScreenY = wy => (worldY + wy - camTop) * ZOOM;
 const GROUND_TEX = {
   grass_a: 'tile.grass_a', grass_b: 'tile.grass_b', grass_c: 'tile.grass_c',
   grass_d: 'tile.grass_d', grass_e: 'tile.grass_e', grass_f: 'tile.grass_f',
-  path: 'tile.path', water: 'tile.water', soil: 'tile.soil',
+  path: 'tile.path', plaza: 'tile.plaza',
+  water: 'tile.water', water2: 'tile.water2', water3: 'tile.water3',
+  wet_sand: 'tile.wet_sand',
+  soil: 'tile.soil',
   soil_b: 'tile.soil_b',
+  sand: 'tile.sand', cliff: 'tile.cliff', forest: 'tile.forest',
 };
 const DECOR_TEX = {
   'decor.lamp': SS.TEXTURES['decor.lamp'], 'decor.planter': SS.TEXTURES['decor.planter'],
@@ -34,6 +38,10 @@ const DECOR_TEX = {
   'decor.tree_leaf': SS.TEXTURES['decor.tree_leaf'],
   'decor.tree_bloom': SS.TEXTURES['decor.tree_bloom'],
   'decor.pond': SS.TEXTURES['decor.pond'],
+  'decor.colony_solar': SS.TEXTURES['decor.colony_solar'],
+  'decor.colony_antenna': SS.TEXTURES['decor.colony_antenna'],
+  'decor.colony_crate': SS.TEXTURES['decor.colony_crate'],
+  'decor.colony_holosign': SS.TEXTURES['decor.colony_holosign'],
 };
 const NEB = SS.makeNebula();
 const SKY = SS.makeSky();
@@ -88,7 +96,13 @@ function makeFrame(night) {
   for (let i = 0; i < 150; i++) { const x = Math.floor(rnd() * W), y = Math.floor(rnd() * H); put(x, y, [220, 225, 255]); }
 
   // 2. ground (world-space, zoomed)
-  for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) blitW(SS.TEXTURES[GROUND_TEX[ground[y][x]] || 'tile.grass_a'], x * T, y * T);
+  for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
+    const gv = ground[y][x];
+    // mirror the game's per-position caustic family pick so the sheet shows the
+    // lake's real texture structure, not one repeated tile
+    const key = gv === 'water' ? ['tile.water', 'tile.water2', 'tile.water3'][(x * 3 + y * 7) % 3] : GROUND_TEX[gv] || 'tile.grass_a';
+    blitW(SS.TEXTURES[key], x * T, y * T);
+  }
 
   // 2b. cast shadows — Phase 1 lighting: soft directional ellipses under buildings & natural decor
   const softEll = (wx, wy, wpx, hpx, strength) => {

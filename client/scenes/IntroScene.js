@@ -5,6 +5,7 @@
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { story } from '../systems/StoryService.js';
+import { tex } from '../systems/AssetTheme.js';
 
 // The opening crawl and title-card copy live in the StoryBank
 // (shared/story/intro.js) — the ONLY source for these words. We render
@@ -28,29 +29,49 @@ class IntroScene extends Phaser.Scene {
     this.touchCtrl.build();
 
     // ── Backdrop: nebula tile + planet + twinkling stars ──
-    this.nebula = this.add.tileSprite(width / 2, height / 2, width, height, 'fx.nebula');
-    this.planet = this.add.image(width - 170, height - 190, 'fx.planet');
-    this.planet2 = this.add.image(120, 150, 'fx.planet').setScale(0.55).setAlpha(0.6).setFlipX(true);
+    this.nebula = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.nebula'));
+    this.planet = this.add.image(width - 170, height - 190, tex('fx.planet'));
+    this.planet2 = this.add.image(120, 150, tex('fx.planet')).setScale(0.55).setAlpha(0.6).setFlipX(true);
 
+    // QA 0904 8.4: one flat star dusting read as soft speckle over the nebula.
+    // The field is now THREE parallax layers — far dust (tiny, slow), a mid
+    // band, and near pinwheels (big, fast) — each its own graphics object so
+    // the update() drift gives real depth, plus a denser band streak that
+    // reads as the galaxy's plane, not random noise.
+    this.starLayers = [
+      { n: 140, sizeMax: 1, alphaMax: 0.5, speed: 0.012, gfx: this.add.graphics() },
+      { n: 90, sizeMax: 2, alphaMax: 0.75, speed: 0.028, gfx: this.add.graphics() },
+      { n: 46, sizeMax: 3, alphaMax: 1.0, speed: 0.055, gfx: this.add.graphics() },
+    ];
     this.stars = [];
-    for (let i = 0; i < 180; i++) {
-      this.stars.push({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        size: Math.floor(Math.random() * 3) + 1,
-        alpha: Math.random() * 0.5 + 0.5,
-        twinkleSpeed: Math.random() * 0.03 + 0.01,
-        phase: Math.random() * Math.PI * 2,
-      });
-    }
-    this.starGraphics = this.add.graphics();
+    this.starLayers.forEach((L, li) => {
+      for (let i = 0; i < L.n; i++) {
+        // the mid layer concentrates a denser galactic band across the upper
+        // third so the backdrop has a readable plane, not uniform confetti
+        const bandy = li === 1 && Math.random() < 0.55
+          ? height * 0.14 + Math.random() * height * 0.26
+          : Math.random() * height;
+        this.stars.push({
+          layer: li,
+          x: Math.random() * width,
+          y: bandy,
+          size: Math.floor(Math.random() * L.sizeMax) + 1,
+          alpha: Math.random() * L.alphaMax * 0.6 + L.alphaMax * 0.4,
+          twinkleSpeed: Math.random() * 0.03 + 0.01,
+          phase: Math.random() * Math.PI * 2,
+        });
+      }
+    });
     this.drawStarfield();
 
     // ── Cinematic depth: CRT scanlines + soft vignette + homeworld in the void
-    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, 'fx.vignette')
+    this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.vignette'))
       .setDepth(950).setAlpha(0.7);
-    this.asteroid = this.add.image(width - 210, height - 150, 'fx.asteroid')
+    this.asteroid = this.add.image(width - 210, height - 150, tex('fx.asteroid'))
       .setDepth(940).setScale(0.85).setAlpha(0.9);
+    // the guide droid (BEEP) drifts across the void as a cameo — a thread from
+    // the crawl into the tutorial, so the ship's little guide is never a stranger
+    this.introDroid = this.add.image(120, 300, tex('ship.droid')).setDepth(945).setScale(1.3).setAlpha(0.9);
 
     // ── Title card (hidden until the crawl finishes) ──
     this.titleCard = this.add.container(width / 2, height / 2).setVisible(false);
@@ -59,10 +80,15 @@ class IntroScene extends Phaser.Scene {
     orbit.lineStyle(2, 0xf2bd68, 0.5).beginPath().arc(0, -116, 155, 2.8, 4.7).strokePath();
     const titlePlate = this.add.rectangle(0, 36, Math.min(620, width * 0.78), 190, 0x071a20, 0.8)
       .setStrokeStyle(1, 0x67e1cd, 0.5);
-    this.houseImg = this.add.image(0, -150, 'bld.house').setScale(2.2);
-    this.houseGlow = this.add.image(0, -120, 'bld.house_glow').setBlendMode(Phaser.BlendModes.ADD).setScale(2.2).setAlpha(0.8);
+    this.houseImg = this.add.image(0, -150, tex('bld.house')).setScale(2.2);
+    this.houseGlow = this.add.image(0, -120, tex('bld.houseGlow')).setBlendMode(Phaser.BlendModes.ADD).setScale(2.2).setAlpha(0.8);
+    // QA 0904 8.2 legibility: the eyebrow/subtitle at 10/13px over the busy
+    // starfield washed out. Both stepped up a size, got a firmer stroke, and
+    // the plate they sit on went more opaque — small glyph copy has to survive
+    // a bright backdrop, not ask permission from it.
     const eyebrow = this.add.text(0, -28, story.intro.eyebrow, {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold', color: '#83c6ba',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', fontStyle: 'bold', color: '#9fd9cd',
+      stroke: '#04161b', strokeThickness: 4,
     }).setOrigin(0.5);
     this.titleText = this.add.text(0, 22, story.intro.title, {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '48px', fontStyle: 'bold', color: '#f7d698',
@@ -70,8 +96,8 @@ class IntroScene extends Phaser.Scene {
     }).setOrigin(0.5);
     const rule = this.add.rectangle(0, 66, 190, 2, 0x67e1cd, 0.7);
     this.subtitle = this.add.text(0, 89, story.intro.subtitle, {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '13px', color: '#c6e8df',
-      stroke: '#061116', strokeThickness: 3,
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '15px', color: '#dcf3ec',
+      stroke: '#041115', strokeThickness: 4,
     }).setOrigin(0.5);
     this.pressStart = this.add.text(0, 142, story.intro.pressStart, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', fontStyle: 'bold', color: '#f7d698',
@@ -215,27 +241,44 @@ class IntroScene extends Phaser.Scene {
 
   drawStarfield() {
     const { width, height } = this.game.config;
-    this.starGraphics.clear();
-    // (nebula tile sits behind this graphics object — only draw stars)
+    for (const L of this.starLayers) L.gfx.clear();
+    // (nebula tile sits behind these graphics objects — only draw stars)
     for (const s of this.stars) {
+      const L = this.starLayers[s.layer];
       const twinkle = 0.3 + Math.abs(Math.sin(s.phase + s.twinkleSpeed * this.time.now)) * 0.7;
       const alpha = s.alpha * twinkle;
       const brightness = Math.floor(alpha * 255);
       const color = (brightness << 16) | (brightness << 8) | brightness;
-      this.starGraphics.fillStyle(color, alpha);
-      this.starGraphics.fillRect(s.x, s.y, s.size, s.size);
+      L.gfx.fillStyle(color, alpha);
+      L.gfx.fillRect(s.x, s.y, s.size, s.size);
     }
   }
 
   update() {
-    // gentle parallax drift on the backdrop
+    // gentle parallax drift on the backdrop — each star layer drifts at its
+    // own rate (QA 0904 8.4: depth comes from the RELATIVE drift speeds)
     this.nebula.tilePositionX -= 0.02;
     this.nebula.tilePositionY -= 0.006;
+    if (this.starLayers) {
+      for (const L of this.starLayers) {
+        L.gfx.x -= L.speed;
+        if (L.gfx.x < -this.game.config.width) L.gfx.x += this.game.config.width;
+      }
+    }
     if (this.planet) this.planet.y += Math.sin(this.time.now * 0.0003) * 0.05;
     // the asteroid slowly tumbles through the void (rotation + bob)
     if (this.asteroid) {
       this.asteroid.rotation = Math.sin(this.time.now * 0.00018) * 0.07;
       this.asteroid.y += Math.sin(this.time.now * 0.0004) * 0.06;
+    }
+    // the droid drifts slowly across the nebula, bobbing and swaying like a
+    // little probe — a living detail behind the crawl text
+    if (this.introDroid) {
+      const { width } = this.game.config;
+      this.introDroid.x += 0.22;
+      this.introDroid.y = 300 + Math.sin(this.time.now * 0.0008) * 9;
+      this.introDroid.rotation = Math.sin(this.time.now * 0.0005) * 0.16;
+      if (this.introDroid.x > width + 40) this.introDroid.x = -40;
     }
     this.drawStarfield();
   }

@@ -42,7 +42,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timesteps", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--horizon-days", type=int, default=12)
+    parser.add_argument("--horizon-days", type=int, default=None,
+                        help="Episode length in days. Default: one season (Node's seasonDays).")
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--output", type=Path, default=Path("artifacts/ppo"))
     parser.add_argument("--check-env", action="store_true")
@@ -90,7 +91,7 @@ def main() -> None:
         "algorithm": "MaskablePPO",
         "seed": args.seed,
         "timesteps": args.timesteps,
-        "horizon_days": args.horizon_days,
+        "horizon_days": env.horizon_days,
         "model": str(model_path.with_suffix(".zip")),
     })
     metrics_path = args.output / "metrics.json"
