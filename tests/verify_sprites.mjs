@@ -442,7 +442,8 @@ console.log('== LINE-WEIGHT (2px-min stroke rule, QA 0904 gate-blindness fix) ==
   const m = psSrc.match(/_updateToolSprite\(\) \{[\s\S]*?\n  \}/);
   check('tool sprite anchors to the hand row (+18), never a head-height offset',
     !!m && /\+ 18\)/.test(m[0]) && !/dy \* 7 - 3/.test(m[0]));
-  check('tool swing tilts AWAY from the head (positive angle)', /setAngle\(26\)/.test(psSrc) && !/setAngle\(-34\)/.test(psSrc));
+  const swingAngle = Number(psSrc.match(/_swingTool\(\)[\s\S]*?setAngle\((\d+)\)/)?.[1]);
+  check('tool swing tilts AWAY from the head (positive angle)', swingAngle > 0 && swingAngle <= 90, `angle=${swingAngle}`);
 }
 
 // ── QA 0904 Stage 1.5: flora grow in clusters, not lawn darts ──

@@ -324,7 +324,7 @@ def build_result(
         },
         "model": {
             "name": policy.model, "base_url": policy.base_url,
-            "reasoning_effort": getattr(policy, "reasoning_effort", "low"),
+            "reasoning_effort": getattr(policy, "reasoning_effort", "max"),
             "thinking": getattr(policy, "thinking", False),
             "max_output_tokens": getattr(policy, "max_output_tokens", 512),
             "policy_retries": getattr(policy, "retries", 1),
@@ -459,13 +459,13 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=30.0, help="request timeout in seconds")
     parser.add_argument(
         "--reasoning-effort", choices=("low", "medium", "high", "max", "xhigh"),
-        default="low", help="reasoning effort sent to the chat template",
+        default="max", help="reasoning effort sent to the chat template",
     )
     parser.add_argument(
         "--thinking", action=argparse.BooleanOptionalAction, default=False,
         help="explicitly enable or disable model thinking",
     )
-    parser.add_argument("--max-output-tokens", type=int, default=512)
+    parser.add_argument("--max-output-tokens", type=int, default=4096)
     parser.add_argument("--policy-retries", type=int, default=1)
     parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument("--seed-start", type=int, default=1)

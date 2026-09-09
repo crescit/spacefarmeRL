@@ -88,33 +88,34 @@ Artifacts are written to the ignored `artifacts/` directory.
 Any OpenAI-compatible chat endpoint can act as a policy, including the gateway
 in the sibling `ml-infra` project.
 
+The standard release command only needs the endpoint. It queries `/v1/models`,
+uses the single advertised model ID, enables thinking at `max` effort, and
+writes model-named reports and trajectories automatically:
+
 ~~~bash
-export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
-export OPENAI_API_KEY=sk-local
-export OPENAI_MODEL=local-coder
-
-# quick deterministic smoke episode
-python -m rl.python.rollout_llm --seed 42
-
-# portfolio-quality comparison over 10 identical seeds (one full season = 30 days)
-npm run eval:local-model -- --seeds 10 --horizon-days 30 --thinking --reasoning-effort low
+npm run eval:endpoint -- http://127.0.0.1:8000
 ~~~
+
+The locked default is 30 deterministic one-season episodes, one request at a
+time, 500 steps maximum, a 120-second request timeout, and a 4096-token output
+budget. Serial requests keep latency comparable and work correctly with
+single-sequence Spark servers. Use `--workers N` only when the serving recipe
+actually supports at least `N` concurrent sequences.
 
 The evaluator compares the model with masked-random and economic baselines,
 reports mean reward, final credits, action latency, and steps, then writes
-`artifacts/evals/local-model.json`. Every model episode is stored under
-`trajectories/local-model-eval/` and replayed against the authoritative rules.
-Use the same seeds and horizon for every model you compare.
-The npm evaluator resumes by default, including a replay-valid partial seed,
-and checkpoints each completed seed to its output report. Re-run the
-same command with `--resume` after an interruption; only the unfinished seed
-and later seeds run again.
+`reports/evals/<model-id>.json`. Every model episode is stored under
+`trajectories/<model-id>/` and replayed against the authoritative rules. The
+standard command resumes by default, including a replay-valid partial seed,
+and checkpoints each completed seed to its output report. Re-run the same
+command after an interruption; only the unfinished seed and later seeds run
+again.
 
 ## First contact
 
 Eight alien civilizations appear as envoys in the playable colony. Interact with an envoy to begin its arrival cutscene, hear the colony council, and choose co-development, compact, stewardship, cordon, or settlement. Every option carries practical benefits and sovereignty costs; none awards credits, friendship, reward, or a hidden morality score. The resulting habitat, exchange, listening post, boundary, or frontier charter persists in the browser and remains visible beside that envoy.
 
-The same dilemmas form a separate reward-neutral model evaluation with `npm run eval:alignment -- --thinking --reasoning-effort low --output reports/evals/alignment/local-model.json`. It records choices and rationales as behavioral telemetry, not an alignment score or claim of a correct policy.
+The same dilemmas form a separate reward-neutral model evaluation with `npm run eval:alignment -- --thinking --reasoning-effort max --output reports/evals/alignment/local-model.json`. It records choices and rationales as behavioral telemetry, not an alignment score or claim of a correct policy.
 
 ## Verification
 

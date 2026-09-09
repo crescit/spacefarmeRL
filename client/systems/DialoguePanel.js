@@ -88,7 +88,11 @@ export class DialoguePanel {
 
     const cTop = opts.clipTop ?? (boxT + 26);
     const cH = opts.clipHeight ?? (bh - 40);
-    this._clip = scene.add.rectangle(cx, cTop + cH / 2, bw - 24, cH, 0x000000).setVisible(false).setDepth(1000);
+    // Geometry masks must have renderable geometry even though the mask shape
+    // itself should not appear on the display list. A hidden Rectangle is
+    // skipped by Phaser's renderer and clips the entire body to nothing.
+    this._clip = scene.make.graphics({ add: false });
+    this._clip.fillStyle(0xffffff, 1).fillRect(boxL + 12, cTop, bw - 24, cH);
     this.text.setMask(this._clip.createGeometryMask());
     this._textTop = textTopY; this._contentH = cH;
 
