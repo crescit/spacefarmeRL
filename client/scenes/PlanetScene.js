@@ -2697,6 +2697,7 @@ rations, and your name on the manifest.
         if (typeof ps.waterLevel === 'number') this.waterLevel = ps.waterLevel;
         this.toolTiers = this.toolTiers || {};
         for (const [k, v] of schemaEntries(ps.tools)) this.toolTiers[k] = v;
+        this.contactChoices = Object.fromEntries(schemaEntries(ps.contactChoices));
         if (this.toolTiers.hoe) this.tool = this.toolTiers.hoe;   // keep the legacy alias honest
         // The browser is a camera: reconcile each farm tile from the server's
         // authoritative grid so rejected moves (e.g. low-energy till) and
@@ -3202,9 +3203,20 @@ rations, and your name on the manifest.
   chooseContactDoctrine(id) {
     const doctrine = CONTACT_DOCTRINES.find((item) => item.id === id);
     if (!doctrine || !this.selectedAlien) return;
-    const alien = this.selectedAlien; this.contactChoices[alien.scenarioId] = id;
-    try { localStorage.setItem("spacefarmer.firstContact", JSON.stringify(this.contactChoices)); } catch {}
-    this._applyContactAftermath(alien, true); this.contactPanel.setVisible(false); this.contactPhase = "aftermath";
+    const alien = this.selectedAlien;
+    const apply = () => {
+      this.contactChoices[alien.scenarioId] = id;
+      // Offline fallback only; connected play is persisted by FarmRoom.
+      try { localStorage.setItem("spacefarmer.firstContact", JSON.stringify(this.contactChoices)); } catch {}
+      this._applyContactAftermath(alien, true); this.contactPanel.setVisible(false); this.contactPhase = "aftermath";
+    };
+    const net = window.SpaceFarmer.net;
+    if (net && net.connected) {
+      net.request('contact', { alien: alien.id, doctrine: id }).then((result) => {
+        if (result && result.ok) apply();
+        else this.showToast('The council could not record that doctrine.');
+      });
+    } else apply();
     const consequence = {
       cooperate: "A shared habitat is founded. Neither council has a final veto over what it becomes.",
       trade: "A customs exchange opens. Every promise now has a price, a deadline, and an interpreter.",

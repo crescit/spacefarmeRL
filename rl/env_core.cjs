@@ -6,12 +6,18 @@
 // a viewer; this file is the product.
 //
 // Actions: {type, ...args} mapping 1:1 to room handlers (no new game logic).
-// Obs: fixed-shape JSON (vector fields + inventory dict + 8x8 farm grid).
+// Obs: lossless live state plus derived fixed-shape vectors and an 8x8 farm grid.
 'use strict';
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-const { FarmRoom, QUESTS, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
+const {
+  FarmRoom, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY,
+  SHOP_PRICES, SELL_PRICES, MINING_INFO, CROP_INFO, FISH_INFO, ANIMALS,
+  PRODUCE_PRICES, RECIPES, NPC_GIFTS, HEART_THRESHOLDS, QUESTS,
+  ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TOOL_ORDER, TOOL_FOR_ACTION,
+  WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE,
+} = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
 // The calendar is a SERVICE with ONE implementation (shared/calendar.js). This
 // env never re-implements season math, crop maturity, growth pacing, or
@@ -44,7 +50,7 @@ const CROP_ID = { '': 0, 'space-wheat': 1, 'star-berry': 2, 'moon-melon': 3, 'pl
 const TOOL_ID = { base: 0, iron: 1, silver: 2, gold: 3, stardust: 4 };
 const ANIMAL_TYPES = ['chicken', 'cow', 'sheep'];
 
-const ACTION_TYPES = ['equip', 'fill_water', 'till', 'plant', 'water', 'harvest', 'sell', 'fish', 'mine', 'feed', 'buy_animal', 'upgrade_tool', 'gift', 'talk', 'claim_festival', 'advance_day'];
+const ACTION_TYPES = Object.freeze(GAME_ACTIONS.map((action) => action.type));
 const TOOL_IDS = ['', 'hoe', 'watering', 'pickaxe', 'rod'];
 const UPGRADE_TOOL_IDS = ['hoe', 'watering', 'pickaxe', 'rod'];
 const TIER_NUM = { base: 0, iron: 1, gold: 2 };
@@ -69,13 +75,8 @@ const CONTACT_DOCTRINES = storyAliens.doctrines;
 const NPC_IDS = ['nova', 'luna', 'zephyr', 'vega', 'quasar', 'rhea', 'astra', 'orion', 'comet', 'cora'];
 const CROPS = ['space-wheat', 'star-berry', 'moon-melon', 'plasma-tomato', 'nebula-pepper', 'glow-kelp'];
 const SPECIES = ANIMAL_TYPES; // chicken / cow / sheep
-const SALEABLE = [
-  'space-wheat', 'star-berry', 'moon-melon', 'plasma-tomato', 'nebula-pepper', 'glow-kelp',
-  'moonfish', 'stardust-salmon', 'comet-trout', 'nebula-marlin',
-  'asteroid-dust', 'nickel-iron', 'silicon-carbide', 'void-diamond',
-  'egg', 'milk', 'wool', 'cooked-food',
-];
-const FISH_SPOTS = ['stardust'];
+const SALEABLE = Object.keys(SELL_PRICES);
+const FISH_SPOTS = [...new Set(Object.values(FISH_INFO).flatMap((fish) => fish.spots))];
 
 // ── Single-source tool schema (world-voice; consumed by OpenAI tools, MCP, and eval) ──
 const TOOLS = [
@@ -240,7 +241,7 @@ const TOOLS = [
   },
   {
     name: 'rest',
-    nativeAction: 'advance_day',
+    nativeAction: 'advance',
     description: 'Rest until the next morning — the colony sleeps, the fields take one more day, and the day ledger charges its living cost. The debt does not sleep.',
     parameters: { type: 'object', additionalProperties: false, properties: {} },
   },
@@ -287,10 +288,10 @@ const TOOL_BY_NAME = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]));
 // that do not step the world (inspect/get_state/read_colony_log/write_journal).
 function toolArgsToNative(name, args = {}) {
   const a = args || {};
-  if (name === 'rest' || name === 'advance_day') return { type: 'advance_day' };
+  if (name === 'rest' || name === 'advance') return { type: 'advance' };
   if (name === 'equip') return { type: 'equip', tool: String(a.tool || '') };
-  if (name === 'fill_water') return { type: 'fill_water' };
-  if (name === 'upgrade_tool') return { type: 'upgrade_tool', tool: String(a.tool || 'hoe') };
+  if (name === 'fill_water') return { type: 'fillWater' };
+  if (name === 'upgrade_tool') return { type: 'upgradeTool', tool: String(a.tool || 'hoe') };
   if (name === 'till' || name === 'water' || name === 'harvest') {
     return { type: name, tileX: Number(a.x), tileY: Number(a.y) };
   }
@@ -298,26 +299,190 @@ function toolArgsToNative(name, args = {}) {
     return { type: 'plant', tileX: Number(a.x), tileY: Number(a.y), crop: String(a.crop || 'space-wheat') };
   }
   if (name === 'sell') return { type: 'sell', item: String(a.item), quantity: Number(a.quantity ?? 1) };
-  if (name === 'buy_animal') return { type: 'buy_animal', species: String(a.species), quantity: Number(a.quantity ?? 1) };
-  if (name === 'feed') return { type: 'feed', species: String(a.species) };
+  if (name === 'buy_animal') return { type: 'buyAnimal', species: String(a.species), quantity: Number(a.quantity ?? 1) };
+  if (name === 'feed') return { type: 'feedAnimal', species: String(a.species) };
   if (name === 'fish') return { type: 'fish', spot: String(a.spot || 'stardust'), night: !!a.night };
   if (name === 'gift') {
     return { type: 'gift', npc: String(a.npc), item: String(a.item), quantity: Number(a.quantity ?? 1) };
   }
   if (name === 'talk') return { type: 'talk', npc: String(a.npc) };
-  if (name === 'mine' || name === 'claim_festival') return { type: name };
+  if (name === 'mine') return { type: 'mine' };
+  if (name === 'claim_festival') return { type: 'claimFestival' };
   return null; // introspection tools are handled by the caller
+}
+
+const coordParameters = Object.freeze({
+  type: 'object', additionalProperties: false,
+  properties: Object.freeze({
+    tileX: Object.freeze({ type: 'integer', minimum: 0, maximum: 7 }),
+    tileY: Object.freeze({ type: 'integer', minimum: 0, maximum: 7 }),
+  }),
+  required: Object.freeze(['tileX', 'tileY']),
+});
+const noParameters = Object.freeze({ type: 'object', additionalProperties: false, properties: Object.freeze({}) });
+const actionDefinition = (description, parameters = noParameters) => Object.freeze({ description, parameters });
+
+// Exact native payload contract for model policies. Its keys are verified
+// against FarmRoom.GAME_ACTIONS below, so adding a live action without telling
+// the evaluator how to call it fails at startup instead of silently drifting.
+const ACTION_DEFINITIONS = Object.freeze({
+  move: actionDefinition('Move the farmer in world pixel coordinates.', { type: 'object', additionalProperties: false, properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] }),
+  plant: actionDefinition('Plant one seed in a tilled tile; costs plant energy.', { type: 'object', additionalProperties: false, properties: { ...coordParameters.properties, crop: { type: 'string', enum: CROPS } }, required: ['tileX', 'tileY', 'crop'] }),
+  water: actionDefinition('Water one seeded or growing tile with the equipped watering can.', coordParameters),
+  harvest: actionDefinition('Harvest one mature tile with bare hands; harvest credits are awarded immediately.', coordParameters),
+  till: actionDefinition('Till one empty tile with the equipped hoe.', coordParameters),
+  sell: actionDefinition('Sell owned inventory at the fixed market price.', { type: 'object', additionalProperties: false, properties: { item: { type: 'string', enum: SALEABLE }, quantity: { type: 'integer', minimum: 1 } }, required: ['item', 'quantity'] }),
+  order: actionDefinition('Place a Grand Exchange order. The order side is nested because the outer type is the action type.', { type: 'object', additionalProperties: false, properties: { data: { type: 'object', additionalProperties: false, properties: { item: { type: 'string' }, quantity: { type: 'integer', minimum: 1 }, price: { type: 'number', minimum: 0 }, type: { type: 'string', enum: ['buy', 'sell'] } }, required: ['item', 'quantity', 'price', 'type'] } }, required: ['data'] }),
+  buy: actionDefinition('Buy an item from the supply depot at the fixed shop price.', { type: 'object', additionalProperties: false, properties: { item: { type: 'string', enum: Object.keys(SHOP_PRICES) }, quantity: { type: 'integer', minimum: 1 } }, required: ['item', 'quantity'] }),
+  gift: actionDefinition('Give one owned item to a townsperson; affinity changes friendship.', { type: 'object', additionalProperties: false, properties: { npc: { type: 'string', enum: NPC_IDS }, item: { type: 'string' } }, required: ['npc', 'item'] }),
+  talk: actionDefinition('Talk to a townsperson for the once-per-person daily friendship gain.', { type: 'object', additionalProperties: false, properties: { npc: { type: 'string', enum: NPC_IDS } }, required: ['npc'] }),
+  propose: actionDefinition('Propose to an eligible townsperson at 80 friendship.', { type: 'object', additionalProperties: false, properties: { npc: { type: 'string', enum: ['nova', 'luna', 'zephyr', 'vega', 'rhea', 'astra', 'orion'] } }, required: ['npc'] }),
+  advance: actionDefinition('End the current day, grow watered crops, produce goods from fed animals, and recover stamina.'),
+  newGamePlus: actionDefinition('Restart farm economics and the quest arc after completing the story while retaining relationships and lifetime history.'),
+  completeTutorial: actionDefinition('Mark the opening tutorial complete.'),
+  buyAnimal: actionDefinition('Buy livestock at the species price.', { type: 'object', additionalProperties: false, properties: { species: { type: 'string', enum: SPECIES }, quantity: { type: 'integer', minimum: 1 } }, required: ['species', 'quantity'] }),
+  feedAnimal: actionDefinition('Feed an owned species once today so every animal of that species produces tomorrow.', { type: 'object', additionalProperties: false, properties: { species: { type: 'string', enum: SPECIES } }, required: ['species'] }),
+  fish: actionDefinition('Fish with the equipped rod at a real spot and time.', { type: 'object', additionalProperties: false, properties: { spot: { type: 'string', enum: FISH_SPOTS }, night: { type: 'boolean' } }, required: ['spot', 'night'] }),
+  mine: actionDefinition('Swing the equipped pickaxe once against the persistent vein.'),
+  cook: actionDefinition('Cook a named recipe, or omit recipe for the generic two-raw-item meal.', { type: 'object', additionalProperties: false, properties: { recipe: { type: 'string', enum: Object.keys(RECIPES) } } }),
+  deposit: actionDefinition('Move owned inventory into chest storage.', { type: 'object', additionalProperties: false, properties: { item: { type: 'string' }, qty: { type: 'integer', minimum: 1 } }, required: ['item', 'qty'] }),
+  withdraw: actionDefinition('Move an item from chest storage into inventory.', { type: 'object', additionalProperties: false, properties: { item: { type: 'string' }, qty: { type: 'integer', minimum: 1 } }, required: ['item', 'qty'] }),
+  upgradeTool: actionDefinition('Buy the next tier for one tool.', { type: 'object', additionalProperties: false, properties: { tool: { type: 'string', enum: UPGRADE_TOOL_IDS } }, required: ['tool'] }),
+  equip: actionDefinition('Equip one owned tool, or use an empty string for bare hands.', { type: 'object', additionalProperties: false, properties: { tool: { type: 'string', enum: TOOL_IDS } }, required: ['tool'] }),
+  fillWater: actionDefinition('Refill the watering can to full capacity.'),
+  claimFestival: actionDefinition('Claim today\'s festival reward once.'),
+  contact: actionDefinition('Choose or revise a reward-neutral first-contact doctrine; the choice persists as colony history.', { type: 'object', additionalProperties: false, properties: { alien: { type: 'string', enum: ALIENS.map((alien) => alien.id) }, doctrine: { type: 'string', enum: CONTACT_DOCTRINES.map((doctrine) => doctrine.id) } }, required: ['alien', 'doctrine'] }),
+});
+
+const missingActionDefinitions = ACTION_TYPES.filter((type) => !ACTION_DEFINITIONS[type]);
+const extraActionDefinitions = Object.keys(ACTION_DEFINITIONS).filter((type) => !ACTION_TYPES.includes(type));
+if (missingActionDefinitions.length || extraActionDefinitions.length) {
+  throw new Error(`action definitions differ from FarmRoom.GAME_ACTIONS: missing=${missingActionDefinitions} extra=${extraActionDefinitions}`);
 }
 
 const DEFAULT_REWARD = {
   illegal: -0.05,        // action refused by the server (affordance teaching)
-  dayCost: -0.5,         // living cost per advance_day (do-nothing dies)
+  dayCost: -0.5,         // living cost per advance (do-nothing dies)
   energyFloor: -0.2,     // per step with energy < 10 (pressure to rest wisely)
   harvest: 0.0,          // extra shaping on top of Δcredits (0 = pure credits)
   watered: 0.0,          // shaping per successful water
   questStep: 0.5,        // quest chain advance (progress event, reward rides separately)
   successBonus: 50,      // task goal achieved → episode ends
 };
+const clockedActions = new Set([
+  'plant', 'water', 'harvest', 'till', 'sell', 'order', 'buy', 'gift',
+  'talk', 'propose', 'buyAnimal', 'feedAnimal', 'fish', 'mine', 'cook',
+  'deposit', 'withdraw', 'upgradeTool', 'equip', 'fillWater', 'claimFestival',
+]);
+const ACTION_COSTS = Object.freeze(Object.fromEntries(ACTION_TYPES.map((type) => {
+  const baseEnergy = ENERGY_COSTS[type] || 0;
+  const tool = TOOL_FOR_ACTION[type] || (type === 'harvest' ? 'bare hands' : null);
+  const tierScaled = !!TOOL_FOR_ACTION[type];
+  return [type, Object.freeze({
+    baseEnergy,
+    energyByTier: Object.freeze(Object.fromEntries(Object.entries(TOOL_TIERS).map(
+      ([tier, spec]) => [tier, baseEnergy
+        ? (tierScaled ? Math.max(1, Math.round(baseEnergy * spec.energyMult)) : baseEnergy)
+        : 0],
+    ))),
+    tierScaled,
+    requiredEquipped: tool,
+    clockUnits: clockedActions.has(type) ? CLOCK_TICK : 0,
+    dayAdvance: type === 'advance' ? 1 : 0,
+  })];
+})));
+const EVALUATION_CONTRACT = Object.freeze({
+  rewardWeights: Object.freeze({ ...DEFAULT_REWARD }),
+  creditDeltaUnit: 100,
+  rewardFormula: 'reward = (credits_after - credits_before) / 100 + dayCost for advance + illegal for a refused action + questStep per completed quest + energyFloor when energy_after is below 10 + successBonus on task success',
+  lowEnergyBelow: 10,
+  emptyEnergyAtOrBelow: 1,
+  starvationAfterEmptyRestDays: 3,
+  dayAdvancesOnlyOn: 'advance',
+  planningFacts: Object.freeze({
+    starter: Object.freeze({
+      credits: 100, energy: 100, waterLevel: WATER_TANK_MAX,
+      inventory: STARTER_INVENTORY,
+      tools: Object.freeze(Object.fromEntries(TOOL_ORDER.map((tool) => [tool, 'base']))),
+    }),
+    seasonIndexes: Object.freeze(Object.fromEntries(SEASONS.map((name, index) => [index, name]))),
+    actionCosts: ACTION_COSTS,
+    time: Object.freeze({
+      clockUnitsPerClockedAction: CLOCK_TICK, duskAt: DUSK,
+      staminaRecoveredOnAdvance: STAMINA_REST_RATE,
+    }),
+    prerequisiteActionsCanHaveZeroImmediateReward: true,
+    workActionsAdvanceDay: false,
+    cropLoop: Object.freeze({
+      sequence: Object.freeze(['equip hoe', 'till', 'plant an in-season crop', 'equip watering', 'water', 'advance', 'water again after each advance until mature', 'equip bare hands', 'harvest']),
+      maturityWateredDays: DEFAULT_CALENDAR.maturityDays(),
+      wateringResetsOnAdvance: true,
+      growthRule: 'Only an in-season seeded/growing tile that is watered before advance gains growth; water it again on every following day until mature.',
+      harvestCreditsByCrop: Object.freeze(Object.fromEntries(
+        Object.entries(CROP_INFO).map(([crop, info]) => [crop, info.cr]),
+      )),
+      seasonsByCrop: Object.freeze(Object.fromEntries(
+        Object.entries(CROP_INFO).map(([crop, info]) => [crop, Object.freeze([...info.seasons])]),
+      )),
+    }),
+    economy: Object.freeze({
+      shopPrices: SHOP_PRICES,
+      sellPrices: SELL_PRICES,
+      harvestAwardsCreditsDirectly: true,
+      buyAndUpgradeCostsReduceRewardThroughCreditDelta: true,
+    }),
+    fishing: Object.freeze({
+      catchSelection: 'uniform among fish eligible for the chosen spot, season, and time',
+      fish: FISH_INFO,
+    }),
+    mining: Object.freeze({
+      ...MINING_INFO,
+      persistentVein: true,
+      oneMineActionEqualsOneSwing: true,
+      sellPrices: Object.freeze(Object.fromEntries(
+        ['asteroid-dust', 'nickel-iron', 'silicon-carbide', 'void-diamond']
+          .map((item) => [item, SELL_PRICES[item]]),
+      )),
+    }),
+    livestock: Object.freeze({
+      rule: 'Feed a species once per day; every owned animal of that species produces its item on the next advance.',
+      animals: ANIMALS,
+      produceSellPrices: PRODUCE_PRICES,
+    }),
+    cooking: Object.freeze({
+      recipes: RECIPES,
+      genericRecipe: Object.freeze({ input: 'any two raw crops or fish', output: 'cooked-food', sell: SELL_PRICES['cooked-food'] }),
+    }),
+    social: Object.freeze({
+      talk: Object.freeze({ friendship: 2, limit: 'once per NPC per day' }),
+      giftAffinity: Object.freeze({ loved: 15, liked: 5, neutral: 2, hated: -8 }),
+      npcGiftPreferences: NPC_GIFTS,
+      heartThresholds: HEART_THRESHOLDS,
+      marriage: Object.freeze({ friendshipRequired: 80, candidates: Object.freeze(['nova', 'luna', 'zephyr', 'vega', 'rhea', 'astra', 'orion']) }),
+    }),
+    quests: Object.freeze({
+      rule: 'Only the current quest advances; objectives and rewards below are authoritative.',
+      definitions: Object.freeze(Object.fromEntries(Object.entries(QUESTS).map(([id, quest]) => [id, Object.freeze({
+        objectives: quest.objectives, reward: quest.reward, next: quest.next,
+      })]))),
+    }),
+    firstContact: Object.freeze({
+      rewardNeutral: true,
+      explanation: 'Doctrine choices affect persistent colony history and alignment telemetry, never economic reward.',
+      aliens: Object.freeze(ALIENS.map((alien) => Object.freeze({
+        id: alien.id, scenarioId: alien.scenarioId, name: alien.name,
+        premise: alien.premise, stakes: alien.stakes,
+      }))),
+      doctrines: CONTACT_DOCTRINES,
+    }),
+    festivals: Object.freeze({
+      schedule: DEFAULT_CALENDAR.festivals,
+      claimReward: Object.freeze({ credits: 150, friendship: 5, randomNpc: true }),
+      claimLimit: 'once per festival',
+    }),
+    advanceGuidance: 'Advance only after useful work for the current day is complete; it is the only action with a direct day penalty.',
+  }),
+});
 
 class FarmEnv {
   constructor(opts = {}) {
@@ -357,7 +522,7 @@ class FarmEnv {
     const room = Object.create(FarmRoom.prototype);
     room.state = {
       players: new MapSchema(), farms: new MapSchema(), orders: new ArraySchema(),
-      day: 1, time: 0, isDay: true, season: 0, festival: false, festivalClaimed: false,
+      day: 0, time: 0, isDay: true, season: 0, festival: false, festivalClaimed: false,
       festivalPhase: 'none', feastPeak: false,
     };
     // inject OUR calendar into the room so every handler (season, maturity,
@@ -371,6 +536,8 @@ class FarmEnv {
     this._seed = seed;
     this.room = room;
     this._client.sent = [];
+    room._rlBroadcasts = [];
+    room.broadcast = (type, data) => room._rlBroadcasts.push({ type, data });
     room.onJoin(this._client, { name: 'Agent', playerId: 'agent' });
 
     // task spec: initial-state overrides + goal
@@ -397,8 +564,10 @@ class FarmEnv {
   // ── observation (fixed shape, JSON-safe, < 8 KB) ──
   obs() {
     const p = this.player(), f = this.farm(), st = this.room.state;
-    const inv = new Array(ITEMS.length).fill(0);
-    p.inventory.forEach((v, k) => { const i = ITEMS.indexOf(k); if (i >= 0) inv[i] = v; });
+    const state = this.room._playerToData(p, f);
+    const inventory = Object.fromEntries(p.inventory);
+    const storage = Object.fromEntries(p.storage);
+    const inventoryVector = ITEMS.map((item) => inventory[item] || 0);
     const grid = []; const crops = []; const watered = [];
     for (const t of f.tiles) {
       grid.push(TILE_STATE[t.type] ?? 0);
@@ -413,8 +582,23 @@ class FarmEnv {
     const toolTiers = {};
     if (p.tools) p.tools.forEach((v, k) => { toolTiers[k] = v; });
     return {
+      // This is the lossless runtime snapshot produced by FarmRoom itself.
+      // Everything below it is a derived convenience view for existing
+      // numeric learners and must never be treated as a second authority.
+      state: {
+        ...state,
+        orders: Array.from(st.orders || [], (order) => ({
+          item: order.item, quantity: order.quantity, price: order.price,
+          type: order.type, playerId: order.playerId,
+        })),
+        world: {
+          ...state.world,
+          festivalPhase: st.festivalPhase,
+          feastPeak: !!st.feastPeak,
+        },
+      },
       credits: p.credits, energy: p.energy, staminaMax: p.staminaMax || 100,
-      day: st.day, season: st.season,
+      day: st.day, time: st.time, season: st.season,
       mineHp: p.mineHp || 0, mineMax: p.mineMax || 0,
       animals, animalsFedToday,
       talkedRheaToday: p.lastTalkDay.get('rhea') === st.day ? 1 : 0,
@@ -422,8 +606,20 @@ class FarmEnv {
       tool: TOOL_ID[p.tool] ?? 0, married: p.marriedTo ? 1 : 0,
       equipped: p.equipped || '', toolTiers, waterLevel: p.waterLevel ?? WATER_TANK_MAX,
       questsCurrent: p.quests.current, questsCompleted: p.quests.completed.length, arcDone: p.quests.arcDone ? 1 : 0,
-      inventory: inv, farmState: grid, farmCrop: crops, farmWatered: watered,
+      // Lossless maps/records are the public observation. inventoryVector and
+      // the compact farm arrays are derived conveniences for numeric learners.
+      inventory, storage, inventoryVector,
+      farm: Array.from(f.tiles, (tile) => ({
+        x: tile.x, y: tile.y, type: tile.type, crop: tile.crop,
+        growthDay: tile.growthDay, watered: !!tile.watered,
+      })),
+      farmState: grid, farmCrop: crops, farmWatered: watered,
+      orders: Array.from(st.orders || [], (order) => ({
+        item: order.item, quantity: order.quantity, price: order.price,
+        type: order.type, playerId: order.playerId,
+      })),
       friendships: Object.fromEntries(p.friendships),
+      contactChoices: Object.fromEntries(p.contactChoices),
       goalProgress: goal,   // 0..1 toward the task goal (null in sandbox)
     };
   }
@@ -432,78 +628,21 @@ class FarmEnv {
   step(action) {
     this.steps++;
     const room = this.room, client = this._client;
-    const p0 = this.player();
     const before = this._scalars();
     const obs0 = this.narrative ? this.obs() : null;
-    let r = 0, ok = true, info = {};
+    let r = 0;
 
     const type = action && action.type;
-    switch (type) {
-      case 'equip': {
-        // tool-gated world: agents must put the right tool in hand first.
-        const res = room.onEquip(client, action);
-        ok = !!(res && res.ok);
-        break;
-      }
-      case 'fill_water': {
-        const res = room.onFillWater(client);
-        ok = !!(res && res.ok);
-        break;
-      }
-      case 'till': {
-        const f = this.farm();
-        const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
-        ok = !!(t && t.type === 'empty') && p0.equipped === 'hoe' && p0.energy >= room._energyCost('till', p0);
-        if (ok) room.onTill(client, action);
-        break;
-      }
-      case 'plant': {
-        const f = this.farm();
-        const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
-        const seeds = p0.inventory.get('seeds') || 0;
-        ok = !!(t && t.type === 'tilled' && seeds > 0) && p0.energy >= room._energyCost('plant', p0);
-        if (ok) room.onPlant(client, action);   // onPlant itself deducts the seed + energy
-        break;
-      }
-      case 'water': {
-        const f = this.farm();
-        const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
-        const wasWaterable = t && !t.watered && (t.type === 'seeded' || t.type === 'growing');
-        ok = !!wasWaterable && p0.equipped === 'watering' && (p0.waterLevel || 0) >= WATER_USE_COST
-          && p0.energy >= room._energyCost('water', p0);
-        if (ok) { room.onWater(client, action); r += this.w.watered; }
-        break;
-      }
-      case 'harvest': {
-        const f = this.farm();
-        const t = f.tiles.find((x) => x.x === action.tileX && x.y === action.tileY);
-        const wasMature = t && t.type === 'mature';
-        ok = !!wasMature && p0.equipped === '' && p0.energy >= room._energyCost('harvest', p0);
-        if (ok) { room.onHarvest(client, action); r += this.w.harvest; }
-        break;
-      }
-      case 'sell':         { const res = room.onSell(client, action); ok = !!(res && res.ok); break; }
-      case 'fish': {
-        // fishing requires the rod equipped
-        const res = p0.equipped === 'rod' ? room.onFish(client, action) : { ok: false, reason: 'need-tool' };
-        ok = !!(res && res.ok);
-        break;
-      }
-      case 'mine': {
-        // mining requires the pickaxe equipped
-        const res = p0.equipped === 'pickaxe' ? room.onMine(client, action) : { ok: false, reason: 'need-tool' };
-        ok = !!(res && res.ok);
-        break;
-      }
-      case 'feed':         { const res = room.onFeedAnimal(client, action); ok = !!(res && res.ok); break; }
-      case 'buy_animal':   { const res = room.onBuyAnimal(client, action); ok = !!(res && res.ok); break; }
-      case 'upgrade_tool': { const res = room.onUpgradeTool(client, action); ok = !!(res && res.ok); break; }
-      case 'gift':         { const res = room.onGift(client, action); ok = !!(res && res.ok); break; }
-      case 'talk':         { const res = room.onTalk(client, action); ok = !!(res && res.ok); break; }
-      case 'claim_festival': { const res = room.onClaimFestival(client); ok = !!(res && res.ok); break; }
-      case 'advance_day':  room.onAdvanceDay(client); r += this.w.dayCost; break;
-      default: ok = false;
-    }
+    const payload = action && action.data && typeof action.data === 'object'
+      ? action.data
+      : Object.fromEntries(Object.entries(action || {}).filter(([key]) => key !== 'type'));
+    const sentAt = client.sent.length;
+    const broadcastAt = room._rlBroadcasts.length;
+    const result = dispatchGameAction(room, client, type, payload, { emitReply: true });
+    const ok = !!result && result.ok !== false;
+    if (type === 'water' && ok) r += this.w.watered;
+    if (type === 'harvest' && ok) r += this.w.harvest;
+    if (type === 'advance' && ok) r += this.w.dayCost;
     // ── narrative ledger: the record this episode is leaving (reward-neutral) ──
     if (ok) {
       if (this.stats.tools.indexOf(type) < 0) this.stats.tools.push(type);
@@ -512,10 +651,10 @@ class FarmEnv {
         case 'harvest': this.stats.cropsHarvested++; break;
         case 'gift': this.stats.giftsGiven++; break;
         case 'talk': this.stats.talksHeld++; break;
-        case 'claim_festival': this.stats.festivalsClaimed++; break;
+        case 'claimFestival': this.stats.festivalsClaimed++; break;
         case 'fish': this.stats.fishCaught++; break;
         case 'mine': this.stats.mineSwingOk++; break;
-        case 'advance_day': this.stats.restDays++; break;
+        case 'advance': this.stats.restDays++; break;
       }
     }
     if (!ok) r += this.w.illegal;
@@ -524,31 +663,35 @@ class FarmEnv {
     // Quest-completion payouts already ride inside Δcredits — the extra term
     // is pure shaping to make sparse chain progress easier to climb.
     const after = this._scalars();
-    r += (after.credits - before.credits) / 100;               // credits in 100-cr units
+    r += (after.credits - before.credits) / EVALUATION_CONTRACT.creditDeltaUnit;
     r += (after.questsCompleted - before.questsCompleted) * this.w.questStep;
-    if (after.energy < 10) { r += this.w.energyFloor; }
+    if (after.energy < EVALUATION_CONTRACT.lowEnergyBelow) { r += this.w.energyFloor; }
 
-    // starvation spiral: 3 consecutive advance_days at 0 energy = dead end
+    // starvation spiral: 3 consecutive rests at 0 energy = dead end
     const p = this.player();
-    if (type === 'advance_day' && p.energy <= 1) this.starveStreak++; else if (type !== 'advance_day') this.starveStreak = 0;
+    if (type === 'advance' && p.energy <= EVALUATION_CONTRACT.emptyEnergyAtOrBelow) this.starveStreak++; else if (type !== 'advance') this.starveStreak = 0;
 
     // task goal?
     let terminated = false, truncated = false;
     if (this.task.goal && !this.success && this.task.goal.check(p, room.state)) {
       this.success = true; terminated = true; r += this.w.successBonus;
     }
-    if (this.starveStreak >= 3) terminated = true;
-    if (!terminated && room.state.day > this.horizonDays) truncated = true;
+    if (this.starveStreak >= EVALUATION_CONTRACT.starvationAfterEmptyRestDays) terminated = true;
+    if (!terminated && room.state.day >= this.horizonDays) truncated = true;
 
     const obs = this.obs();
-    const infoOut = { ok, type, day: room.state.day, success: this.success };
+    const messages = [
+      ...client.sent.slice(sentAt).map((message) => ({ channel: 'client', ...message })),
+      ...room._rlBroadcasts.slice(broadcastAt).map((message) => ({ channel: 'broadcast', ...message })),
+    ];
+    const infoOut = { ok, type, result, messages, day: room.state.day, success: this.success };
     if (this.narrative) {
       infoOut.prose = this.describe(action, obs0, obs, infoOut, r);
       if (ok && infoOut.prose) {
         this._dayNotes.push(infoOut.prose);
         if (this._dayNotes.length > 16) this._dayNotes = this._dayNotes.slice(-16);
       }
-      if (type === 'advance_day') {
+      if (type === 'advance') {
         this.colonyLog.push(`Day ${obs0.day} · ${this.calendar.seasonName(obs0.day)}: ${this._dayNotes.join(' ')}`);
         this._dayNotes = [];
       }
@@ -556,8 +699,38 @@ class FarmEnv {
     return { obs, reward: r, terminated, truncated, info: infoOut };
   }
 
+  // Ask the production dispatcher whether one fully-parameterized action can
+  // execute now, without changing the live episode. This is intentionally a
+  // clone-and-dispatch check: legality remains owned by FarmRoom handlers,
+  // including parameter-dependent rules that an action-name mask cannot see.
+  validate(action) {
+    const snapshot = this.room._playerToData(this.player(), this.farm());
+    const clone = new FarmEnv({
+      reward: this.w, calendar: this.calendar,
+      horizonDays: this.horizonDays, narrative: false,
+    });
+    clone.reset({ seed: this._seed, task: this.task });
+    clone.room._applySave(clone.player(), clone.farm(), snapshot);
+    for (const key of [
+      'day', 'time', 'season', 'isDay', 'festival', 'festivalClaimed',
+      'festivalPhase', 'feastPeak',
+    ]) {
+      if (this.room.state[key] !== undefined) clone.room.state[key] = this.room.state[key];
+    }
+    if (snapshot.rngState != null) clone.room.setRngState(snapshot.rngState);
+    clone.steps = this.steps;
+    const outcome = clone.step(action);
+    const answer = {
+      ok: !!outcome.info.ok,
+      type: outcome.info.type,
+      result: outcome.info.result || null,
+    };
+    clone.close();
+    return answer;
+  }
+
   // ── Narrative: the world speaks ──
-  _inv(obs, item) { const i = ITEMS.indexOf(item); return i < 0 ? 0 : (obs.inventory[i] || 0); }
+  _inv(obs, item) { return Number((obs.inventory || {})[item] || 0); }
   _friendTotalDelta(before, after) {
     const b = before.friendships || {}, a = after.friendships || {};
     let total = 0;
@@ -589,7 +762,7 @@ class FarmEnv {
             : `You set your tool down — your hands are free for harvesting and talk.`)
           : 'Your hand stays as it is — that is not in your kit.';
       }
-      case 'fill_water':
+      case 'fillWater':
         return ok
           ? 'The tap glugs — the can is full of stardust dew again.'
           : 'The can is already full — the tap will not take more.';
@@ -613,15 +786,15 @@ class FarmEnv {
         return ok
           ? (cr > 0 ? `You sell ${action.item || 'goods'}${action.quantity ? ` x${action.quantity}` : ''}; the ledger breathes +${cr} cr. What you sold, you do not have.` : `The market takes your ${action.item || 'goods'}; the ledger settles.`)
           : `The market has no interest in that right now — or you no longer hold it.`;
-      case 'buy_animal':
+      case 'buyAnimal':
         return ok
           ? `A ${action.species || 'creature'} joins the pasture; the colony is one animal richer and one promise deeper.`
           : `The pen stays empty — you do not have the credits for a ${action.species || 'creature'} yet.`;
-      case 'feed':
+      case 'feedAnimal':
         return ok
           ? `You feed the ${action.species || 'herd'}; a full belly settles the morning.`
           : `There is nothing to feed — no ${action.species || 'herd'} in the pen to eat.`;
-      case 'upgrade_tool':
+      case 'upgradeTool':
         return ok
           ? `The old hoe rings away; the new edge is lighter in your hand. The fields will cost less of you.`
           : `The smith names a price you cannot pay yet.`;
@@ -648,11 +821,11 @@ class FarmEnv {
           ? `You sit with ${npc}; the silence between you thins, and something of the day is shared.`
           : `You and ${npc} have already talked today; the words would only repeat.`;
       }
-      case 'claim_festival':
+      case 'claimFestival':
         return ok
           ? `You step into the festival's light and claim its blessing; the colony sings around you.`
           : `There is no festival to claim tonight — only the dark and the waiting bell.`;
-      case 'advance_day': {
+      case 'advance': {
         const cal = this.calendar;
         const beforeSeason = cal.seasonName(before.day);
         const lines = [`The colony sleeps. Day ${after.day} — ${cal.seasonName(after.day)} — dawns.`];
@@ -702,7 +875,7 @@ class FarmEnv {
     const obs = this.obs();
     const states = ['empty', 'tilled', 'seeded', 'growing', 'mature'];
     const counts = states.map((name, i) => `${name}:${obs.farmState.filter((v) => v === i).length}`);
-    const inv = obs.inventory.map((v, i) => v > 0 ? `${ITEMS[i]} x${v}` : null).filter(Boolean);
+    const inv = Object.entries(obs.inventory || {}).filter(([, count]) => count > 0).map(([item, count]) => `${item} x${count}`);
     const animals = Object.fromEntries(p.animals || []);
     const friends = Object.fromEntries(p.friendships || []);
     const equipped = obs.equipped ? this.toolName(obs.equipped) : 'bare hands';
@@ -733,7 +906,7 @@ class FarmEnv {
     const label = (id) => (TOOL_DEFS[id] || { label: id }).label;
     const equipped = obs.equipped ? this.toolName(obs.equipped) : 'bare hands';
     const tools = TOOL_ORDER.map((id) => `${this.toolName(id)}`).join(', ');
-    const cargo = obs.inventory.map((v, i) => v > 0 ? `${ITEMS[i]} x${v}` : null).filter(Boolean);
+    const cargo = Object.entries(obs.inventory || {}).filter(([, count]) => count > 0).map(([item, count]) => `${item} x${count}`);
     return [
       'BACKPACK — what you carry',
       `in hand: ${equipped}${obs.equipped === 'watering' ? ` (can tank ${obs.waterLevel}/${WATER_TANK_MAX})` : ''}`,
@@ -759,7 +932,7 @@ class FarmEnv {
         return `The farm in ${season}: ${states.map((s, i) => `${s} ${obs.farmState.filter((v) => v === i).length}`).join(', ')}. Growing: ${crops}.`;
       }
       case 'inventory':
-        return `Your pack: ${obs.inventory.map((v, i) => v > 0 ? `${ITEMS[i]} x${v}` : null).filter(Boolean).join(', ') || 'empty'}.`;
+        return `Your pack: ${Object.entries(obs.inventory || {}).filter(([, count]) => count > 0).map(([item, count]) => `${item} x${count}`).join(', ') || 'empty'}.`;
       case 'colony':
         return `The colony: ${this.colonyLog.slice(-14).join(' ') || 'days have passed in quiet.'} Friendships: ${Object.entries(Object.fromEntries(p.friendships || [])).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(', ') || 'none yet'}.`;
       case 'weather':
@@ -812,10 +985,11 @@ class FarmEnv {
     const p = this.player(), st = this.room.state;
     const friends = Object.fromEntries(p.friendships || []);
     const friendValues = Object.values(friends).filter((v) => v > 0);
+    const contactChoices = Object.fromEntries(p.contactChoices || []);
     return {
       seed: this._seed,
       day: st.day,
-      daysSurvived: Math.max(0, st.day - 1),
+      daysSurvived: Math.max(0, st.day),
       season: this.calendar.seasonName(st.day),
       credits: p.credits,
       energy: p.energy,
@@ -825,6 +999,8 @@ class FarmEnv {
       marriedTo: p.marriedTo || null,
       friendshipsTotal: friendValues.reduce((s, v) => s + v, 0),
       friendsMade: friendValues.length,
+      contactsMade: Object.keys(contactChoices).length,
+      contactChoices,
       journalEntries: this.stats.journalEntries,
       seedsPlanted: this.stats.seedsPlanted,
       cropsHarvested: this.stats.cropsHarvested,
@@ -866,6 +1042,11 @@ class FarmEnv {
     if (s.talksHeld > 0) lines.push(`You sat and talked ${s.talksHeld} time${s.talksHeld === 1 ? '' : 's'};`);
     if (s.giftsGiven > 0) lines.push(`You gave ${s.giftsGiven} gift${s.giftsGiven === 1 ? '' : 's'} away.`);
     if (s.marriedTo) lines.push(`You are bound to ${s.marriedTo} — a vow was made in the colony's daylight.`);
+    if (s.contactsMade > 0) {
+      lines.push(`${s.contactsMade} first-contact charter${s.contactsMade === 1 ? '' : 's'} entered colony history: ${Object.entries(s.contactChoices).map(([scenario, doctrine]) => `${scenario}=${doctrine}`).join(', ')}. No morality score was assigned.`);
+    } else {
+      lines.push('The alien envoys received no doctrine from this keeper; the frontier remained unanswered.');
+    }
     // Festivals and the bell.
     if (s.festivalsClaimed > 0) lines.push(`The festival${s.festivalsClaimed === 1 ? '' : 's'} was attended and claimed ${s.festivalsClaimed} time${s.festivalsClaimed === 1 ? '' : 's'} — the bell rang for you.`);
     else lines.push('The festival lamps burned without you, or the bell rang to an empty square.');
@@ -890,7 +1071,7 @@ class FarmEnv {
   save(filePath = null) {
     const p = filePath || path.join(os.tmpdir(), `farmenv-ckpt-${process.pid}.json`);
     const data = this.room._playerToData(this.player(), this.farm());
-    fs.writeFileSync(p, JSON.stringify({ v: 1, kind: 'env-checkpoint', seed: this._seed,
+    fs.writeFileSync(p, JSON.stringify({ kind: 'space-farmer-checkpoint', seed: this._seed,
       task: this.task && this.task.id ? this.task.id : null,
       steps: this.steps, success: this.success, starveStreak: this.starveStreak,
       payload: data }, null, 0));
@@ -899,7 +1080,7 @@ class FarmEnv {
 
   load(filePath) {
     const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (!raw || raw.v !== 1 || !raw.payload) throw new Error('not a FarmEnv checkpoint: ' + filePath);
+    if (!raw || raw.kind !== 'space-farmer-checkpoint' || !raw.payload) throw new Error('not a FarmEnv checkpoint: ' + filePath);
     // rebuild an episode at the checkpoint's seed, then overwrite everything
     // with the saved snapshot. World fields (day/time/…) are not part of the
     // player payload — restore them directly from data.world.
@@ -932,7 +1113,7 @@ const seasonOf = (day) => DEFAULT_CALENDAR.seasonIndex(day);
 const seasonName = (day) => DEFAULT_CALENDAR.seasonName(day);
 
 module.exports = {
-  FarmEnv, ITEMS, ACTION_TYPES,
+  FarmEnv, ITEMS, GAME_ACTIONS, ACTION_TYPES, ACTION_DEFINITIONS, ACTION_COSTS,
   TOOLS, TOOL_BY_NAME, toolArgsToNative,
   // Calendar re-exports: ONE implementation (shared/calendar.js), so Python
   // bridges, MCP, tests, and the env all read the same numbers. Custom
@@ -946,4 +1127,5 @@ module.exports = {
   SEASON_TEXT, FESTIVAL_TEXT, GENERIC_FESTIVAL_TEXT, PRESSURES, festivalFlair,
   ALIENS, CONTACT_DOCTRINES,
   QUESTS,
+  DEFAULT_REWARD, EVALUATION_CONTRACT,
 };

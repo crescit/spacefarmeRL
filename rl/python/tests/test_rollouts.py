@@ -1,4 +1,5 @@
 import tempfile
+import json
 import unittest
 from pathlib import Path
 
@@ -35,11 +36,53 @@ class RolloutTests(unittest.TestCase):
             self.assertEqual(result["seed"], 55)
 
     def test_action_labels_cover_engine_surface(self):
-        # 14 original macro actions + equip + fill_water (tool-gated world)
-        self.assertEqual(len(ACTION_LABELS), 16)
-        self.assertIn("advance_day", ACTION_LABELS)
+        self.assertEqual(len(ACTION_LABELS), 26)
+        self.assertIn("advance", ACTION_LABELS)
         self.assertIn("equip", ACTION_LABELS)
-        self.assertIn("fill_water", ACTION_LABELS)
+        self.assertIn("fillWater", ACTION_LABELS)
+        self.assertIn("contact", ACTION_LABELS)
+
+    def test_trajectory_audits_native_action_state_delta_and_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audit.jsonl"
+            recorder = TrajectoryRecorder(FarmGymEnv(horizon_days=5), path)
+            try:
+                recorder.reset(seed=1)
+                recorder.step(
+                    ACTION_LABELS.index("sell"),
+                    policy_decision={"source": "primary_content", "rationale": "cash"},
+                )
+            finally:
+                recorder.close()
+            record = json.loads(path.read_text().splitlines()[1])
+            self.assertEqual(record["native_action"]["item"], "cooked-food")
+            self.assertEqual(record["changes"]["credits_delta"], 40)
+            self.assertEqual(record["changes"]["inventory_delta"]["cooked-food"], -1)
+            self.assertEqual(record["policy_decision"]["rationale"], "cash")
+            self.assertTrue(any(
+                message["type"] == "sell"
+                for message in record["info"]["messages"]
+            ))
+
+    def test_trajectory_records_explicit_actual_energy_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "energy.jsonl"
+            recorder = TrajectoryRecorder(FarmGymEnv(horizon_days=5), path)
+            try:
+                recorder.reset(seed=1)
+                recorder.step_native({"type": "equip", "tool": "hoe"}, tool="equip")
+                recorder.step_native(
+                    {"type": "till", "tileX": 0, "tileY": 0}, tool="till"
+                )
+            finally:
+                recorder.close()
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual(rows[1]["energy"], {
+                "before": 100.0, "cost": 0.0, "after": 100.0, "capacity": 100.0,
+            })
+            self.assertEqual(rows[2]["energy"], {
+                "before": 100.0, "cost": 5.0, "after": 95.0, "capacity": 100.0,
+            })
 
 
 if __name__ == "__main__":

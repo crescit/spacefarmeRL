@@ -112,14 +112,46 @@ console.log('== Determinism ==');
 // ══ Task 2: env_core reset/step/obs/reward ══
 console.log('== env_core ==');
 {
-  const { FarmEnv, ITEMS, ACTION_TYPES } = require(path.join(__dirname, '..', 'rl', 'env_core.cjs'));
+  const { FarmEnv, ITEMS, GAME_ACTIONS, ACTION_TYPES, ACTION_DEFINITIONS, EVALUATION_CONTRACT } = require(path.join(__dirname, '..', 'rl', 'env_core.cjs'));
   const env = new FarmEnv({ horizonDays: 10 });
 
   // obs shape stable across resets + long random rollout
   const o0 = env.reset({ seed: 7 });
-  const shapeOf = (o) => JSON.stringify({ k: Object.keys(o).sort(), inv: o.inventory.length, grid: o.farmState.length, crop: o.farmCrop.length });
+  check('action surface is exactly FarmRoom wire messages',
+    JSON.stringify(ACTION_TYPES) === JSON.stringify(GAME_ACTIONS.map((a) => a.type)));
+  check('reset starts on the live game day zero', o0.day === 0 && o0.time === 0);
+  check('starter inventory is lossless and matches onJoin', JSON.stringify(o0.inventory) === JSON.stringify({
+    seeds: 5, 'tech-part': 2, 'starlight-crystal': 1, 'exotic-seed': 1,
+    'space-feather': 1, 'data-crystal': 1, 'rare-mineral': 1,
+    'cooked-food': 1, weeds: 1, flowers: 1,
+  }), JSON.stringify(o0.inventory));
+  check('all live actions have native schemas and complete cost records',
+    ACTION_TYPES.every((type) => ACTION_DEFINITIONS[type] && EVALUATION_CONTRACT.planningFacts.actionCosts[type]));
+  check('planning contract exposes the real starter seeds and full economy',
+    EVALUATION_CONTRACT.planningFacts.starter.inventory.seeds === 5 &&
+    EVALUATION_CONTRACT.planningFacts.economy.shopPrices.seeds === 5 &&
+    EVALUATION_CONTRACT.planningFacts.fishing.fish['nebula-marlin'].worth === 120 &&
+    EVALUATION_CONTRACT.planningFacts.livestock.animals.chicken.cost === 100 &&
+    EVALUATION_CONTRACT.planningFacts.actionCosts.fish.baseEnergy === 10 &&
+    EVALUATION_CONTRACT.planningFacts.actionCosts.talk.baseEnergy === 0);
+  const contact = env.step({ type: 'contact', alien: 'keth', doctrine: 'colonize' });
+  check('alien doctrine is a persistent reward-neutral game action',
+    contact.info.ok && contact.reward === 0 &&
+    contact.obs.contactChoices['keth-refuge'] === 'colonize');
+  const bought = env.step({ type: 'buy', item: 'seeds', quantity: 1 });
+  check('handler reply is preserved in transition info',
+    bought.info.result.ok === true && bought.info.result.item === 'seeds');
+  check('client reply message is logged', bought.info.messages.some((m) => m.channel === 'client' && m.type === 'buy'));
+  env.reset({ seed: 7 });
+  let festivalMorning;
+  for (let day = 0; day < 25; day++) festivalMorning = env.step({ type: 'advance' });
+  check('client and broadcast messages are both logged',
+    festivalMorning.info.messages.some((m) => m.type === 'daySummary') &&
+    festivalMorning.info.messages.some((m) => m.channel === 'broadcast' && m.type === 'festivalPhase'));
+  env.reset({ seed: 7 });
+  const shapeOf = (o) => JSON.stringify({ k: Object.keys(o).sort(), inv: Object.keys(o.inventory).sort(), grid: o.farmState.length, crop: o.farmCrop.length });
   const shape = shapeOf(o0);
-  check('obs initial shape (inv 29, grid 64)', o0.inventory.length === ITEMS.length && o0.farmState.length === 64);
+  check('obs initial shape (inventory vector 29, grid 64)', o0.inventoryVector.length === ITEMS.length && o0.farmState.length === 64);
   let stepsOk = true;
   const TYPES = ACTION_TYPES;
   for (let i = 0; i < 1000; i++) {
@@ -127,7 +159,8 @@ console.log('== env_core ==');
     if (a.type === 'sell') Object.assign(a, { item: 'space-wheat', quantity: 1 });
     if (a.type === 'gift') Object.assign(a, { npc: 'rhea', item: 'weeds' });
     if (a.type === 'talk') Object.assign(a, { npc: 'rhea' });
-    if (a.type === 'buy_animal') Object.assign(a, { species: 'chicken' });
+    if (a.type === 'contact') Object.assign(a, { alien: 'aurelian', doctrine: 'observe' });
+    if (a.type === 'buyAnimal') Object.assign(a, { species: 'chicken' });
     if (['till', 'plant', 'water', 'harvest'].includes(a.type)) Object.assign(a, { tileX: i % 8, tileY: (i >> 3) % 8, crop: 'space-wheat' });
     const { obs } = env.step(a);
     if (obs.day > 10) { env.reset({ seed: 7 }); }
@@ -151,12 +184,12 @@ console.log('== env_core ==');
   R += env.step({ type: 'equip', tool: 'watering' }).reward;
   R += env.step({ type: 'water', tileX: 0, tileY: 0 }).reward;            // day-1 water
   for (let d = 0; d < MD; d++) {
-    R += env.step({ type: 'advance_day' }).reward;                        // dayCost
+    R += env.step({ type: 'advance' }).reward;                            // dayCost
     // Re-water for the next day's growth, but NOT once the tile is mature —
     // watering a mature tile is refused (illegal penalty), which would skew
     // the hand-computed total. Refill the can at the tap when it runs low.
     if (env.farm().tiles.find((t) => t.x === 0 && t.y === 0).type !== 'mature') {
-      if ((env.player().waterLevel || 0) < 20) R += env.step({ type: 'fill_water' }).reward;
+      if ((env.player().waterLevel || 0) < 20) R += env.step({ type: 'fillWater' }).reward;
       R += env.step({ type: 'water', tileX: 0, tileY: 0 }).reward;        // watered=0 shaping
     }
   }
@@ -177,13 +210,13 @@ console.log('== env_core ==');
 
   // episode isolation: reset wipes everything (fresh obs, day 1, starter state)
   const o1 = env.reset({ seed: 3 });
-  check('reset isolates state (day 1, credits reset)', o1.day === 1 && o1.credits === o0.credits && o1.farmState.every((v) => v === 0));
+  check('reset isolates state (day 0, credits reset)', o1.day === 0 && o1.credits === o0.credits && o1.farmState.every((v) => v === 0));
 
   // truncation: advance past horizon → truncated
   env.reset({ seed: 3 });
   let last = null;
-  for (let d = 0; d <= 10; d++) last = env.step({ type: 'advance_day' });
-  check('horizon truncates episode', last.truncated === true && env.room.state.day > 10);
+  for (let d = 0; d <= 10; d++) last = env.step({ type: 'advance' });
+  check('horizon truncates episode', last.truncated === true && env.room.state.day >= 10);
 
   // determinism through the env API (same seed+actions → same trajectory)
   const run = (seed) => {
@@ -198,7 +231,7 @@ console.log('== env_core ==');
       { type: 'equip', tool: 'watering' },
       { type: 'water', tileX: 0, tileY: 0 },
       ...Array.from({ length: MD }, () => [
-        { type: 'advance_day' }, { type: 'fill_water' }, { type: 'water', tileX: 0, tileY: 0 },
+        { type: 'advance' }, { type: 'fillWater' }, { type: 'water', tileX: 0, tileY: 0 },
       ]).flat(),
       { type: 'equip', tool: '' },
       { type: 'harvest', tileX: 0, tileY: 0 },

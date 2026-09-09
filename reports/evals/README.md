@@ -8,7 +8,7 @@ are reproducible from the report's seeds and can grow quickly.
 
 Leaderboard entries must use:
 
-- action interface `masked-macro-v3-strict`;
+- action interface `energy-grounded-native-strict`;
 - seeds 1 through 30;
 - a 30-day horizon (one full B-612 season);
 - deterministic model sampling;
@@ -20,13 +20,19 @@ Run a new model by pointing at its endpoint:
 npm run eval:endpoint -- http://127.0.0.1:8000
 ~~~
 
-The runner discovers the sole advertised model, uses `max` reasoning with a
-4096-token budget, and selects filesystem-safe output paths. Gateways exposing
+The runner discovers the sole advertised model and uses the same portable
+fast-action protocol for every family: thinking off, compact mechanics,
+the authoritative reward/horizon contract, reason-before-action strict JSON,
+one action per request, and a 256-token cap. It selects
+filesystem-safe, semantically named protocol output paths. Gateways exposing
 multiple models must add `--model MODEL_ID` to resolve the ambiguity.
 
 Use a filesystem-safe model slug for the filename. The JSON report is the
 committed result; trajectories are retained locally for inspection and are
-validated automatically through exact replay.
+validated automatically through exact replay. Every transition records the
+resolved native action and arguments, reward, credit/energy/day/inventory/animal
+deltas, and model-decision provenance including rationale, tokens, retries, and
+latency.
 
 Reaching `--max-steps` is recorded as a capped episode rather than a crash.
 The evaluator writes a partial report after every completed seed. If a run is

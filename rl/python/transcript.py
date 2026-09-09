@@ -15,9 +15,9 @@ from typing import Any
 
 TOOL_GLYPH = {
     "till": "🛠", "plant": "🌱", "water": "💧", "harvest": "🌾", "sell": "🪙",
-    "buy_animal": "🐔", "feed": "🌾", "upgrade_tool": "⚒", "fish": "🎣",
-    "mine": "⛏", "gift": "🎁", "talk": "💬", "claim_festival": "🎆",
-    "advance_day": "🌙", "rest": "🌙", "read_colony_log": "📜",
+    "buyAnimal": "🐔", "feedAnimal": "🌾", "upgradeTool": "⚒", "fish": "🎣",
+    "mine": "⛏", "gift": "🎁", "talk": "💬", "claimFestival": "🎆",
+    "advance": "🌙", "rest": "🌙", "read_colony_log": "📜",
     "write_journal": "📖", "get_state": "📊", "inspect": "🔍",
 }
 

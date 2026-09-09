@@ -38,16 +38,21 @@ Desktop controls:
 
 ## Why this is an RL environment
 
-`rl/env_core.cjs` wraps the production `FarmRoom` directly. It provides:
+`rl/env_core.cjs` dispatches through the production `FarmRoom` action registry.
+The registry is also what Colyseus uses to register browser messages, so the
+headless environment cannot silently drift into a different game. It provides:
 
 - seeded deterministic episodes;
-- 14 native action types;
-- fixed-shape observations;
-- action masks and a state-aware macro codec;
+- all 26 live wire actions, including persistent alien-contact doctrine choices;
+- the exact day-zero starter inventory and a lossless runtime state snapshot;
+- every handler result, client reply, milestone/day summary, and broadcast in
+  transition `info.messages`;
+- derived fixed-shape vectors, action masks, and a macro codec for numeric
+  learners that need them;
 - reward and termination semantics;
 - deterministic mid-episode checkpoints;
 - parallel rollout workers;
-- JSONL trajectory recording and exact replay;
+- schema-version-free JSONL trajectory recording and exact replay;
 - Gymnasium and MaskablePPO examples;
 - optional OpenAI-compatible model policies.
 
@@ -89,24 +94,50 @@ Any OpenAI-compatible chat endpoint can act as a policy, including the gateway
 in the sibling `ml-infra` project.
 
 The standard release command only needs the endpoint. It queries `/v1/models`,
-uses the single advertised model ID, enables thinking at `max` effort, and
-writes model-named reports and trajectories automatically:
+uses the single advertised model ID, and applies the same grounded action
+protocol to every model: thinking off, strict JSON, and one action per call.
+The model supplies the exact native payload itself—including crop, tile, shop
+item and quantity, livestock species, NPC, recipe, fishing spot/time, or alien
+doctrine. Every request includes the authoritative starter inventory, complete
+economy, action energy/time costs, production timing, social rules, first-contact
+stakes, and reward/horizon contract.
+The evaluator never substitutes `advance` for malformed output: invalid native
+calls are recorded and rejected by the real handler, while unparseable output
+stops the episode without changing the day.
+Reports and trajectories are named by model and semantic protocol:
 
 ~~~bash
 npm run eval:endpoint -- http://127.0.0.1:8000
 ~~~
 
+For an experimental batched policy, ask the model to plan up to eight actions
+per completion. Each queued action is checked against live state after the
+preceding action resolves; an invalid queued action is discarded and triggers
+an immediate replan. Non-release settings receive isolated artifact paths:
+
+~~~bash
+npm run eval:endpoint -- http://127.0.0.1:8000 \
+  --action-batch-size 8 --reasoning-effort high
+~~~
+
+Use the default batch size of one for release runs. Model-native task tokens are
+not enabled automatically because that would give different model families
+different protocols. `--model-task action` remains available only for explicit
+DeepSeek diagnostics, and receives a distinct protocol name.
+
 The locked default is 30 deterministic one-season episodes, one request at a
-time, 500 steps maximum, a 120-second request timeout, and a 4096-token output
-budget. Serial requests keep latency comparable and work correctly with
-single-sequence Spark servers. Use `--workers N` only when the serving recipe
-actually supports at least `N` concurrent sequences.
+time, 500 steps maximum, a 120-second stream-idle timeout, and a 256-token
+output budget. Responses stream for consistent telemetry. Serial requests keep latency comparable and work
+correctly with single-sequence Spark servers. Use `--workers N` only when the
+serving recipe actually supports at least `N` concurrent sequences.
 
 The evaluator compares the model with masked-random and economic baselines,
-reports mean reward, final credits, action latency, and steps, then writes
-`reports/evals/<model-id>.json`. Every model episode is stored under
-`trajectories/<model-id>/` and replayed against the authoritative rules. The
-standard command resumes by default, including a replay-valid partial seed,
+reports mean reward, final credits, action latency, and steps, then writes a
+model- and protocol-named JSON report. Every model episode is stored under
+`trajectories/<model-id>/<protocol>/` and replayed against the
+authoritative rules. Distinct semantic protocol names prevent an older prompt
+from being silently resumed into a current run. The standard command
+resumes by default, including a replay-valid partial seed,
 and checkpoints each completed seed to its output report. Re-run the same
 command after an interruption; only the unfinished seed and later seeds run
 again.

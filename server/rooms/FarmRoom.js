@@ -13,6 +13,7 @@ const { savePlayer, loadPlayer } = require('../persistence');
 // yearly festival dates all come from the single shared module. Inject a
 // different Calendar for tests/variants via FarmRoom.calendar or room.calendar.
 const { createCalendar, DEFAULT_CALENDAR } = require('../../shared/calendar.js');
+const { aliens: ALIEN_DATA, doctrines: CONTACT_DOCTRINES } = require('../../shared/story/aliens.js');
 
 // ── Schema definitions ──
 
@@ -68,6 +69,7 @@ class Player extends Schema {
     this.lifetime = {};          // lifetime totals (earned, harvested, sold, fished, mined, gifts) — survive New Game+
     this.ngPlus = 0;             // New Game+ cycle count (0 = first playthrough)
     this.milestonesSeen = {};    // milestoneId → 1 (toast fires once per save)
+    this.contactChoices = {};    // scenarioId → doctrineId (authoritative colony history)
   }
 }
 defineTypes(Player, {
@@ -95,6 +97,7 @@ defineTypes(Player, {
   lifetime: { map: 'number' },      // lifetime totals across New Game+ cycles
   ngPlus: 'number',                 // NG+ cycle count
   milestonesSeen: { map: 'number' },// milestoneId → 1
+  contactChoices: { map: 'string' }, // alien scenarioId → chosen doctrine
 });
 
 class Tile extends Schema {
@@ -227,6 +230,62 @@ const TOOLS = {
 const WATER_TANK_MAX = 100;   // can capacity, in water units
 const WATER_USE_COST = 20;    // units drained per water action
 
+// A new game starts from this exact inventory. New Game+ uses the same table,
+// so browser play, persistence, and RL reset cannot drift apart.
+const STARTER_INVENTORY = Object.freeze({
+  seeds: 5, 'tech-part': 2, 'starlight-crystal': 1, 'exotic-seed': 1,
+  'space-feather': 1, 'data-crystal': 1, 'rare-mineral': 1,
+  'cooked-food': 1, weeds: 1, flowers: 1,
+});
+
+// The wire protocol is the game action API.  Keep it beside the handlers so
+// the browser, headless RL environment, and tests all discover the same
+// surface instead of maintaining competing action lists and name mappings.
+// `reply` mirrors NetworkSystem.request(): these messages send their handler
+// result back on the same channel; fire-and-forget messages only mutate state.
+const GAME_ACTIONS = Object.freeze([
+  { type: 'move', handler: 'onMove', reply: false },
+  { type: 'plant', handler: 'onPlant', reply: false },
+  { type: 'water', handler: 'onWater', reply: false },
+  { type: 'harvest', handler: 'onHarvest', reply: false },
+  { type: 'till', handler: 'onTill', reply: false },
+  { type: 'sell', handler: 'onSell', reply: true },
+  { type: 'order', handler: 'onOrder', reply: false },
+  { type: 'buy', handler: 'onShopBuy', reply: true },
+  { type: 'gift', handler: 'onGift', reply: true },
+  { type: 'talk', handler: 'onTalk', reply: true },
+  { type: 'propose', handler: 'onPropose', reply: true },
+  { type: 'advance', handler: 'onAdvanceDay', reply: false },
+  { type: 'newGamePlus', handler: 'onNewGamePlus', reply: true },
+  { type: 'completeTutorial', handler: 'onTutorialComplete', reply: false },
+  { type: 'buyAnimal', handler: 'onBuyAnimal', reply: true },
+  { type: 'feedAnimal', handler: 'onFeedAnimal', reply: true },
+  { type: 'fish', handler: 'onFish', reply: true },
+  { type: 'mine', handler: 'onMine', reply: true },
+  { type: 'cook', handler: 'onCook', reply: true },
+  { type: 'deposit', handler: 'onDeposit', reply: true },
+  { type: 'withdraw', handler: 'onWithdraw', reply: true },
+  { type: 'upgradeTool', handler: 'onUpgradeTool', reply: true },
+  { type: 'equip', handler: 'onEquip', reply: true },
+  { type: 'fillWater', handler: 'onFillWater', reply: true },
+  { type: 'claimFestival', handler: 'onClaimFestival', reply: true },
+  { type: 'contact', handler: 'onContact', reply: true },
+]);
+const GAME_ACTION_BY_TYPE = new Map(GAME_ACTIONS.map((action) => [action.type, action]));
+
+function dispatchGameAction(room, client, type, data = {}, { emitReply = true } = {}) {
+  const action = GAME_ACTION_BY_TYPE.get(type);
+  if (!action) return { ok: false, reason: 'unknown-action', type };
+  const result = room[action.handler](client, data || {});
+  // A few live fire-and-forget handlers intentionally return nothing.  Their
+  // successful dispatch is still an actionable transition for RL callers.
+  const normalized = result === undefined ? { ok: true } : result;
+  if (emitReply && action.reply && client && typeof client.send === 'function') {
+    client.send(type, normalized);
+  }
+  return normalized;
+}
+
 // ── Energy: one table, one gate. Every action that spends energy goes
 //    through _energyCost()/_spendEnergy() on the room — nothing else mutates
 //    a player's energy. Base costs below; tool tiers (energyMult) scale farm
@@ -333,6 +392,29 @@ const FISH_INFO = {
   'comet-trout':      { worth: 65,  spots: ['stardust'],          seasons: [2, 3],    night: true },
   'nebula-marlin':    { worth: 120, spots: ['deep'],              seasons: [3],       night: true },
 };
+
+// Every credit price exposed by the game. These tables are consumed directly
+// by handlers and the RL planning contract; neither side keeps a shadow copy.
+const SHOP_PRICES = Object.freeze({
+  seeds: 5, 'stardust-crystal': 100, 'tech-part': 40, 'cooked-food': 40,
+});
+const SELL_PRICES = Object.freeze({
+  'space-wheat': 20, 'star-berry': 35, 'moon-melon': 50,
+  'plasma-tomato': 40, 'stardust-crystal': 100,
+  'nebulite-ore': 75, egg: 25, milk: 30, wool: 45,
+  moonfish: 25, 'stardust-salmon': 45, 'comet-trout': 65,
+  'nebula-marlin': 120, 'asteroid-dust': 40, 'nickel-iron': 75,
+  'silicon-carbide': 110, 'void-diamond': 250, 'cooked-food': 40,
+  ...DISH_SELL,
+});
+const MINING_INFO = Object.freeze({
+  hardnessSwings: Object.freeze({ min: 3, max: 7 }),
+  lootByHardness: Object.freeze({
+    '3-4': Object.freeze({ 'nickel-iron': 0.5, 'asteroid-dust': 0.5 }),
+    '5-6': Object.freeze({ 'silicon-carbide': 0.5, 'nickel-iron': 0.5 }),
+    '7': Object.freeze({ 'void-diamond': 1 }),
+  }),
+});
 
 // ══ 'THE STARDUST STORY' — the quest arc ═════════════════════════════════
 // 3 acts / 14 quests. Every objective maps to an EXISTING server event, so the
@@ -533,88 +615,10 @@ class FarmRoom extends Room {
       this.state.players.forEach((p) => { if (p) this.saveNow(p.id, false); });
     }, 90000);
 
-    // ── register message handlers (colyseus 0.17: this.onMessage(type, (client, data) => …)) ──
-    this.onMessage('move', (client, data) => this.onMove(client, data));
-    this.onMessage('plant', (client, data) => this.onPlant(client, data));
-    this.onMessage('water', (client, data) => this.onWater(client, data));
-    this.onMessage('harvest', (client, data) => this.onHarvest(client, data));
-    this.onMessage('till', (client, data) => this.onTill(client, data));
-    this.onMessage('sell', (client, data) => {
-      const r = this.onSell(client, data);
-      if (client && client.send) client.send('sell', r);   // sell needs a reply (GE/ranch kiosks await it)
-    });
-    this.onMessage('order', (client, data) => this.onOrder(client, data));
-    // ── Supply Depot — the colony shop. Every item the client advertises
-    //    must be purchasable here, or the shelf is a lie. ──
-    this.onMessage('buy', (client, data) => {
-      const r = this.onShopBuy(client, data);
-      if (client && client.send) client.send('buy', r);
-    });
-    // reply-capable handlers: colyseus 0.17 no longer auto-replies return values,
-    // so explicitly send the result back to the caller via client.send(type, result).
-    this.onMessage('gift', (client, data) => {
-      const result = this.onGift(client, data);
-      if (client && client.send) client.send('gift', result);
-    });
-    this.onMessage('talk', (client, data) => {
-      const result = this.onTalk(client, data);
-      if (client && client.send) client.send('talk', result);
-    });
-    this.onMessage('propose', (client, data) => {
-      const result = this.onPropose(client, data);
-      if (client && client.send) client.send('propose', result);
-    });
-    this.onMessage('advance', (client, data) => this.onAdvanceDay(client, data));
-    this.onMessage('newGamePlus', (client) => {
-      const result = this.onNewGamePlus(client);
-      if (client && client.send) client.send('newGamePlus', result);
-    });
-    this.onMessage('completeTutorial', (client, data) => this.onTutorialComplete(client, data));
-    // ── livestock + seasons ──
-    this.onMessage('buyAnimal', (client, data) => {
-      const r = this.onBuyAnimal(client, data);
-      if (client && client.send) client.send('buyAnimal', r);
-    });
-    this.onMessage('feedAnimal', (client, data) => {
-      const r = this.onFeedAnimal(client, data);
-      if (client && client.send) client.send('feedAnimal', r);
-    });
-    this.onMessage('fish', (client, data) => {
-      const r = this.onFish(client, data);
-      if (client && client.send) client.send('fish', r);
-    });
-    this.onMessage('mine', (client, data) => {
-      const r = this.onMine(client, data);
-      if (client && client.send) client.send('mine', r);
-    });
-    this.onMessage('cook', (client, data) => {
-      const r = this.onCook(client, data);
-      if (client && client.send) client.send('cook', r);
-    });
-    this.onMessage('deposit', (client, data) => {
-      const r = this.onDeposit(client, data);
-      if (client && client.send) client.send('deposit', r);
-    });
-    this.onMessage('withdraw', (client, data) => {
-      const r = this.onWithdraw(client, data);
-      if (client && client.send) client.send('withdraw', r);
-    });
-    this.onMessage('upgradeTool', (client, data) => {
-      const r = this.onUpgradeTool(client, data);
-      if (client && client.send) client.send('upgradeTool', r);
-    });
-    this.onMessage('equip', (client, data) => {
-      const r = this.onEquip(client, data);
-      if (client && client.send) client.send('equip', r);
-    });
-    this.onMessage('fillWater', (client, data) => {
-      const r = this.onFillWater(client);
-      if (client && client.send) client.send('fillWater', r);
-    });
-    this.onMessage('claimFestival', (client, data) => {
-      const r = this.onClaimFestival(client, data);
-      if (client && client.send) client.send('claimFestival', r);
-    });
+    // Register exactly the same discoverable action table used by headless RL.
+    for (const action of GAME_ACTIONS) {
+      this.onMessage(action.type, (client, data) => dispatchGameAction(this, client, action.type, data));
+    }
   }
 
   // ── Persistence: serialize a player + farm into a plain JSON-safe object ──
@@ -644,6 +648,7 @@ class FarmRoom extends Room {
       lifetime: map(player.lifetime),
       ngPlus: player.ngPlus || 0,
       milestonesSeen: map(player.milestonesSeen),
+      contactChoices: map(player.contactChoices),
       quests: {
         current: player.quests.current,
         completed: Array.from(player.quests.completed),
@@ -716,6 +721,7 @@ class FarmRoom extends Room {
     fill(player.lifetime, data.lifetime);
     player.ngPlus = data.ngPlus || 0;
     fill(player.milestonesSeen, data.milestonesSeen);
+    fill(player.contactChoices, data.contactChoices);
     const q = player.quests;
     if (data.quests) {
       q.current = data.quests.current || '';
@@ -779,16 +785,7 @@ class FarmRoom extends Room {
       // new farmer — starter gift items so the friendship/gifting loop is
       // testable from day one (inventory is a MapSchema — populate via .set())
       freshPlayer.name = options.name || 'Farmer';
-      freshPlayer.inventory.set('seeds', 5);
-      freshPlayer.inventory.set('tech-part', 2);
-      freshPlayer.inventory.set('starlight-crystal', 1);
-      freshPlayer.inventory.set('exotic-seed', 1);
-      freshPlayer.inventory.set('space-feather', 1);
-      freshPlayer.inventory.set('data-crystal', 1);
-      freshPlayer.inventory.set('rare-mineral', 1);
-      freshPlayer.inventory.set('cooked-food', 1);
-      freshPlayer.inventory.set('weeds', 1);
-      freshPlayer.inventory.set('flowers', 1);
+      this._grantStarterInventory(freshPlayer);
       // starter tool kit: every new farmer owns the four basic tools.
       this._grantStarterTools(freshPlayer);
       // 'The Stardust Story' begins for every new farmer — the intro crawl
@@ -899,20 +896,12 @@ class FarmRoom extends Room {
     p.energy = 100;
     p.tool = 'base';
     p.mineHp = 0; p.mineMax = 0;
-    p.inventory.clear();
     p.storage.clear();
     p.animals.clear();
     p.animalsFedDay.clear();
     p.tools.clear();
     // starter gift + starter kit, same as a brand-new farmer
-    p.inventory.set('seeds', 5);
-    p.inventory.set('tech-part', 2);
-    p.inventory.set('starlight-crystal', 1);
-    p.inventory.set('exotic-seed', 1);
-    p.inventory.set('space-feather', 1);
-    p.inventory.set('data-crystal', 1);
-    p.inventory.set('rare-mineral', 1);
-    p.inventory.set('cooked-food', 1);
+    this._grantStarterInventory(p);
     this._grantStarterTools(p);
     // story restarts (a new cycle of The Stardust Story)
     p.quests.current = '';
@@ -970,6 +959,14 @@ class FarmRoom extends Room {
     if (opts.fresh !== false) {
       p.equipped = '';
       p.waterLevel = WATER_TANK_MAX;
+    }
+  }
+
+  _grantStarterInventory(p) {
+    if (!p || !p.inventory) return;
+    p.inventory.clear();
+    for (const [item, count] of Object.entries(STARTER_INVENTORY)) {
+      p.inventory.set(item, count);
     }
   }
 
@@ -1094,21 +1091,7 @@ class FarmRoom extends Room {
     this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
-    // Sellable prices. ('nebula-cream' was a phantom item — it appears in no
-    // crop/ITEMS/SALEABLE table and no quest — so it's gone.) Note the farm's
-    // harvest sink is CROP_INFO.cr (see onHarvest); the crop rows here are
-    // the historical sell prices, retained pending a product call on harvest.
-    const prices = {
-      'space-wheat': 20, 'star-berry': 35, 'moon-melon': 50,
-      'plasma-tomato': 40, 'stardust-crystal': 100,
-      'nebulite-ore': 75, 'egg': 25, 'milk': 30, 'wool': 45,
-      'moonfish': 25, 'stardust-salmon': 45, 'comet-trout': 65, 'nebula-marlin': 120,
-      'asteroid-dust': 40, 'nickel-iron': 75, 'silicon-carbide': 110, 'void-diamond': 250,
-      'cooked-food': 40,
-    };
-    // named kitchen dishes (M4) — dishes sell for 2-4x their raw ingredients
-    for (const k in DISH_SELL) if (!(k in prices)) prices[k] = DISH_SELL[k];
-    const price = prices[data.item] || 10;
+    const price = SELL_PRICES[data.item] || 10;
     // Economy integrity: you can only sell what you actually hold.
     const qty = Math.max(1, Math.floor(data.quantity || 1));
     const have = player.inventory.get(data.item) || 0;
@@ -1127,12 +1110,6 @@ class FarmRoom extends Room {
     this._tickClock();  // a moment of the day passes
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
-    const SHOP_PRICES = {
-      'seeds': 5,                  // the progression unlocker — the farm needs seeds
-      'stardust-crystal': 100,
-      'tech-part': 40,
-      'cooked-food': 40,
-    };
     const item = data && data.item;
     const price = SHOP_PRICES[item];
     if (!price) return { ok: false, reason: 'not-for-sale', item: item || null };
@@ -1240,7 +1217,7 @@ class FarmRoom extends Room {
     const npcId = data.npc;
     if (!npcId) return { ok: false, reason: 'bad-params' };
     // daily +2 cap: a given NPC can only be talked to once per day
-    const last = player.lastTalkDay.get(npcId) || -1;
+    const last = player.lastTalkDay.get(npcId) ?? -1;
     if (last === this.state.day) return { ok: false, reason: 'already-talked', npc: npcId };
     player.lastTalkDay.set(npcId, this.state.day);
     const cur = player.friendships.get(npcId) || 0;
@@ -1597,6 +1574,26 @@ class FarmRoom extends Room {
     return { ok: true, credits: player.credits, npc: npcId, festival: true };
   }
 
+  // ── First contact: a reward-neutral but persistent colony doctrine. ──
+  // This used to exist only in browser localStorage, which made the choice
+  // invisible to saves, multiplayer, replays, and RL. It is now a normal game
+  // action with the same StoryBank ids the client renders.
+  onContact(client, data) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return { ok: false, reason: 'no-player' };
+    const alien = ALIEN_DATA.find((entry) =>
+      entry.id === (data && data.alien) || entry.scenarioId === (data && data.scenario));
+    if (!alien) return { ok: false, reason: 'unknown-alien', alien: data && data.alien };
+    const doctrine = CONTACT_DOCTRINES.find((entry) => entry.id === (data && data.doctrine));
+    if (!doctrine) return { ok: false, reason: 'unknown-doctrine', doctrine: data && data.doctrine };
+    player.contactChoices.set(alien.scenarioId, doctrine.id);
+    return {
+      ok: true, alien: alien.id, scenario: alien.scenarioId,
+      doctrine: doctrine.id, label: doctrine.label, aftermath: doctrine.aftermath,
+      rewardNeutral: true,
+    };
+  }
+
   // ── 'The Stardust Story' — quest engine ───────────────────────────────────
   // Objective progress is server-authoritative. Incremental objectives (plant,
   // harvest, sell, fish, mine, cook, gift, feed, festival, talk) bump a counter
@@ -1700,4 +1697,4 @@ class FarmRoom extends Room {
   }
 }
 
-module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST };
+module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY, SHOP_PRICES, SELL_PRICES, MINING_INFO, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, PRODUCE_PRICES, CROP_INFO, FISH_INFO, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE };

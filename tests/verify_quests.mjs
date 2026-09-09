@@ -83,6 +83,7 @@ check('catching a fish completes q1_learn_fish', p.quests.current === 'q1_debt_i
 // q1_debt_installment: earn 150cr selling + talk quasar → complete
 p.inventory.set('space-wheat', (p.inventory.get('space-wheat') || 0) + 10);
 room.onSell(client, { item: 'space-wheat', quantity: 10 });   // 20*10 = 200 >= 150
+room.state.day += 1; // Arrange the next-day quest case; duplicate talk itself never advances time.
 room.onTalk(client, { npc: 'quasar' });
 check('sell + talk completes q1_debt_installment', p.quests.current === 'q2_meet_nova');
 check('Act 1 fully done (5 quests)', ['q1_meet_quasar','q1_first_soil','q1_first_harvest','q1_learn_fish','q1_debt_installment'].every((q) => p.quests.completed.includes(q)));
@@ -175,6 +176,7 @@ while (m2 < 5) {
 }
 room.state.festival = true;
 room.onClaimFestival(client, {});   // festival objective
+room.state.day += 1; // Arrange the next-day quest case; duplicate talk itself never advances time.
 room.onTalk(client, { npc: 'nova' });
 check('mine 5 + festival + talk-nova completes the arc', p.quests.arcDone === true);
 check('final reward: 500cr + stardust-core item', p.credits >= 500 && (p.inventory.get('stardust-core') || 0) >= 1);

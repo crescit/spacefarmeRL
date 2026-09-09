@@ -47,14 +47,14 @@ check('the denied tile stays empty', env.farm().tiles.find((t) => t.x === 2 && t
 
 // 4. Rest recovers toward the ceiling AND the day's work conditions the body.
 const maxBefore = env.player().staminaMax;
-env.step({ type: 'advance_day' });
+env.step({ type: 'advance' });
 const p = env.player();
 check('a day of real work trains the ceiling (+2)', p.staminaMax === maxBefore + 2, `${maxBefore} -> ${p.staminaMax}`);
 check('rest recovers +30 toward the ceiling', p.energy === Math.min(p.staminaMax, 30), `energy ${p.energy}`);
 
 // 5. Tool tiers are technique: an iron hoe spends less stamina per action.
 p.credits = 250;
-env.step({ type: 'upgrade_tool' });
+env.step({ type: 'upgradeTool', tool: 'hoe' });
 check('hoe upgrade succeeded', p.tool === 'iron');
 const e0 = p.energy;
 env.step({ type: 'till', tileX: 5, tileY: 5 });

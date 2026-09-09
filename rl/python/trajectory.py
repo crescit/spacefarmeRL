@@ -9,13 +9,54 @@ from rl.python.env_gym import FarmGymEnv, SimBridge
 
 
 class TrajectoryRecorder:
-    def __init__(self, env: FarmGymEnv, path: str | Path, action_interface: str = "masked-macro-v3-strict"):
+    def __init__(self, env: FarmGymEnv, path: str | Path, action_interface: str = "energy-grounded-native-strict"):
         self.env = env
         self.path = Path(path)
         self.action_interface = action_interface
         self.handle = None
         self.steps = 0
         self._summary_written = False
+        self.last_record: dict[str, Any] | None = None
+
+    def _changes(
+        self, before: dict[str, Any], after: dict[str, Any]
+    ) -> dict[str, Any]:
+        changes: dict[str, Any] = {}
+        for key in ("credits", "energy", "day", "waterLevel", "questsCompleted"):
+            delta = float(after.get(key, 0)) - float(before.get(key, 0))
+            if delta:
+                changes[f"{key}_delta"] = delta
+        before_inventory = before.get("inventory") or {}
+        after_inventory = after.get("inventory") or {}
+        inventory_delta = {
+            name: int(after_inventory.get(name, 0)) - int(before_inventory.get(name, 0))
+            for name in sorted(set(before_inventory) | set(after_inventory))
+            if int(after_inventory.get(name, 0)) != int(before_inventory.get(name, 0))
+        }
+        if inventory_delta:
+            changes["inventory_delta"] = inventory_delta
+        species = ("chicken", "cow", "sheep")
+        animal_delta = {
+            name: int(after.get("animals", [0, 0, 0])[index])
+            - int(before.get("animals", [0, 0, 0])[index])
+            for index, name in enumerate(species)
+            if int(after.get("animals", [0, 0, 0])[index])
+            != int(before.get("animals", [0, 0, 0])[index])
+        }
+        if animal_delta:
+            changes["animals_delta"] = animal_delta
+        return changes
+
+    @staticmethod
+    def _energy_budget(before: dict[str, Any], after: dict[str, Any]) -> dict[str, float]:
+        energy_before = float(before.get("energy", 0))
+        energy_after = float(after.get("energy", 0))
+        return {
+            "before": energy_before,
+            "cost": max(0.0, energy_before - energy_after),
+            "after": energy_after,
+            "capacity": float(after.get("staminaMax", before.get("staminaMax", 100))),
+        }
 
     def reset(self, *, seed: int, options: dict[str, Any] | None = None):
         obs, info = self.env.reset(seed=seed, options=options)
@@ -24,7 +65,7 @@ class TrajectoryRecorder:
             self.handle.close()
         self.handle = self.path.open("w", encoding="utf-8")
         header = {
-            "kind": "space-farmer-trajectory", "version": 2,
+            "kind": "space-farmer-trajectory",
             "action_interface": self.action_interface,
             "seed": int(seed),
             "horizon_days": int((options or {}).get("horizon_days", self.env.horizon_days)),
@@ -47,8 +88,11 @@ class TrajectoryRecorder:
         if (
             int(header.get("seed", -1)) != int(seed)
             or int(header.get("horizon_days", -1)) != self.env.horizon_days
+            or header.get("action_interface") != self.action_interface
         ):
-            raise ValueError("trajectory seed or horizon does not match resume command")
+            raise ValueError(
+                "trajectory seed, horizon, or action interface does not match resume command"
+            )
         obs, info = self.env.reset(seed=seed)
         if self.env.raw_obs != header.get("initial_observation"):
             raise AssertionError("trajectory initial observation does not replay")
@@ -85,9 +129,10 @@ class TrajectoryRecorder:
         self.steps = len(transitions)
         return obs, info, total_reward, terminated, truncated
 
-    def step(self, action: int):
+    def step(self, action: int, *, policy_decision: dict[str, Any] | None = None):
         if self.handle is None:
             raise RuntimeError("reset() must be called before step()")
+        before = dict(self.env.raw_obs or {})
         result = self.env.step(action)
         _obs, reward, terminated, truncated, info = result
         record = {
@@ -98,17 +143,26 @@ class TrajectoryRecorder:
             "terminated": bool(terminated),
             "truncated": bool(truncated),
             "info": {key: value for key, value in info.items() if key != "action_mask"},
+            "changes": self._changes(before, self.env.raw_obs or {}),
+            "energy": self._energy_budget(before, self.env.raw_obs or {}),
             "observation": self.env.raw_obs,
         }
+        if policy_decision is not None:
+            record["policy_decision"] = policy_decision
+        self.last_record = record
         self.handle.write(json.dumps(record, separators=(",", ":")) + "\n")
         self.handle.flush()
         self.steps += 1
         return result
 
-    def step_native(self, native: dict[str, Any], *, tool: str | None = None):
+    def step_native(
+        self, native: dict[str, Any], *, tool: str | None = None,
+        policy_decision: dict[str, Any] | None = None,
+    ):
         """Record one native (tool-driven) transition into the trajectory."""
         if self.handle is None:
             raise RuntimeError("reset() must be called before step()")
+        before = dict(self.env.raw_obs or {})
         result = self.env.native_step(native)
         _obs, reward, terminated, truncated, info = result
         record = {
@@ -119,10 +173,15 @@ class TrajectoryRecorder:
             "terminated": bool(terminated),
             "truncated": bool(truncated),
             "info": {key: value for key, value in info.items() if key != "action_mask"},
+            "changes": self._changes(before, self.env.raw_obs or {}),
+            "energy": self._energy_budget(before, self.env.raw_obs or {}),
             "observation": self.env.raw_obs,
         }
         if info.get("prose"):
             record["prose"] = info["prose"]
+        if policy_decision is not None:
+            record["policy_decision"] = policy_decision
+        self.last_record = record
         self.handle.write(json.dumps(record, separators=(",", ":")) + "\n")
         self.handle.flush()
         self.steps += 1
@@ -143,7 +202,7 @@ class TrajectoryRecorder:
         if self._summary_written or self.env.raw_obs is None:
             return
         record = {
-            "kind": "episode-summary", "version": 1,
+            "kind": "episode-summary",
             "stats": self.env.narrative_stats(),
             "testimony": self.env.testimony(),
         }

@@ -33,8 +33,8 @@ function run() {
   env.step({ type: 'till', tileX: 0, tileY: 0 });
   env.step({ type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' });
   env.step({ type: 'water', tileX: 0, tileY: 0 });
-  const p1 = env.step({ type: 'advance_day' });
-  const p2 = env.step({ type: 'advance_day' });
+  const p1 = env.step({ type: 'advance' });
+  const p2 = env.step({ type: 'advance' });
   return { briefing: env.briefing(), prose: p1.info.prose + '|' + p2.info.prose, log: env.colonyLogText() };
 }
 const a = run(), b = run();

@@ -144,10 +144,10 @@ console.log('== Env-level checkpoint (deterministic replay) ==');
     { type: 'plant', tileX: 0, tileY: 0, crop: 'space-wheat' },
     { type: 'water', tileX: 0, tileY: 0 },
   ];
-  for (let d = 0; d < MD; d++) script.push({ type: 'advance_day' }, { type: 'water', tileX: 0, tileY: 0 });
+  for (let d = 0; d < MD; d++) script.push({ type: 'advance' }, { type: 'water', tileX: 0, tileY: 0 });
   script.push(
     { type: 'mine' }, { type: 'mine' }, { type: 'fish', spot: 'stardust' },
-    { type: 'advance_day' },
+    { type: 'advance' },
     { type: 'harvest', tileX: 0, tileY: 0 },
     { type: 'mine' }, { type: 'mine' }, { type: 'fish', spot: 'copper' },
   );

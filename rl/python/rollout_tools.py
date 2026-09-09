@@ -108,17 +108,20 @@ def run_seed(policy: ToolDialogPolicy, seed: int, horizon_days: int,
         for _ in range(max_steps):
             started = time.perf_counter()
             native = policy.choose_native(env)
-            from_model = native is not None
             if native is None:
-                native = {"type": "advance_day"}   # keeper declined to act → the day ends
+                print(
+                    f"seed={seed} stopped=NO_TOOL_CALL step={steps + 1} "
+                    "no game action executed",
+                    flush=True,
+                )
+                break
             _obs, reward, terminated, truncated, info = recorder.step_native(native, tool=native["type"])
-            if from_model:
-                policy.observe(native, info)
+            policy.observe(native, info)
             steps += 1
             ms = (time.perf_counter() - started) * 1000
             print(f"seed={seed} day={env.raw_obs['day']:02d} step={steps:03d} {native['type']:<14} "
                   f"reward={reward:7.3f} latency={ms:7.1f}ms", flush=True)
-            if native["type"] in ("advance_day", "rest") and not (terminated or truncated):
+            if native["type"] in ("advance", "rest") and not (terminated or truncated):
                 policy.begin_day(env.briefing())
             if terminated or truncated:
                 break
