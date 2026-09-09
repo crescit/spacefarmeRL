@@ -9,30 +9,20 @@ are reproducible from the report's seeds and can grow quickly.
 Leaderboard entries must use:
 
 - action interface `masked-macro-v3-strict`;
-- seeds 1 through 10;
+- seeds 1 through 30;
 - a 30-day horizon (one full B-612 season);
 - deterministic model sampling;
 - the same environment revision.
 
-Run a new model:
+Run a new model by pointing at its endpoint:
 
 ~~~bash
-export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
-export OPENAI_API_KEY=sk-local
-export OPENAI_MODEL=model-id
-
-npm run eval:local-model -- \
-  --seeds 10 \
-  --seed-start 1 \
-  --horizon-days 30 \
-  --max-steps 500 \
-  --timeout 120 \
-  --thinking \
-  --reasoning-effort low \
-  --resume \
-  --output reports/evals/model-id.json \
-  --trajectory-dir trajectories/model-id
+npm run eval:endpoint -- http://127.0.0.1:8000
 ~~~
+
+The runner discovers the sole advertised model, uses `max` reasoning with a
+4096-token budget, and selects filesystem-safe output paths. Gateways exposing
+multiple models must add `--model MODEL_ID` to resolve the ambiguity.
 
 Use a filesystem-safe model slug for the filename. The JSON report is the
 committed result; trajectories are retained locally for inspection and are
@@ -53,24 +43,17 @@ must not be mixed into the current leaderboard.
 
 The release eval is **thirty one-season episodes** (30 seeds × 30 days each —
 year-long horizons are reserved for committed sagas and can be slow). Run it
-parallelized across seeds so wall-clock stays tolerable:
+with the same endpoint-only command:
 
 ~~~bash
-export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
-export OPENAI_API_KEY=sk-local
-export OPENAI_MODEL=model-id
-
-python -m rl.python.eval_local_model \
-  --seeds 30 --horizon 1 season --workers 4 --resume \
-  --max-steps 500 --timeout 120 \
-  --output reports/evals/model-id.json \
-  --trajectory-dir trajectories/model-id
+npm run eval:endpoint -- http://127.0.0.1:8000
 ~~~
 
 `--horizon 1 season | 1 year | N` resolves against the single-source B-612
-calendar (season = 30 days). `--workers N` runs seeds on independent
-simulation processes and policy instances while still checkpointing a partial
-report after every completed seed.
+calendar (season = 30 days). `--workers N` runs seeds on independent simulation
+processes and policy instances while still checkpointing a partial report after
+every completed seed. The standard default is one worker so latency remains
+comparable on single-sequence serving profiles.
 
 Reports are **report v4**: besides reward, credits, steps, latency, validity
 rates and the random/economic baselines, every episode carries the
@@ -116,7 +99,7 @@ they are infrastructure diagnostics, not evidence of model quality.
 
 ## Reward-neutral first contact
 
-The alien suite is separate from the economic leaderboard. It presents the same eight dilemmas found in the web game and records preferences across five doctrines without assigning reward or moral rank. Run `npm run eval:alignment -- --thinking --reasoning-effort low --output reports/evals/alignment/model-id.json`. An invalid or missing JSON choice stays invalid; it is never converted into a doctrine. These reports are behavioral telemetry, not an alignment score.
+The alien suite is separate from the economic leaderboard. It presents the same eight dilemmas found in the web game and records preferences across five doctrines without assigning reward or moral rank. Run `npm run eval:alignment -- --thinking --reasoning-effort max --output reports/evals/alignment/model-id.json`. An invalid or missing JSON choice stays invalid; it is never converted into a doctrine. These reports are behavioral telemetry, not an alignment score.
 
 ## Report interpretation
 

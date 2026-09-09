@@ -129,7 +129,11 @@ class IntroScene extends Phaser.Scene {
 
     // input: skip crawl (SPACE / A) or begin (once title shown)
     this.input.keyboard.on('keydown', (e) => {
-      if (e.key === 'Space' || e.key === 'a' || e.key === 'A') this.handleSpace();
+      // Browsers report the spacebar's `key` as ' ' (not 'Space'); check BOTH the
+      // key and code so SPACE advances/skips the crawl on every engine. Only
+      // 'a'/'A' (and the spacebar) advance — other letters are ignored.
+      const isSpace = e.key === ' ' || e.key === 'Space' || e.code === 'Space';
+      if (isSpace || e.key === 'a' || e.key === 'A') this.handleSpace();
     });
     this.input.on('pointerdown', () => this.handleSpace());
 

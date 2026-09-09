@@ -1,7 +1,12 @@
 // FarmRoom.js — Colyseus room for Space Farmer
 // Each room = one planet instance with up to 16 players
 const { Room } = require('@colyseus/core');
-const { Schema, ArraySchema, defineTypes } = require('@colyseus/schema');
+const { Schema, ArraySchema, Encoder, defineTypes } = require('@colyseus/schema');
+// A populated 16-player room (each player owns a 64-tile farm plus story and
+// inventory maps) exceeds Colyseus' generic 8 KiB default full-state buffer.
+// Reserve enough for the documented room capacity so joins never trigger a
+// last-second encoder growth/overflow warning in production.
+Encoder.BUFFER_SIZE = Math.max(Encoder.BUFFER_SIZE, 128 * 1024);
 const { savePlayer, loadPlayer } = require('../persistence');
 // The B-612 calendar is a SERVICE we depend on, never reimplemented here:
 // days-per-season, season boundaries, growth pacing, crop maturity, and the
@@ -560,7 +565,10 @@ class FarmRoom extends Room {
       if (client && client.send) client.send('propose', result);
     });
     this.onMessage('advance', (client, data) => this.onAdvanceDay(client, data));
-    this.onMessage('newGamePlus', (client, data) => this.onNewGamePlus(client));
+    this.onMessage('newGamePlus', (client) => {
+      const result = this.onNewGamePlus(client);
+      if (client && client.send) client.send('newGamePlus', result);
+    });
     this.onMessage('completeTutorial', (client, data) => this.onTutorialComplete(client, data));
     // ── livestock + seasons ──
     this.onMessage('buyAnimal', (client, data) => {

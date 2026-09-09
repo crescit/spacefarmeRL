@@ -14,6 +14,7 @@
     "train:ppo": "python3 -m rl.python.train_ppo",
     "check:public": "bash scripts/public_check.sh",
     "eval:local-model": "python3 -m rl.python.eval_local_model --resume",
+    "eval:endpoint": "uv run --with-requirements rl/python/requirements.txt python -m rl.python.eval_endpoint",
     "compare:models": "python3 -m rl.python.compare_evals",
     "report:models": "python3 -m rl.python.render_eval_report",
     "rollout:tools": "python3 -m rl.python.rollout_tools",

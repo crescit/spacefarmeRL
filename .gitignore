@@ -6,7 +6,11 @@ __pycache__/
 .coverage
 .pytest_cache/
 dist/
-artifacts/
+# Generated artifacts stay local, except the finished shareable promo.
+artifacts/*
+!artifacts/demo/
+artifacts/demo/*
+!artifacts/demo/space-farmer-demo.mp4
 trajectories/
 checkpoints/
 *.tmp

@@ -58,11 +58,14 @@ PPO uses `sb3-contrib` MaskablePPO and the environment's live action mask.
 ## OpenAI-compatible policy evaluation
 
 ~~~bash
-export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
-export OPENAI_API_KEY=sk-local
-export OPENAI_MODEL=local-coder
-python -m rl.python.eval_local_model --seeds 10 --horizon-days 30 --resume
+npm run eval:endpoint -- http://127.0.0.1:8000
 ~~~
+
+The endpoint runner discovers the sole model from `/v1/models`, derives safe
+artifact paths, and applies the locked release settings: 30 seeds, one season,
+thinking enabled, `max` reasoning effort, 4096 output tokens, and resumable
+serial execution. Pass `--model` only for a gateway that advertises multiple
+models, or `--workers N` only when the backend supports that concurrency.
 
 The model receives a compact state summary and only currently valid macro
 actions. The report includes reward, final credits, steps, request latency,
@@ -87,23 +90,18 @@ trajectory stores the same record as its terminal `episode-summary` line
 
 ### Release protocol — 30 season-ones
 
-For release evals, run thirty one-season episodes (30 days each). The runner
-parallelizes seeds so the wall-clock cost stays tolerable:
+For release evals, run thirty one-season episodes (30 days each):
 
 ~~~bash
-python -m rl.python.eval_local_model \
-  --seeds 30 --horizon 1 season --workers 4 --resume \
-  --max-steps 500 --timeout 120 \
-  --output reports/evals/<model>.json \
-  --trajectory-dir trajectories/<model>
+npm run eval:endpoint -- http://127.0.0.1:8000
 ~~~
 
 - `--horizon 1 season | 1 year | N` resolves against the single-source B-612
   calendar (season = 30 days); `--horizon-days` still gives exact control.
 - `--workers N` runs independent seeds concurrently — each worker owns its own
   simulation process and policy instance — while preserving the partial-report
-  checkpoint after every completed seed. Default `--workers 1` behaves exactly
-  like the historical runner.
+  checkpoint after every completed seed. The locked default is `1`, which avoids
+  queue-inflated latency on single-sequence serving profiles.
 - The Markdown leaderboard (`compare_evals.py`) and HTML dashboard
   (`render_eval_report.py`) surface the narrative columns beside reward,
   credits, steps, and latency; per-seed testimony renders in the dashboard and

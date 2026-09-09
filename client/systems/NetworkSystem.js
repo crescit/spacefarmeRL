@@ -93,19 +93,43 @@ class NetworkSystem {
   }
 
   // Send a message and get the server's return value (Colyseus replies to sender).
+  // NOTE: this SDK's Room.send(messageType, payload) takes ONLY two args and
+  // returns void — the third "waitForReply" arg is silently ignored, so a naive
+  // `await send(type, data, true)` resolves undefined and every client
+  // `.then(r => ...)` takes the failure branch (no toast, stale panel). The
+  // server replies via room.onMessage(type, result) — await THAT instead.
   async request(type, data) {
     if (!this.room) return null;
+    let unsub = null;
+    let timeout = null;
     try {
-      return await this.room.send(type, data, true);  // third arg = wait for reply
+      const reply = new Promise((resolve) => {
+        // onMessage returns an unsubscribe fn (nanoevents) — remove our handler
+        // once it fires so repeated requests don't leak listeners.
+        unsub = this.room.onMessage(type, resolve);
+      });
+      this.room.send(type, data);
+      // Fire-and-forget messages have no server reply. Resolve null after a
+      // short grace rather than hanging forever if one is passed here.
+      return await Promise.race([
+        reply,
+        new Promise((resolve) => { timeout = setTimeout(() => resolve(null), 4000); }),
+      ]);
     } catch (err) {
       console.warn('request failed', type, err);
       return null;
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
+      if (unsub) unsub();
     }
   }
 
   getPlayerState() {
     if (!this.room || !this.room.state) return null;
-    return this.room.state.players[this.playerId];
+    // Colyseus MapSchema hides entries behind $items/$indexes — bracket access
+    // (`players[id]`) returns undefined; the schema's .get() is the real lookup.
+    const p = this.room.state.players;
+    return p && typeof p.get === 'function' ? p.get(this.playerId) : p[this.playerId];
   }
 
   // Pull authoritative friendship/marriage/inventory into `into` (a plain object).
@@ -125,7 +149,9 @@ class NetworkSystem {
 
   getFarmState() {
     if (!this.room || !this.room.state) return null;
-    return this.room.state.farms[this.playerId];
+    // Same MapSchema rule as getPlayerState — use .get() for the real lookup.
+    const f = this.room.state.farms;
+    return f && typeof f.get === 'function' ? f.get(this.playerId) : f[this.playerId];
   }
 }
 

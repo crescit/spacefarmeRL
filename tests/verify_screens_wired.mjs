@@ -192,6 +192,9 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   // unparameterized update() (ReferenceError: time), freezing the title screen
   check('ship update declares the frame clock', /update\(time, delta\)/.test(shipSrc));
   check('planet update declares the frame clock', /update\(time\)/.test(planetSrc));
+  const playerFrameLookups = planetSrc.match(/setTexture\(`player\.\$\{this\.playerDir\}_\$\{fKey\}`\)/g) || [];
+  check('world + interior walk cycles use registered player.* texture keys',
+    playerFrameLookups.length === 2, `got ${playerFrameLookups.length}/2 namespaced lookups`);
   check('intro update needs no frame clock (uses this.time)', /update\(\)/.test(introSrc));
   check('game.js scene registry: Intro→Ship→Planet',
     /scene:\s*\[IntroScene,\s*SpaceshipScene,\s*PlanetScene\]/.test(gameSrc));

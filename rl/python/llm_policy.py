@@ -72,7 +72,7 @@ class OpenAIActionPolicy:
         timeout: float = 30.0,
         reasoning_effort: str | None = None,
         thinking: bool | None = None,
-        max_output_tokens: int = 512,
+        max_output_tokens: int = 4096,
         retries: int = 1,
     ):
         self.base_url = (
@@ -82,7 +82,7 @@ class OpenAIActionPolicy:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY") or "sk-local"
         self.timeout = timeout
         self.reasoning_effort = (
-            reasoning_effort or os.getenv("OPENAI_REASONING_EFFORT") or "low"
+            reasoning_effort or os.getenv("OPENAI_REASONING_EFFORT") or "max"
         )
         if thinking is None:
             thinking = os.getenv("OPENAI_THINKING", "false").lower() in {
@@ -267,7 +267,7 @@ class ToolDialogPolicy(OpenAIActionPolicy):
         timeout: float = 30.0,
         reasoning_effort: str | None = None,
         thinking: bool | None = None,
-        max_output_tokens: int = 512,
+        max_output_tokens: int = 4096,
         retries: int = 1,
         tools: list[dict[str, Any]] | None = None,
         debug_dir: str | None = None,

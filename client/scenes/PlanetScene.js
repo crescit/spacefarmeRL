@@ -431,6 +431,9 @@ class PlanetScene extends Phaser.Scene {
       this.glowRegistry.push(rim);
       this.npcBrains[npc.id] = {
         id: npc.id,
+        name: npc.name,
+        emoji: npc.emoji,
+        data: npc,
         home: NPC_POS[npc.id],
         x: tx, y: ty,                 // current pixel center
         dir: 'front',
@@ -2040,8 +2043,11 @@ rations, and your name on the manifest.
   _swingTool() {
     if (!this.toolSpr || !this.toolSpr.visible) return;
     this.tweens.killTweensOf(this.toolSpr);
-    this.toolSpr.setAngle(26);
-    this.tweens.add({ targets: this.toolSpr, angle: 0, duration: 130, ease: 'Back.easeOut' });
+    // Hold the working arc long enough to read at normal play speed and in
+    // captured footage; the old 130 ms / 26° twitch looked like an equip-only
+    // pose at common 12–30 fps recording rates.
+    this.toolSpr.setAngle(42);
+    this.tweens.add({ targets: this.toolSpr, angle: 0, duration: 260, ease: 'Back.easeOut' });
   }
 
   // ── Equipped-tool action: only when the tool has a target in range, so a
@@ -2328,7 +2334,7 @@ rations, and your name on the manifest.
       this.intPlayer.y = Phaser.Math.Clamp(ny, this.intCy - H2 + 24, this.intCy + H2 - 20);
       const moving = !!dx || !!dy;
       const fKey = moving ? Math.floor(time / 110) % 3 : 0;
-      this.intPlayer.setTexture(`${this.playerDir}_${fKey}`);
+      this.intPlayer.setTexture(`player.${this.playerDir}_${fKey}`);
       if (this.intShadow) this.intShadow.setPosition(this.intPlayer.x, this.intPlayer.y + 14);
 
       // interact inside: route to the room's interaction points
@@ -2369,7 +2375,7 @@ rations, and your name on the manifest.
     // player texture — 32×32 walk cycle when moving, idle frame when stopped
     const moving = !!dx || !!dy;
     const fKey = moving ? Math.floor(time / 110) % 3 : 0;
-    this.playerSpr.setTexture(`${this.playerDir}_${fKey}`);
+    this.playerSpr.setTexture(`player.${this.playerDir}_${fKey}`);
     this._updateToolSprite();
 
     // camera target follows player (world-local → scene coords)
