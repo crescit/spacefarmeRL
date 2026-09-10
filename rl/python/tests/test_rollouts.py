@@ -35,6 +35,41 @@ class RolloutTests(unittest.TestCase):
             self.assertEqual(result["steps"], 6)
             self.assertEqual(result["seed"], 55)
 
+    def test_resume_replaces_provisional_summary_and_keeps_failure_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "resume.jsonl"
+            first = TrajectoryRecorder(FarmGymEnv(horizon_days=5), path)
+            try:
+                first.reset(seed=9)
+                first.step_native({"type": "advance"})
+                first.record_policy_failure({"raw_output": "not json"})
+            finally:
+                first.close()
+
+            resumed = TrajectoryRecorder(FarmGymEnv(horizon_days=5), path)
+            try:
+                resumed.resume(seed=9)
+                during = [
+                    json.loads(line) for line in path.read_text().splitlines() if line
+                ]
+                self.assertFalse(any(
+                    row.get("kind") == "episode-summary" for row in during
+                ))
+                resumed.step_native({"type": "advance"})
+            finally:
+                resumed.close()
+
+            records = [
+                json.loads(line) for line in path.read_text().splitlines() if line
+            ]
+            self.assertEqual(
+                sum(row.get("kind") == "episode-summary" for row in records), 1
+            )
+            self.assertEqual(
+                sum(row.get("kind") == "policy-failure" for row in records), 1
+            )
+            self.assertEqual(replay_trajectory(path)["steps"], 2)
+
     def test_action_labels_cover_engine_surface(self):
         self.assertEqual(len(ACTION_LABELS), 26)
         self.assertIn("advance", ACTION_LABELS)

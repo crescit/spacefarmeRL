@@ -1,0 +1,203 @@
+{
+  "complete": true,
+  "environment": {
+    "action_interface": "energy-grounded-native-strict",
+    "horizon_days": 30,
+    "seeds": [
+      1,
+      2,
+      3
+    ]
+  },
+  "episodes": {
+    "economic": [
+      {
+        "credits": 140.0,
+        "policy": "economic",
+        "reward": -14.6,
+        "seed": 1,
+        "steps": 31
+      },
+      {
+        "credits": 140.0,
+        "policy": "economic",
+        "reward": -14.6,
+        "seed": 2,
+        "steps": 31
+      },
+      {
+        "credits": 140.0,
+        "policy": "economic",
+        "reward": -14.6,
+        "seed": 3,
+        "steps": 31
+      }
+    ],
+    "model": [
+      {
+        "actions_per_model_call": null,
+        "capped": false,
+        "contact_choices": {},
+        "contacts": 0,
+        "credits": 1020.0,
+        "days": 30,
+        "fallback_count": 0,
+        "festivals": 1,
+        "friends_made": 3,
+        "friendships": 58.0,
+        "incomplete_reason": null,
+        "journal_entries": 0,
+        "mean_latency_ms": null,
+        "mean_model_call_latency_ms": null,
+        "mean_ttft_ms": null,
+        "model_calls": 0,
+        "p95_latency_ms": null,
+        "policy": "qwen3.8-flash-next",
+        "primary_valid_rate": null,
+        "quests": 8,
+        "replay_ok": true,
+        "retry_rate": null,
+        "reward": -2.85,
+        "seed": 1,
+        "steps": 198,
+        "testimony": "Spring on B-612 is over. What the colony holds now is what this keeper made of it.\nThe years record: planted 4 seeds, cut 4 harvests, brought in 3 catches of fish, swung the pick 18 times.\nThe colony ledger closes at 1020 cr \u2014 solvent, this season, by the keeper's hand.\n3 colonists came to know you \u2014 58 heart-units of trust carried across the season.\nYou sat and talked 4 times;\nYou gave 3 gifts away.\nThe alien envoys received no doctrine from this keeper; the frontier remained unanswered.\nThe festival was attended and claimed 1 time \u2014 the bell rang for you.\nThe colony's thread moved: 8 quests carried to their close.\n\nThe bell asks the only question worth asking: What kind of keeper were you?",
+        "trajectory": "trajectories/qwen3.8-flash-next/energy-grounded-native-stream/seed-1.jsonl",
+        "unique_tools": 18
+      },
+      {
+        "actions_per_model_call": 0.9382470119521913,
+        "capped": false,
+        "contact_choices": {},
+        "contacts": 0,
+        "credits": 795.0,
+        "days": 30,
+        "fallback_count": 0,
+        "festivals": 1,
+        "friends_made": 2,
+        "friendships": 7.0,
+        "incomplete_reason": null,
+        "journal_entries": 0,
+        "mean_latency_ms": 9138.941791908825,
+        "mean_model_call_latency_ms": 8574.58482866346,
+        "mean_ttft_ms": 6155.250808299314,
+        "model_calls": 502,
+        "p95_latency_ms": 15696.651332997135,
+        "policy": "qwen3.8-flash-next",
+        "primary_valid_rate": 0.9341825902335457,
+        "quests": 4,
+        "replay_ok": true,
+        "retry_rate": 0.06581740976645435,
+        "reward": -6.049999999999998,
+        "seed": 2,
+        "steps": 471,
+        "testimony": "Spring on B-612 is over. What the colony holds now is what this keeper made of it.\nThe years record: planted 5 seeds, cut 20 harvests, brought in 1 catch of fish.\nThe colony ledger closes at 795 cr \u2014 solvent, this season, by the keeper's hand.\n2 colonists came to know you \u2014 7 heart-units of trust carried across the season.\nYou sat and talked 1 time;\nThe alien envoys received no doctrine from this keeper; the frontier remained unanswered.\nThe festival was attended and claimed 1 time \u2014 the bell rang for you.\nThe colony's thread moved: 4 quests carried to their close.\n\nThe bell asks the only question worth asking: What kind of keeper were you?",
+        "trajectory": "trajectories/qwen3.8-flash-next/energy-grounded-native-stream/seed-2.jsonl",
+        "unique_tools": 13
+      },
+      {
+        "actions_per_model_call": null,
+        "capped": false,
+        "contact_choices": {},
+        "contacts": 0,
+        "credits": 60.0,
+        "days": 30,
+        "fallback_count": 8,
+        "festivals": 1,
+        "friends_made": 2,
+        "friendships": 11.0,
+        "incomplete_reason": null,
+        "journal_entries": 0,
+        "mean_latency_ms": null,
+        "mean_model_call_latency_ms": null,
+        "mean_ttft_ms": null,
+        "model_calls": 0,
+        "p95_latency_ms": null,
+        "policy": "qwen3.8-flash-next",
+        "primary_valid_rate": null,
+        "quests": 4,
+        "replay_ok": true,
+        "retry_rate": null,
+        "reward": -14.250000000000007,
+        "seed": 3,
+        "steps": 335,
+        "testimony": "Spring on B-612 is over. What the colony holds now is what this keeper made of it.\nThe years record: planted 5 seeds, cut 19 harvests, brought in 1 catch of fish.\nThe ledger closes at 60 cr \u2014 thin, but not in debt.\n2 colonists came to know you \u2014 11 heart-units of trust carried across the season.\nYou sat and talked 3 times;\nThe alien envoys received no doctrine from this keeper; the frontier remained unanswered.\nThe festival was attended and claimed 1 time \u2014 the bell rang for you.\nThe colony's thread moved: 4 quests carried to their close.\n\nThe bell asks the only question worth asking: What kind of keeper were you?",
+        "trajectory": "trajectories/qwen3.8-flash-next/energy-grounded-native-stream/seed-3.jsonl",
+        "unique_tools": 13
+      }
+    ],
+    "random": [
+      {
+        "credits": 45.0,
+        "policy": "random",
+        "reward": -16.200000000000035,
+        "seed": 1,
+        "steps": 438
+      },
+      {
+        "credits": 70.0,
+        "policy": "random",
+        "reward": -16.100000000000016,
+        "seed": 2,
+        "steps": 316
+      },
+      {
+        "credits": 10.0,
+        "policy": "random",
+        "reward": -17.250000000000018,
+        "seed": 3,
+        "steps": 351
+      }
+    ]
+  },
+  "model": {
+    "action_batch_size": 1,
+    "base_url": "http://spark-e4bb.tail8fb967.ts.net:8000/v1",
+    "max_output_tokens": 256,
+    "model_task": null,
+    "name": "qwen3.8-flash-next",
+    "policy_retries": 1,
+    "reasoning_effort": "low",
+    "stream": true,
+    "thinking": false
+  },
+  "report_version": 4,
+  "schema_version": 2,
+  "summary": {
+    "economic": {
+      "episodes": 3.0,
+      "mean_credits": 140.0,
+      "mean_reward": -14.6,
+      "mean_steps": 31.0
+    },
+    "model": {
+      "episodes": 3.0,
+      "fallback_count": 0.0,
+      "latency_episodes": 1.0,
+      "mean_actions_per_model_call": 0.9382470119521913,
+      "mean_contacts": 0.0,
+      "mean_credits": 625.0,
+      "mean_days": 30.0,
+      "mean_festivals": 1.0,
+      "mean_friends": 2.3333333333333335,
+      "mean_friendships": 25.333333333333332,
+      "mean_journal_entries": 0.0,
+      "mean_latency_ms": 9138.941791908825,
+      "mean_model_call_latency_ms": 8574.58482866346,
+      "mean_primary_valid_rate": 0.9341825902335457,
+      "mean_quests": 5.333333333333333,
+      "mean_retry_rate": 0.06581740976645435,
+      "mean_reward": -7.716666666666669,
+      "mean_steps": 334.6666666666667,
+      "mean_ttft_ms": 6155.250808299314,
+      "mean_unique_tools": 14.666666666666666,
+      "model_calls": 502.0,
+      "p95_episode_latency_ms": 15696.651332997135
+    },
+    "random": {
+      "episodes": 3.0,
+      "mean_credits": 41.666666666666664,
+      "mean_reward": -16.51666666666669,
+      "mean_steps": 368.3333333333333
+    }
+  }
+}

@@ -31,6 +31,7 @@ class ModelEpisode:
     trajectory: str
     replay_ok: bool
     capped: bool = False
+    incomplete_reason: str | None = None
     primary_valid_rate: float | None = None
     retry_rate: float | None = None
     fallback_count: int = 0
@@ -79,6 +80,7 @@ def evaluate_episode(
     model_call_latencies: list[float] = []
     ttfts: list[float] = []
     capped = False
+    incomplete_reason: str | None = None
     had_prior_steps = False
     primary_valid = retries_used = fallback_count = 0
     terminated = truncated = False
@@ -132,6 +134,8 @@ def evaluate_episode(
                 and not bool(getattr(decision, "parsed", False))
                 and getattr(decision, "source", "") != "invalid_payload"
             ):
+                recorder.record_policy_failure(policy_decision or {})
+                incomplete_reason = "unparseable_model_output"
                 print(
                     f"seed={seed} stopped=UNPARSEABLE step={recorder.steps + 1} "
                     "no game action executed",
@@ -199,6 +203,7 @@ def evaluate_episode(
         trajectory=str(path),
         replay_ok=replay["steps"] == steps,
         capped=capped,
+        incomplete_reason=incomplete_reason,
         primary_valid_rate=(
             None if had_prior_steps or not latencies else primary_valid / len(latencies)
         ),
@@ -250,10 +255,7 @@ def recover_capped_episode(
     if not records:
         return None
     header, transitions = records[0], records[1:]
-    transitions = [
-        record for record in transitions
-        if record.get("kind") != "episode-summary"
-    ]
+    transitions = [record for record in transitions if not record.get("kind")]
     if (
         header.get("kind") != "space-farmer-trajectory"
         or header.get("action_interface") != action_interface(policy)
@@ -372,6 +374,11 @@ def validate_runtime_quality(
     offenders: list[str] = []
     capped = 0
     for episode in episodes:
+        if episode.incomplete_reason:
+            offenders.append(
+                f"seed={episode.seed}: incomplete ({episode.incomplete_reason})"
+            )
+            continue
         if episode.primary_valid_rate is None:
             continue  # recovered/untracked — no validity signal to gate on
         if episode.capped:
@@ -480,9 +487,25 @@ def load_completed(
         raise ValueError(
             "resume report does not match model, reasoning settings, seeds, horizon, or action interface"
         )
-    return [
-        ModelEpisode(**row) for row in (saved.get("episodes") or {}).get("model", [])
-    ]
+    completed: list[ModelEpisode] = []
+    for row in (saved.get("episodes") or {}).get("model", []):
+        episode = ModelEpisode(**row)
+        if episode.incomplete_reason or episode.capped:
+            continue
+        trajectory = Path(episode.trajectory)
+        if trajectory.exists():
+            records = [
+                json.loads(line)
+                for line in trajectory.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+            transitions = [record for record in records[1:] if not record.get("kind")]
+            if not transitions or not bool(
+                transitions[-1].get("terminated") or transitions[-1].get("truncated")
+            ):
+                continue
+        completed.append(episode)
+    return completed
 
 
 def make_policy(args: argparse.Namespace) -> OpenAIActionPolicy:

@@ -96,10 +96,7 @@ class TrajectoryRecorder:
         obs, info = self.env.reset(seed=seed)
         if self.env.raw_obs != header.get("initial_observation"):
             raise AssertionError("trajectory initial observation does not replay")
-        transitions = [
-            record for record in records[1:]
-            if record.get("kind") != "episode-summary"
-        ]
+        transitions = [record for record in records[1:] if not record.get("kind")]
         total_reward = 0.0
         terminated = truncated = False
         for transition in transitions:
@@ -124,10 +121,36 @@ class TrajectoryRecorder:
                     f"trajectory diverged at step {transition['step']}"
                 )
             total_reward += reward
+        # A previous interrupted attempt leaves a provisional narrative summary
+        # at EOF. Remove only summaries before appending so the resumed episode
+        # gets one authoritative final summary; retain policy-failure audit events.
+        preserved = [
+            record for record in records
+            if record.get("kind") != "episode-summary"
+        ]
+        self.path.write_text(
+            "".join(
+                json.dumps(record, separators=(",", ":")) + "\n"
+                for record in preserved
+            ),
+            encoding="utf-8",
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.handle = self.path.open("a", encoding="utf-8")
         self.steps = len(transitions)
         return obs, info, total_reward, terminated, truncated
+
+    def record_policy_failure(self, policy_decision: dict[str, Any]) -> None:
+        """Audit a model response that produced no executable game action."""
+        if self.handle is None:
+            raise RuntimeError("reset() must be called before recording a policy failure")
+        record = {
+            "kind": "policy-failure",
+            "step": self.steps,
+            "policy_decision": policy_decision,
+        }
+        self.handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+        self.handle.flush()
 
     def step(self, action: int, *, policy_decision: dict[str, Any] | None = None):
         if self.handle is None:
@@ -216,10 +239,7 @@ def replay_trajectory(path: str | Path) -> dict[str, Any]:
     if not records or records[0].get("kind") != "space-farmer-trajectory":
         raise ValueError("not a Space Farmer trajectory")
     header, transitions = records[0], records[1:]
-    transitions = [
-        record for record in transitions
-        if record.get("kind") != "episode-summary"
-    ]
+    transitions = [record for record in transitions if not record.get("kind")]
     total_reward = 0.0
     with SimBridge() as bridge:
         initial, _ = bridge.reset(header["seed"], header["horizon_days"])

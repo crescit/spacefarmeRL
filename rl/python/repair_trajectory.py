@@ -63,7 +63,11 @@ def repair(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     if not records or records[0].get("kind") != "space-farmer-trajectory":
         raise ValueError(f"not a Space Farmer trajectory: {path}")
     header = records[0]
-    original = [row for row in records[1:] if row.get("kind") != "episode-summary"]
+    original = [row for row in records[1:] if not row.get("kind")]
+    audit_events = [
+        row for row in records[1:]
+        if row.get("kind") and row.get("kind") != "episode-summary"
+    ]
     repaired: list[dict[str, Any]] = []
     with SimBridge() as bridge:
         observation, _ = bridge.reset(header["seed"], header["horizon_days"])
@@ -93,7 +97,10 @@ def repair(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     summary = {"kind": "episode-summary", "stats": stats, "testimony": testimony}
     candidate = path.with_suffix(path.suffix + ".repairing")
     candidate.write_text(
-        "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in [header, *repaired, summary]),
+        "".join(
+            json.dumps(row, separators=(",", ":")) + "\n"
+            for row in [header, *repaired, *audit_events, summary]
+        ),
         encoding="utf-8",
     )
     replay_trajectory(candidate)
@@ -106,8 +113,11 @@ def repair(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
 
 def episode_row(path: Path, policy: str) -> dict[str, Any]:
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
-    transitions = [row for row in records[1:] if row.get("kind") != "episode-summary"]
-    summary = next(row for row in records[1:] if row.get("kind") == "episode-summary")
+    transitions = [row for row in records[1:] if not row.get("kind")]
+    summary = next(
+        row for row in reversed(records[1:])
+        if row.get("kind") == "episode-summary"
+    )
     decisions = [row["policy_decision"] for row in transitions if row.get("policy_decision")]
     latencies = [float(row["latency_ms"]) for row in decisions if row.get("latency_ms") is not None]
     model_call_latencies: list[float] = []

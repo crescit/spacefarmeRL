@@ -240,6 +240,15 @@ class LlmPolicyTests(unittest.TestCase):
         body = json.loads(request.data)
         self.assertEqual(body["messages"][-1]["task"], "action")
 
+    def test_stream_request_explicitly_requests_usage(self):
+        policy = OpenAIActionPolicy(stream=True)
+        response = io.BytesIO(b"data: [DONE]\n\n")
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            policy._request({"state": {}}, thinking=False)
+        request = urlopen.call_args.args[0]
+        body = json.loads(request.data)
+        self.assertEqual(body["stream_options"], {"include_usage": True})
+
     def test_strict_candidate_rejects_prose(self):
         mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
         self.assertIsNone(parse_action_candidate("I might till or fish", mask))

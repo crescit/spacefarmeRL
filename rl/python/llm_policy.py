@@ -647,6 +647,10 @@ class OpenAIActionPolicy:
             },
             "stream": self.stream,
         }
+        if self.stream:
+            # OpenAI-compatible servers such as vLLM only emit the terminal
+            # token-usage chunk when it is explicitly requested.
+            payload["stream_options"] = {"include_usage": True}
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             self.base_url + "/chat/completions",
@@ -771,12 +775,18 @@ class OpenAIActionPolicy:
             if retry_error:
                 request_prompt = {
                     "retry_correction": (
-                        retry_error + " The previous response was not executed. Return a "
-                        "corrected JSON object for the current unchanged state. If unsure, "
-                        "copy one complete object from valid_examples_now exactly."
+                        retry_error + " The previous response was not executed. Return only "
+                        "a corrected JSON action for the unchanged state. Omit reason and all "
+                        "explanation. The entire response must be one short JSON object. If "
+                        "unsure, copy one object from valid_examples_now exactly."
                     ),
+                    "state": prompt["state"],
+                    "valid_action_names": prompt["valid_action_names"],
                     "valid_examples_now": [row["example_native_action"] for row in valid],
-                    **prompt,
+                    "response_format": {
+                        "action": "one valid action name",
+                        "arguments": "that action's exact parameter object",
+                    },
                 }
             payload = self._request(request_prompt, thinking=use_thinking)
             choice = payload["choices"][0]
