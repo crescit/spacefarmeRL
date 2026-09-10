@@ -164,15 +164,25 @@ console.log('== C. New Game+ ==');
 console.log('== D. Exchange ledger ==');
 {
   const { room, client, p } = makeRoom();
+  const phantom = room.onOrder(client, { item: 'space-wheat', quantity: 1, price: 20, type: 'sell' });
+  check('unowned sell order rejected', !phantom.ok && phantom.reason === 'need-item' && room.state.orders.length === 0, JSON.stringify(phantom));
+  const unfunded = room.onOrder(client, { item: 'star-berry', quantity: 10, price: 30, type: 'buy' });
+  check('unfunded buy order rejected', !unfunded.ok && unfunded.reason === 'not-enough-credits' && room.state.orders.length === 0, JSON.stringify(unfunded));
+  const zeroPrice = room.onOrder(client, { item: 'star-berry', quantity: 1, price: 0, type: 'buy' });
+  check('zero-price order rejected', !zeroPrice.ok && zeroPrice.reason === 'bad-order' && room.state.orders.length === 0, JSON.stringify(zeroPrice));
   // seller lists 2 star-berry at 30; buyer (second session) bids it
   p.inventory.set('star-berry', 2);
   room.state.orders.length = 0;
-  room.onOrder(client, { item: 'star-berry', quantity: 2, price: 30, type: 'sell' });
+  const listed = room.onOrder(client, { item: 'star-berry', quantity: 2, price: 30, type: 'sell' });
+  check('funded sell order listed', listed.ok && room.state.orders.length === 1, JSON.stringify(listed));
   const buyerClient = { sessionId: 'b', send() { } };
   room.onJoin(buyerClient, { name: 'Buyer' });
-  room.state.orders.push({ item: 'star-berry', quantity: 2, price: 30, type: 'buy', playerId: 'b' });
-  room.matchOrders();
+  const buyer = room.state.players.get('b');
+  const bid = room.onOrder(buyerClient, { item: 'star-berry', quantity: 2, price: 30, type: 'buy' });
+  check('funded matching buy order filled', bid.ok && bid.fills.length === 1 && room.state.orders.length === 0, JSON.stringify(bid));
   check('seller credited by match', p.credits === 100 + 60, `cr=${p.credits}`);
+  check('seller inventory deducted by match', (p.inventory.get('star-berry') || 0) === 0);
+  check('buyer charged and receives inventory', buyer.credits === 40 && buyer.inventory.get('star-berry') === 2, `cr=${buyer.credits} berries=${buyer.inventory.get('star-berry')}`);
   check('seller ledger tallies sale', (p.lifetime.get('sold') || 0) === 2 && (p.lifetime.get('earned') || 0) >= 60, JSON.stringify(lifetimeOf(p)));
   check('seller gets first-sale milestone', !!client, 'presence of client implies send path ran');
 }

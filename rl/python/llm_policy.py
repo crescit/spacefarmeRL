@@ -152,6 +152,8 @@ def _schema_accepts(value: Any, schema: dict[str, Any]) -> bool:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if "minimum" in schema and value < schema["minimum"]:
             return False
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+            return False
         if "maximum" in schema and value > schema["maximum"]:
             return False
     return True
@@ -332,6 +334,15 @@ def current_action_constraints(action: str, obs: dict[str, Any], env: FarmGymEnv
             item: int(credits // float(price)) for item, price in shop.items()
             if float(price) > 0 and credits >= float(price)
         }}
+    if action == "order":
+        return {
+            "sell_orders_require_owned_inventory": {
+                k: int(v) for k, v in inventory.items() if int(v) > 0
+            },
+            "buy_order_credit_budget": float(obs.get("credits", 0)),
+            "single_agent_episode_has_counterparty": False,
+            "unmatched_order_reward_and_quest_progress": 0,
+        }
     return {}
 
 

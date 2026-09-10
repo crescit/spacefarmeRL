@@ -17,6 +17,7 @@ const {
   PRODUCE_PRICES, RECIPES, NPC_GIFTS, HEART_THRESHOLDS, QUESTS,
   ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TOOL_ORDER, TOOL_FOR_ACTION,
   WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE,
+  STAMINA_TRAIN_RATE, STAMINA_MAX,
 } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
 // The calendar is a SERVICE with ONE implementation (shared/calendar.js). This
@@ -332,7 +333,7 @@ const ACTION_DEFINITIONS = Object.freeze({
   harvest: actionDefinition('Harvest one mature tile with bare hands; harvest credits are awarded immediately.', coordParameters),
   till: actionDefinition('Till one empty tile with the equipped hoe.', coordParameters),
   sell: actionDefinition('Sell owned inventory at the fixed market price.', { type: 'object', additionalProperties: false, properties: { item: { type: 'string', enum: SALEABLE }, quantity: { type: 'integer', minimum: 1 } }, required: ['item', 'quantity'] }),
-  order: actionDefinition('Place a Grand Exchange order. The order side is nested because the outer type is the action type.', { type: 'object', additionalProperties: false, properties: { data: { type: 'object', additionalProperties: false, properties: { item: { type: 'string' }, quantity: { type: 'integer', minimum: 1 }, price: { type: 'number', minimum: 0 }, type: { type: 'string', enum: ['buy', 'sell'] } }, required: ['item', 'quantity', 'price', 'type'] } }, required: ['data'] }),
+  order: actionDefinition('Place a funded Grand Exchange order. Sell orders require owned inventory; buy orders require credits. Unmatched orders earn nothing and do not advance sell quests.', { type: 'object', additionalProperties: false, properties: { data: { type: 'object', additionalProperties: false, properties: { item: { type: 'string' }, quantity: { type: 'integer', minimum: 1 }, price: { type: 'number', exclusiveMinimum: 0 }, type: { type: 'string', enum: ['buy', 'sell'] } }, required: ['item', 'quantity', 'price', 'type'] } }, required: ['data'] }),
   buy: actionDefinition('Buy an item from the supply depot at the fixed shop price.', { type: 'object', additionalProperties: false, properties: { item: { type: 'string', enum: Object.keys(SHOP_PRICES) }, quantity: { type: 'integer', minimum: 1 } }, required: ['item', 'quantity'] }),
   gift: actionDefinition('Give one owned item to a townsperson; affinity changes friendship.', { type: 'object', additionalProperties: false, properties: { npc: { type: 'string', enum: NPC_IDS }, item: { type: 'string' } }, required: ['npc', 'item'] }),
   talk: actionDefinition('Talk to a townsperson for the once-per-person daily friendship gain.', { type: 'object', additionalProperties: false, properties: { npc: { type: 'string', enum: NPC_IDS } }, required: ['npc'] }),
@@ -410,6 +411,8 @@ const EVALUATION_CONTRACT = Object.freeze({
     time: Object.freeze({
       clockUnitsPerClockedAction: CLOCK_TICK, duskAt: DUSK,
       staminaRecoveredOnAdvance: STAMINA_REST_RATE,
+      staminaCapacityGrowthAfterWorkedDay: STAMINA_TRAIN_RATE,
+      staminaCapacityMaximum: STAMINA_MAX,
     }),
     prerequisiteActionsCanHaveZeroImmediateReward: true,
     workActionsAdvanceDay: false,
@@ -430,6 +433,12 @@ const EVALUATION_CONTRACT = Object.freeze({
       sellPrices: SELL_PRICES,
       harvestAwardsCreditsDirectly: true,
       buyAndUpgradeCostsReduceRewardThroughCreditDelta: true,
+      grandExchange: Object.freeze({
+        settlement: 'A sell order transfers owned inventory only when another player has a matching funded buy order; then credits and inventory move atomically.',
+        unmatchedReward: 0,
+        unmatchedSellQuestProgress: 0,
+        singleAgentEvaluationHasCounterparty: false,
+      }),
     }),
     fishing: Object.freeze({
       catchSelection: 'uniform among fish eligible for the chosen spot, season, and time',

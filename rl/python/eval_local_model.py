@@ -157,7 +157,8 @@ def evaluate_episode(
                 f"reward={reward:7.3f} latency={latencies[-1]:7.1f}ms "
                 f"decision={getattr(decision, 'source', 'untracked')} "
                 f"tokens={getattr(decision, 'completion_tokens', None)} "
-                f"energy={energy.get('before', 0):g}->{energy.get('after', 0):g} "
+                f"energy={energy.get('before', 0):g}->{energy.get('after', 0):g}"
+                f"/{energy.get('capacity', 0):g} "
                 f"cost={energy.get('cost', 0):g} "
                 f"native={json.dumps(info['native_action'], separators=(',', ':'))} "
                 f"changes={json.dumps(recorded.get('changes', {}), separators=(',', ':'))} "
@@ -502,6 +503,7 @@ def evaluate_seeds(
     trajectory_dir: Path,
     completed: set[int],
     *,
+    prior_episodes: list[ModelEpisode] | None = None,
     policy_factory=None,
 ) -> list[ModelEpisode]:
     """Run every missing seed, sequentially or across --workers threads.
@@ -515,6 +517,7 @@ def evaluate_seeds(
         policy_factory = lambda: make_policy(args)
     missing = [seed for seed in seeds if seed not in completed]
     found: dict[int, ModelEpisode] = {}
+    prior = {episode.seed: episode for episode in (prior_episodes or [])}
 
     def work(seed: int) -> tuple[int, ModelEpisode | None]:
         if args.resume:
@@ -532,7 +535,9 @@ def evaluate_seeds(
         return seed, episode
 
     def checkpoint(seed: int) -> None:
-        episodes = sorted(found.values(), key=lambda item: item.seed)
+        episodes = sorted(
+            {**prior, **found}.values(), key=lambda item: item.seed
+        )
         partial = {"model": [asdict(item) for item in episodes]}
         write_result(
             args.output,
@@ -652,7 +657,8 @@ def main() -> None:
 
     try:
         new_episodes = evaluate_seeds(
-            args, seeds, args.trajectory_dir, completed
+            args, seeds, args.trajectory_dir, completed,
+            prior_episodes=model_episodes,
         )
         seen = {episode.seed for episode in model_episodes}
         model_episodes.extend(

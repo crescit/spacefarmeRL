@@ -250,7 +250,7 @@ const GAME_ACTIONS = Object.freeze([
   { type: 'harvest', handler: 'onHarvest', reply: false },
   { type: 'till', handler: 'onTill', reply: false },
   { type: 'sell', handler: 'onSell', reply: true },
-  { type: 'order', handler: 'onOrder', reply: false },
+  { type: 'order', handler: 'onOrder', reply: true },
   { type: 'buy', handler: 'onShopBuy', reply: true },
   { type: 'gift', handler: 'onGift', reply: true },
   { type: 'talk', handler: 'onTalk', reply: true },
@@ -1125,34 +1125,90 @@ class FarmRoom extends Room {
 
   onOrder(client, data) {
     this._tickClock();  // a moment of the day passes
-    const order = new GrandExchangeOrder(data.item, data.quantity, data.price, data.type, client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return { ok: false, reason: 'no-player' };
+    const item = data && data.item;
+    const type = data && data.type;
+    const quantity = Math.floor(Number(data && data.quantity));
+    const price = Number(data && data.price);
+    if (!item || !['buy', 'sell'].includes(type) || !Number.isFinite(quantity)
+        || quantity < 1 || !Number.isFinite(price) || price <= 0) {
+      return { ok: false, reason: 'bad-order' };
+    }
+    if (type === 'sell') {
+      const have = player.inventory.get(item) || 0;
+      if (have < quantity) return { ok: false, reason: 'need-item', item, have, need: quantity };
+    } else {
+      const need = price * quantity;
+      if (player.credits < need) {
+        return { ok: false, reason: 'not-enough-credits', need, balance: player.credits };
+      }
+    }
+    const order = new GrandExchangeOrder(item, quantity, price, type, client.sessionId);
     this.state.orders.push(order);
-    this.matchOrders();
+    const fills = this.matchOrders();
+    return { ok: true, item, quantity, price, type, fills };
   }
 
   matchOrders() {
     const orders = this.state.orders;
-    const buys = orders.filter(o => o.type === 'buy');
-    const sells = orders.filter(o => o.type === 'sell');
-    for (const sell of sells) {
-      const match = buys.find(b => b.item === sell.item && b.price >= sell.price);
-      if (!match) continue;
-      const qty = Math.min(sell.quantity, match.quantity);
-      const buyer = this.state.players.get(match.playerId);
+    const fills = [];
+    const remove = (order) => {
+      const index = orders.indexOf(order);
+      if (index >= 0) orders.splice(index, 1);
+    };
+    // Re-check backing resources at settlement. Orders are not escrowed, so a
+    // player may spend inventory/credits elsewhere while waiting; stale
+    // unfunded orders are removed instead of minting phantom goods or money.
+    while (true) {
+      const sell = orders.find((candidate) => candidate.type === 'sell');
+      if (!sell) break;
       const seller = this.state.players.get(sell.playerId);
-      if (buyer && seller) {
-        buyer.credits -= match.price * qty;
-        seller.credits += match.price * qty;
-        this._ledgerAdd(match.playerId, { spent: match.price * qty });
-        this._ledgerAdd(sell.playerId, { earned: match.price * qty, sold: qty });
-        const sellerClient = this._clientBySession(sell.playerId);
-        if (sellerClient) this._checkMilestones(sellerClient);
+      const have = seller ? (seller.inventory.get(sell.item) || 0) : 0;
+      if (!seller || have <= 0) { remove(sell); continue; }
+      const buy = orders.find((candidate) =>
+        candidate.type === 'buy'
+        && candidate.playerId !== sell.playerId
+        && candidate.item === sell.item
+        && candidate.price >= sell.price);
+      if (!buy) {
+        // Try another sell order before concluding that nothing else matches.
+        const laterMatch = orders.find((candidate) =>
+          candidate.type === 'sell' && candidate !== sell
+          && orders.some((bid) => bid.type === 'buy' && bid.playerId !== candidate.playerId
+            && bid.item === candidate.item && bid.price >= candidate.price));
+        if (!laterMatch) break;
+        // Move the currently-unmatched order behind the matchable one.
+        orders.splice(orders.indexOf(sell), 1);
+        orders.push(sell);
+        continue;
       }
+      const buyer = this.state.players.get(buy.playerId);
+      const affordable = buyer ? Math.floor(buyer.credits / buy.price) : 0;
+      if (!buyer || affordable <= 0) { remove(buy); continue; }
+      const qty = Math.min(sell.quantity, buy.quantity, have, affordable);
+      if (qty <= 0) break;
+      const total = buy.price * qty;
+      seller.inventory.set(sell.item, have - qty);
+      buyer.inventory.set(sell.item, (buyer.inventory.get(sell.item) || 0) + qty);
+      buyer.credits -= total;
+      seller.credits += total;
+      this._ledgerAdd(buy.playerId, { spent: total });
+      this._ledgerAdd(sell.playerId, { earned: total, sold: qty });
+      const sellerClient = this._clientBySession(sell.playerId)
+        || { sessionId: sell.playerId, send() {} };
+      const buyerClient = this._clientBySession(buy.playerId);
+      this.questEvent(sellerClient, { kind: 'sell', amount: total });
+      this._checkMilestones(sellerClient);
+      if (buyerClient) this._checkMilestones(buyerClient);
+      fills.push({ item: sell.item, quantity: qty, price: buy.price,
+        total, sellerId: sell.playerId, buyerId: buy.playerId });
       sell.quantity -= qty;
-      match.quantity -= qty;
-      if (sell.quantity <= 0) orders.splice(orders.indexOf(sell), 1);
-      if (match.quantity <= 0) orders.splice(orders.indexOf(match), 1);
+      buy.quantity -= qty;
+      if (sell.quantity <= 0 || (seller.inventory.get(sell.item) || 0) <= 0) remove(sell);
+      if (buy.quantity <= 0 || buyer.credits < buy.price) remove(buy);
     }
+    return fills;
   }
 
   // ── Friendship engine (Harvest Moon-style) ──
@@ -1697,4 +1753,4 @@ class FarmRoom extends Room {
   }
 }
 
-module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY, SHOP_PRICES, SELL_PRICES, MINING_INFO, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, PRODUCE_PRICES, CROP_INFO, FISH_INFO, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE };
+module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY, SHOP_PRICES, SELL_PRICES, MINING_INFO, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, PRODUCE_PRICES, CROP_INFO, FISH_INFO, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE, STAMINA_TRAIN_RATE, STAMINA_MAX };

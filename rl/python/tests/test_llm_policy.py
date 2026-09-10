@@ -96,6 +96,9 @@ class LlmPolicyTests(unittest.TestCase):
             self.assertEqual(policy.last_decision.native_action, {"type": "equip", "tool": "hoe"})
             planning = captured["episode_contract"]["mechanics"]["planningFacts"]
             self.assertEqual(planning["cropLoop"]["maturityWateredDays"], 6)
+            self.assertEqual(planning["time"]["staminaRecoveredOnAdvance"], 30)
+            self.assertEqual(planning["time"]["staminaCapacityGrowthAfterWorkedDay"], 2)
+            self.assertEqual(planning["time"]["staminaCapacityMaximum"], 150)
             self.assertIn("downstream return", captured["planning_rule"])
             self.assertEqual(captured["state"]["equipped"], "bare hands")
             self.assertEqual(captured["state"]["inventory"]["seeds"], 5)
