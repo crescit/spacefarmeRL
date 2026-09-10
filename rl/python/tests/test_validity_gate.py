@@ -125,10 +125,26 @@ class ValidityGateTests(unittest.TestCase):
             with patch.object(policy, "_request", return_value=empty):
                 episode = evaluate_episode(policy, 3, 4, 60, directory)
             self.assertFalse(episode.capped)
+            self.assertEqual(
+                episode.incomplete_reason, "unparseable_model_output"
+            )
             self.assertGreater(episode.fallback_count, 0)
             self.assertLess(episode.primary_valid_rate, 0.5)
+            records = [
+                json.loads(line)
+                for line in (directory / "seed-3.jsonl").read_text().splitlines()
+                if line
+            ]
+            failure = next(
+                row for row in records if row.get("kind") == "policy-failure"
+            )
+            self.assertEqual(failure["step"], 0)
+            self.assertIn("raw_outputs", failure["policy_decision"])
+            self.assertEqual(
+                failure["policy_decision"]["finish_reason"], "length"
+            )
             # a truncated run must be refused loudly, not recorded as evidence
-            with self.assertRaisesRegex(ValueError, "validity gate refused"):
+            with self.assertRaisesRegex(ValueError, "incomplete"):
                 validate_runtime_quality([episode])
 
     def test_timeout_propagates_loudly(self):

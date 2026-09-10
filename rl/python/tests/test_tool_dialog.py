@@ -84,7 +84,7 @@ class StubServer:
 
 class ToolDialogTests(unittest.TestCase):
     def test_native_from_tool_mapping(self):
-        self.assertEqual(native_from_tool("rest", {}), {"type": "advance_day"})
+        self.assertEqual(native_from_tool("rest", {}), {"type": "advance"})
         self.assertEqual(
             native_from_tool("plant", {"x": 3, "y": 2, "crop": "star-berry"}),
             {"type": "plant", "tileX": 3, "tileY": 2, "crop": "star-berry"},
@@ -156,7 +156,7 @@ class ToolDialogTests(unittest.TestCase):
 
             # 6. journal is answered in-loop (no env step); then rest() ends the day
             native = policy.choose_native(env)
-            self.assertEqual(native, {"type": "advance_day"})
+            self.assertEqual(native, {"type": "advance"})
             _, _r, _t, _tr, info = env.native_step(native)
             policy.observe(native, info)
 
@@ -194,14 +194,12 @@ class ToolDialogTests(unittest.TestCase):
             actions = []
             for _ in range(30):
                 native = policy.choose_native(env)
-                from_model = native is not None
                 if native is None:
-                    native = {"type": "advance_day"}   # keeper declined → the day ends
+                    break
                 _, _, term, trunc, info = rec.step_native(native, tool=native["type"])
-                if from_model:
-                    policy.observe(native, info)
+                policy.observe(native, info)
                 actions.append(native["type"])
-                if native["type"] == "advance_day":
+                if native["type"] == "advance":
                     policy.begin_day(env.briefing())   # a fresh morning, same keeper
                 if term or trunc:
                     break

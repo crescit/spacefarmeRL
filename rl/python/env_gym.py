@@ -1,7 +1,7 @@
 """Gymnasium adapter for the authoritative Space Farmer simulation.
 
 The Node process owns all game rules. Python supplies transport, observation
-flattening, and a compact 16-action macro codec suitable for starter agents.
+flattening, and a compact action macro codec suitable for starter agents.
 Native action dictionaries remain available through SimBridge.
 """
 from __future__ import annotations
@@ -19,9 +19,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_ENTRY = REPO_ROOT / "rl" / "bridge.cjs"
 
 ACTION_LABELS = (
-    "till", "plant", "water", "harvest", "sell", "fish", "mine", "feed",
-    "buy_animal", "upgrade_tool", "gift", "talk", "claim_festival",
-    "advance_day", "equip", "fill_water",
+    "move", "plant", "water", "harvest", "till", "sell", "order", "buy",
+    "gift", "talk", "propose", "advance", "newGamePlus", "completeTutorial",
+    "buyAnimal", "feedAnimal", "fish", "mine", "cook", "deposit", "withdraw",
+    "upgradeTool", "equip", "fillWater", "claimFestival",
+    "contact",
 )
 ANIMALS = ("chicken", "cow", "sheep")
 TOOLS_ORDER = ("", "hoe", "watering", "pickaxe", "rod")
@@ -149,7 +151,8 @@ def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
         tier = TIER_VALUE.get(str(tool_tiers.get(tool_name, "base")), 0)
         values.append(float(tier) / 2.0)
     values.append(float(obs.get("waterLevel", 100)) / 100.0)
-    values.extend(float(v) / 99.0 for v in list(obs.get("inventory") or [])[:item_count])
+    inventory = obs.get("inventoryVector") or []
+    values.extend(float(v) / 99.0 for v in list(inventory)[:item_count])
     values.extend(float(v) / 4.0 for v in list(obs.get("farmState") or [])[:64])
     values.extend(float(v) / 6.0 for v in list(obs.get("farmCrop") or [])[:64])
     values.extend(float(v) for v in list(obs.get("farmWatered") or [])[:64])
@@ -161,10 +164,11 @@ def flatten_observation(obs: dict[str, Any], item_count: int) -> np.ndarray:
 
 
 class MacroActionCodec:
-    """Map the 16 engine action types to useful, state-aware native actions."""
+    """Resolve exact engine action types to state-aware native payloads."""
 
-    def __init__(self, items: Iterable[str]):
+    def __init__(self, items: Iterable[str], saleable: Iterable[str] = SALEABLE):
         self.items = tuple(items)
+        self.saleable = tuple(saleable)
         self.item_index = {name: index for index, name in enumerate(self.items)}
 
     @staticmethod
@@ -180,14 +184,15 @@ class MacroActionCodec:
         return index % 8, index // 8
 
     def _count(self, obs: dict[str, Any], item: str) -> int:
-        inventory = list(obs.get("inventory") or [])
-        index = self.item_index.get(item, -1)
-        return int(inventory[index]) if 0 <= index < len(inventory) else 0
+        inventory = obs.get("inventory") or {}
+        return int(inventory.get(item, 0))
 
     def decode(self, label: int, obs: dict[str, Any]) -> dict[str, Any]:
         action = ACTION_LABELS[int(label)]
         if action == "equip":
             return {"type": action, "tool": self._pick_tool(obs)}
+        if action == "move":
+            return {"type": action, "x": 200, "y": 200}
         if action in {"till", "plant", "water", "harvest"}:
             required = {"till": {0}, "plant": {1}, "water": {2, 3}, "harvest": {4}}[action]
             x, y = self._tile(obs, required, require_unwatered=action == "water")
@@ -197,11 +202,15 @@ class MacroActionCodec:
                 native["crop"] = crops.get(int(obs.get("season", 0)), "space-wheat")
             return native
         if action == "sell":
-            item = next((name for name in SALEABLE if self._count(obs, name) > 0), "space-wheat")
+            item = next((name for name in self.saleable if self._count(obs, name) > 0), "space-wheat")
             return {"type": action, "item": item, "quantity": 1}
+        if action == "order":
+            return {"type": action, "data": {"item": "space-wheat", "quantity": 1, "price": 20, "type": "sell"}}
+        if action == "buy":
+            return {"type": action, "item": "seeds", "quantity": 1}
         if action == "fish":
             return {"type": action, "spot": "stardust", "night": not bool(obs.get("isDay", 1))}
-        if action == "feed":
+        if action == "feedAnimal":
             counts = list(obs.get("animals") or [0] * len(ANIMALS))
             fed = list(obs.get("animalsFedToday") or [0] * len(ANIMALS))
             index = next((
@@ -209,13 +218,35 @@ class MacroActionCodec:
                 if int(count) > 0 and not bool(fed[i])
             ), 0)
             return {"type": action, "species": ANIMALS[index]}
-        if action == "buy_animal":
+        if action == "buyAnimal":
             return {"type": action, "species": "chicken", "quantity": 1}
         if action == "gift":
             item = next((name for name in self.items if self._count(obs, name) > 0), "weeds")
             return {"type": action, "npc": "rhea", "item": item}
         if action == "talk":
-            return {"type": action, "npc": "rhea"}
+            last_talk = ((obs.get("state") or {}).get("lastTalkDay") or {})
+            npc = next((
+                name for name in ("nova", "luna", "zephyr", "vega", "quasar", "rhea", "astra", "orion", "comet", "cora")
+                if int(last_talk.get(name, -1)) != int(obs.get("day", 0))
+            ), "rhea")
+            return {"type": action, "npc": npc}
+        if action == "propose":
+            friendships = obs.get("friendships") or {}
+            npc = next((
+                name for name in ("nova", "luna", "zephyr", "vega", "rhea", "astra", "orion")
+                if int(friendships.get(name, 0)) >= 80
+            ), "rhea")
+            return {"type": action, "npc": npc}
+        if action == "cook":
+            return {"type": action}
+        if action in {"deposit", "withdraw"}:
+            source = obs.get("inventory" if action == "deposit" else "storage") or {}
+            item = next((name for name, count in source.items() if int(count) > 0), "space-wheat")
+            return {"type": action, "item": item, "qty": 1}
+        if action == "upgradeTool":
+            return {"type": action, "tool": "hoe"}
+        if action == "contact":
+            return {"type": action, "alien": "aurelian", "doctrine": "observe"}
         return {"type": action}
 
     @staticmethod
@@ -250,34 +281,56 @@ class MacroActionCodec:
         energy = float(obs.get("energy", 0))
         equipped = str(obs.get("equipped", "") or "")
         tank = float(obs.get("waterLevel", 100))
-        mask = np.ones(len(ACTION_LABELS), dtype=np.int8)
+        allowed = {name: 1 for name in ACTION_LABELS}
         # farm work is tool-gated: mask each craft off until its tool is in hand
-        mask[0] = int(0 in grid and energy > 0 and equipped == "hoe")
-        mask[1] = int(1 in grid and self._count(obs, "seeds") > 0 and energy > 0)
-        mask[2] = int(
+        allowed["till"] = int(0 in grid and energy > 0 and equipped == "hoe")
+        allowed["plant"] = int(1 in grid and self._count(obs, "seeds") > 0 and energy > 0)
+        allowed["water"] = int(
             any(s in {2, 3} and not bool(watered[i]) for i, s in enumerate(states))
             and energy > 0 and equipped == "watering" and tank >= WATER_USE_COST
         )
-        mask[3] = int(4 in grid and equipped == "")
-        mask[4] = int(any(self._count(obs, name) > 0 for name in SALEABLE))
-        mask[5] = int(energy >= 10 and equipped == "rod")
-        mask[6] = int(energy >= 5 and equipped == "pickaxe")
+        allowed["harvest"] = int(4 in grid and equipped == "")
+        allowed["sell"] = int(any(self._count(obs, name) > 0 for name in self.saleable))
+        allowed["buy"] = int(float(obs.get("credits", 0)) >= 5)
+        allowed["fish"] = int(energy >= 10 and equipped == "rod")
+        allowed["mine"] = int(energy >= 5 and equipped == "pickaxe")
         counts = list(obs.get("animals") or [0] * len(ANIMALS))
         fed = list(obs.get("animalsFedToday") or [0] * len(ANIMALS))
-        mask[7] = int(any(
+        allowed["feedAnimal"] = int(any(
             int(count) > 0 and not bool(fed[i]) for i, count in enumerate(counts)
         ))
-        mask[8] = int(float(obs.get("credits", 0)) >= 100)
+        allowed["buyAnimal"] = int(float(obs.get("credits", 0)) >= 100)
         tool = int(obs.get("tool", 0))
         credits = float(obs.get("credits", 0))
-        mask[9] = int((tool == 0 and credits >= 150) or (tool == 1 and credits >= 400))
-        mask[10] = int(sum(int(v) for v in (obs.get("inventory") or [])) > 0)
-        mask[11] = int(not bool(obs.get("talkedRheaToday", 0)))
-        mask[12] = int(bool(obs.get("festival")) and not bool(obs.get("festivalClaimed")))
-        mask[13] = 1
-        mask[14] = 1   # equip is always legal (re-tooling is never wasteful)
-        mask[15] = 1   # fill_water is always legal (it only no-ops when full)
-        return mask
+        allowed["upgradeTool"] = int((tool == 0 and credits >= 150) or (tool == 1 and credits >= 400))
+        allowed["gift"] = int(sum(int(v) for v in (obs.get("inventory") or {}).values()) > 0)
+        last_talk = ((obs.get("state") or {}).get("lastTalkDay") or {})
+        allowed["talk"] = int(any(
+            int(last_talk.get(npc, -1)) != int(obs.get("day", 0))
+            for npc in ("nova", "luna", "zephyr", "vega", "quasar", "rhea", "astra", "orion", "comet", "cora")
+        ))
+        allowed["propose"] = int(
+            not bool(obs.get("married"))
+            and any(
+                int((obs.get("friendships") or {}).get(npc, 0)) >= 80
+                for npc in ("nova", "luna", "zephyr", "vega", "rhea", "astra", "orion")
+            )
+        )
+        allowed["claimFestival"] = int(bool(obs.get("festival")) and not bool(obs.get("festivalClaimed")))
+        allowed["newGamePlus"] = int(bool(obs.get("arcDone")))
+        allowed["completeTutorial"] = int(
+            not bool((obs.get("state") or {}).get("tutorialComplete", False))
+        )
+        allowed["fillWater"] = int(tank < 100)
+        raw_food = (
+            "space-wheat", "star-berry", "moon-melon", "plasma-tomato",
+            "moonfish", "stardust-salmon", "comet-trout", "nebula-marlin",
+        )
+        allowed["cook"] = int(sum(self._count(obs, item) for item in raw_food) >= 2)
+        allowed["deposit"] = int(any(int(v) > 0 for v in (obs.get("inventory") or {}).values()))
+        allowed["withdraw"] = int(any(int(v) > 0 for v in (obs.get("storage") or {}).values()))
+        allowed["contact"] = 1  # doctrines are reward-neutral and may be revised
+        return np.asarray([allowed[name] for name in ACTION_LABELS], dtype=np.int8)
 
 
 class FarmGymEnv(gym.Env):
@@ -300,7 +353,12 @@ class FarmGymEnv(gym.Env):
                 "guess the season length — the calendar is Node's source of truth"
             )
         self.horizon_days = int(horizon_days)
-        self.codec = MacroActionCodec(self.bridge.spec["items"])
+        if tuple(self.bridge.spec.get("actionTypes") or ()) != ACTION_LABELS:
+            raise RuntimeError("Python action labels differ from FarmRoom.GAME_ACTIONS")
+        vocabulary = self.bridge.spec.get("vocabulary") or {}
+        self.codec = MacroActionCodec(
+            self.bridge.spec["items"], vocabulary.get("saleable") or SALEABLE
+        )
         self.action_space = spaces.Discrete(len(ACTION_LABELS))
         size = (len(SCALARS) + 1 + len(TOOLS_ORDER) + len(TOOL_IDS) + 1
                 + len(self.bridge.spec["items"]) + 64 + 64 + 64 + 3 + 3 + len(FRIENDS))
@@ -342,6 +400,14 @@ class FarmGymEnv(gym.Env):
         return (
             flatten_observation(self.raw_obs, len(self.codec.items)), reward,
             terminated, truncated, {**info, "native_action": native},
+        )
+
+    def validate_native_action(self, native: dict[str, Any]) -> dict[str, Any]:
+        """Validate an exact payload through a cloned production dispatcher."""
+        if self.raw_obs is None:
+            raise RuntimeError("reset() must be called before action validation")
+        return dict(
+            self.bridge.request({"cmd": "validate", "action": native}).get("validation") or {}
         )
 
     # ── Narrative accessors: the world speaks through the one Node authority ──

@@ -8,7 +8,7 @@ import statistics
 import time
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +31,14 @@ class ModelEpisode:
     trajectory: str
     replay_ok: bool
     capped: bool = False
+    incomplete_reason: str | None = None
     primary_valid_rate: float | None = None
     retry_rate: float | None = None
     fallback_count: int = 0
+    model_calls: int = 0
+    mean_model_call_latency_ms: float | None = None
+    actions_per_model_call: float | None = None
+    mean_ttft_ms: float | None = None
     # ── narrative record (report v4: biography, not a bar) ──
     days: int = 0
     quests: int = 0
@@ -42,6 +47,8 @@ class ModelEpisode:
     journal_entries: int = 0
     festivals: int = 0
     unique_tools: int = 0
+    contacts: int = 0
+    contact_choices: dict[str, str] = field(default_factory=dict)
     testimony: str = ""
 
 
@@ -64,10 +71,16 @@ def evaluate_episode(
     resume: bool = False,
 ) -> ModelEpisode:
     path = trajectory_dir / f"seed-{seed}.jsonl"
-    recorder = TrajectoryRecorder(FarmGymEnv(horizon_days=horizon_days), path)
+    recorder = TrajectoryRecorder(
+        FarmGymEnv(horizon_days=horizon_days), path,
+        action_interface=action_interface(policy),
+    )
     total_reward = 0.0
     latencies: list[float] = []
+    model_call_latencies: list[float] = []
+    ttfts: list[float] = []
     capped = False
+    incomplete_reason: str | None = None
     had_prior_steps = False
     primary_valid = retries_used = fallback_count = 0
     terminated = truncated = False
@@ -94,14 +107,66 @@ def evaluate_episode(
                 primary_valid += int(decision.parsed and not decision.retry_used)
                 retries_used += int(decision.retry_used)
                 fallback_count += int(not decision.parsed)
-            latencies.append((time.perf_counter() - started) * 1000.0)
-            _obs, reward, terminated, truncated, info = recorder.step(action)
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            latencies.append(elapsed_ms)
+            if decision is None or getattr(decision, "model_called", True):
+                call_count = max(1, int(getattr(decision, "model_call_count", 1)))
+                model_call_latencies.extend([elapsed_ms / call_count] * call_count)
+                if decision is not None and getattr(decision, "ttft_ms", None) is not None:
+                    ttfts.append(float(decision.ttft_ms))
+            policy_decision = None
+            if decision is not None:
+                decision_fields = (
+                    asdict(decision) if is_dataclass(decision)
+                    else dict(vars(decision))
+                )
+                policy_decision = {
+                    **decision_fields,
+                    "latency_ms": elapsed_ms,
+                }
+            # Never turn an unparseable model response into an in-world day
+            # advance. There is no truthful action to execute, so stop this
+            # episode and let the validity gate refuse the run. Recognizable
+            # but illegal native payloads use source=invalid_payload and are
+            # dispatched below so the real game can reject and log them.
+            if (
+                decision is not None
+                and not bool(getattr(decision, "parsed", False))
+                and getattr(decision, "source", "") != "invalid_payload"
+            ):
+                recorder.record_policy_failure(policy_decision or {})
+                incomplete_reason = "unparseable_model_output"
+                print(
+                    f"seed={seed} stopped=UNPARSEABLE step={recorder.steps + 1} "
+                    "no game action executed",
+                    flush=True,
+                )
+                break
+            native_action = getattr(decision, "native_action", None)
+            if native_action is not None:
+                _obs, reward, terminated, truncated, info = recorder.step_native(
+                    native_action, tool=native_action.get("type"),
+                    policy_decision=policy_decision,
+                )
+            else:
+                _obs, reward, terminated, truncated, info = recorder.step(
+                    action, policy_decision=policy_decision
+                )
             total_reward += reward
+            recorded = recorder.last_record or {}
+            energy = recorded.get("energy") or {}
             print(
                 f"seed={seed} step={recorder.steps:03d} "
                 f"day={recorder.env.raw_obs['day']} action={info['type']:<14} "
                 f"reward={reward:7.3f} latency={latencies[-1]:7.1f}ms "
-                f"decision={getattr(decision, 'source', 'untracked')}"
+                f"decision={getattr(decision, 'source', 'untracked')} "
+                f"tokens={getattr(decision, 'completion_tokens', None)} "
+                f"energy={energy.get('before', 0):g}->{energy.get('after', 0):g}"
+                f"/{energy.get('capacity', 0):g} "
+                f"cost={energy.get('cost', 0):g} "
+                f"native={json.dumps(info['native_action'], separators=(',', ':'))} "
+                f"changes={json.dumps(recorded.get('changes', {}), separators=(',', ':'))} "
+                f"reason={getattr(decision, 'rationale', None)!r}"
             )
             if terminated or truncated:
                 break
@@ -138,6 +203,7 @@ def evaluate_episode(
         trajectory=str(path),
         replay_ok=replay["steps"] == steps,
         capped=capped,
+        incomplete_reason=incomplete_reason,
         primary_valid_rate=(
             None if had_prior_steps or not latencies else primary_valid / len(latencies)
         ),
@@ -145,6 +211,18 @@ def evaluate_episode(
             None if had_prior_steps or not latencies else retries_used / len(latencies)
         ),
         fallback_count=fallback_count,
+        model_calls=0 if had_prior_steps else len(model_call_latencies),
+        mean_model_call_latency_ms=(
+            None if had_prior_steps else
+            (float(statistics.fmean(model_call_latencies)) if model_call_latencies else 0.0)
+        ),
+        actions_per_model_call=(
+            None if had_prior_steps or not model_call_latencies else
+            len(latencies) / len(model_call_latencies)
+        ),
+        mean_ttft_ms=(
+            None if had_prior_steps or not ttfts else float(statistics.fmean(ttfts))
+        ),
         days=int(narrative.get("daysSurvived", 0)),
         quests=int(narrative.get("questsCompleted", 0)),
         friendships=float(narrative.get("friendshipsTotal", 0.0)),
@@ -152,6 +230,8 @@ def evaluate_episode(
         journal_entries=int(narrative.get("journalEntries", 0)),
         festivals=int(narrative.get("festivalsClaimed", 0)),
         unique_tools=len(narrative.get("tools") or []),
+        contacts=int(narrative.get("contactsMade", 0)),
+        contact_choices=dict(narrative.get("contactChoices") or {}),
         testimony=testimony,
     )
 
@@ -175,12 +255,10 @@ def recover_capped_episode(
     if not records:
         return None
     header, transitions = records[0], records[1:]
-    transitions = [
-        record for record in transitions
-        if record.get("kind") != "episode-summary"
-    ]
+    transitions = [record for record in transitions if not record.get("kind")]
     if (
         header.get("kind") != "space-farmer-trajectory"
+        or header.get("action_interface") != action_interface(policy)
         or int(header.get("seed", -1)) != seed
         or int(header.get("horizon_days", -1)) != horizon_days
         or len(transitions) != max_steps
@@ -223,6 +301,7 @@ def aggregate(episodes: list[dict[str, Any]]) -> dict[str, float]:
         "mean_journal_entries": "journal_entries",
         "mean_festivals": "festivals",
         "mean_unique_tools": "unique_tools",
+        "mean_contacts": "contacts",
     }
     for label, key in narrative_keys.items():
         if all(key in row for row in episodes):
@@ -249,6 +328,24 @@ def aggregate(episodes: list[dict[str, Any]]) -> dict[str, float]:
             [float(row["p95_latency_ms"]) for row in latency_rows], 0.95
         )
         result["latency_episodes"] = float(len(latency_rows))
+    batching_rows = [
+        row for row in episodes if row.get("actions_per_model_call") is not None
+    ]
+    if batching_rows:
+        result["model_calls"] = float(sum(
+            int(row.get("model_calls", 0)) for row in batching_rows
+        ))
+        result["mean_actions_per_model_call"] = float(statistics.fmean(
+            float(row["actions_per_model_call"]) for row in batching_rows
+        ))
+        result["mean_model_call_latency_ms"] = float(statistics.fmean(
+            float(row["mean_model_call_latency_ms"]) for row in batching_rows
+        ))
+        ttft_rows = [row for row in batching_rows if row.get("mean_ttft_ms") is not None]
+        if ttft_rows:
+            result["mean_ttft_ms"] = float(statistics.fmean(
+                float(row["mean_ttft_ms"]) for row in ttft_rows
+            ))
     return result
 
 
@@ -277,6 +374,11 @@ def validate_runtime_quality(
     offenders: list[str] = []
     capped = 0
     for episode in episodes:
+        if episode.incomplete_reason:
+            offenders.append(
+                f"seed={episode.seed}: incomplete ({episode.incomplete_reason})"
+            )
+            continue
         if episode.primary_valid_rate is None:
             continue  # recovered/untracked — no validity signal to gate on
         if episode.capped:
@@ -302,7 +404,16 @@ def validate_runtime_quality(
         )
 
 
-ACTION_INTERFACE = "masked-macro-v3-strict"
+ACTION_INTERFACE = "energy-grounded-native-strict"
+
+
+def action_interface(policy: OpenAIActionPolicy) -> str:
+    interface = ACTION_INTERFACE
+    if getattr(policy, "action_batch_size", 1) > 1:
+        interface += f"-batch-{policy.action_batch_size}"
+    if getattr(policy, "model_task", None):
+        interface += f"-{policy.model_task}-task"
+    return interface
 
 
 def build_result(
@@ -320,7 +431,7 @@ def build_result(
         "environment": {
             "horizon_days": horizon_days,
             "seeds": seeds,
-            "action_interface": ACTION_INTERFACE,
+            "action_interface": action_interface(policy),
         },
         "model": {
             "name": policy.model, "base_url": policy.base_url,
@@ -328,6 +439,9 @@ def build_result(
             "thinking": getattr(policy, "thinking", False),
             "max_output_tokens": getattr(policy, "max_output_tokens", 512),
             "policy_retries": getattr(policy, "retries", 1),
+            "stream": getattr(policy, "stream", True),
+            "action_batch_size": getattr(policy, "action_batch_size", 1),
+            "model_task": getattr(policy, "model_task", None),
         },
         "summary": {
             name: aggregate(rows) for name, rows in policies.items() if rows
@@ -354,7 +468,7 @@ def load_completed(
     expected = {
         "horizon_days": horizon_days,
         "seeds": seeds,
-        "action_interface": ACTION_INTERFACE,
+        "action_interface": action_interface(policy),
     }
     actual = {key: environment.get(key) for key in expected}
     saved_model = saved.get("model") or {}
@@ -364,15 +478,34 @@ def load_completed(
         "thinking": policy.thinking,
         "max_output_tokens": policy.max_output_tokens,
         "policy_retries": policy.retries,
+        "stream": getattr(policy, "stream", True),
+        "action_batch_size": getattr(policy, "action_batch_size", 1),
+        "model_task": getattr(policy, "model_task", None),
     }
     actual_model = {key: saved_model.get(key) for key in expected_model}
     if actual != expected or actual_model != expected_model:
         raise ValueError(
             "resume report does not match model, reasoning settings, seeds, horizon, or action interface"
         )
-    return [
-        ModelEpisode(**row) for row in (saved.get("episodes") or {}).get("model", [])
-    ]
+    completed: list[ModelEpisode] = []
+    for row in (saved.get("episodes") or {}).get("model", []):
+        episode = ModelEpisode(**row)
+        if episode.incomplete_reason or episode.capped:
+            continue
+        trajectory = Path(episode.trajectory)
+        if trajectory.exists():
+            records = [
+                json.loads(line)
+                for line in trajectory.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+            transitions = [record for record in records[1:] if not record.get("kind")]
+            if not transitions or not bool(
+                transitions[-1].get("terminated") or transitions[-1].get("truncated")
+            ):
+                continue
+        completed.append(episode)
+    return completed
 
 
 def make_policy(args: argparse.Namespace) -> OpenAIActionPolicy:
@@ -381,6 +514,9 @@ def make_policy(args: argparse.Namespace) -> OpenAIActionPolicy:
         args.base_url, args.model, args.api_key, timeout=args.timeout,
         reasoning_effort=args.reasoning_effort, thinking=args.thinking,
         max_output_tokens=args.max_output_tokens, retries=args.policy_retries,
+        stream=getattr(args, "stream", True),
+        action_batch_size=getattr(args, "action_batch_size", 1),
+        model_task=getattr(args, "model_task", None),
     )
 
 
@@ -390,6 +526,7 @@ def evaluate_seeds(
     trajectory_dir: Path,
     completed: set[int],
     *,
+    prior_episodes: list[ModelEpisode] | None = None,
     policy_factory=None,
 ) -> list[ModelEpisode]:
     """Run every missing seed, sequentially or across --workers threads.
@@ -403,6 +540,7 @@ def evaluate_seeds(
         policy_factory = lambda: make_policy(args)
     missing = [seed for seed in seeds if seed not in completed]
     found: dict[int, ModelEpisode] = {}
+    prior = {episode.seed: episode for episode in (prior_episodes or [])}
 
     def work(seed: int) -> tuple[int, ModelEpisode | None]:
         if args.resume:
@@ -420,7 +558,9 @@ def evaluate_seeds(
         return seed, episode
 
     def checkpoint(seed: int) -> None:
-        episodes = sorted(found.values(), key=lambda item: item.seed)
+        episodes = sorted(
+            {**prior, **found}.values(), key=lambda item: item.seed
+        )
         partial = {"model": [asdict(item) for item in episodes]}
         write_result(
             args.output,
@@ -467,6 +607,18 @@ def main() -> None:
     )
     parser.add_argument("--max-output-tokens", type=int, default=4096)
     parser.add_argument("--policy-retries", type=int, default=1)
+    parser.add_argument(
+        "--action-batch-size", type=int, default=1,
+        help="ask for up to N planned macro actions per model call (default 1)",
+    )
+    parser.add_argument(
+        "--model-task", choices=("action",), default=None,
+        help="emit a model-native per-message task hint (DeepSeek V4 supports action)",
+    )
+    parser.add_argument(
+        "--stream", action=argparse.BooleanOptionalAction, default=True,
+        help="stream chat tokens so --timeout is an idle rather than total timeout",
+    )
     parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument("--seed-start", type=int, default=1)
     parser.add_argument(
@@ -501,6 +653,8 @@ def main() -> None:
         parser.error("--seeds must be positive")
     if args.workers < 1:
         parser.error("--workers must be positive")
+    if args.action_batch_size < 1:
+        parser.error("--action-batch-size must be positive")
     if args.horizon is not None:
         args.horizon_days = parse_horizon(args.horizon)
     if args.horizon_days is None:
@@ -519,12 +673,15 @@ def main() -> None:
     completed = {episode.seed for episode in model_episodes}
     print(
         f"model={policy.model} endpoint={policy.base_url} seeds={seeds} "
-        f"horizon={args.horizon_days} workers={args.workers} resume={sorted(completed)}"
+        f"horizon={args.horizon_days} workers={args.workers} "
+        f"action_batch_size={args.action_batch_size} model_task={args.model_task or 'none'} "
+        f"resume={sorted(completed)}"
     )
 
     try:
         new_episodes = evaluate_seeds(
-            args, seeds, args.trajectory_dir, completed
+            args, seeds, args.trajectory_dir, completed,
+            prior_episodes=model_episodes,
         )
         seen = {episode.seed for episode in model_episodes}
         model_episodes.extend(
@@ -533,7 +690,7 @@ def main() -> None:
         model_episodes.sort(key=lambda item: item.seed)
     except (urllib.error.URLError, TimeoutError) as exc:
         raise SystemExit(
-            f"Model endpoint unavailable at {policy.base_url}: {exc}\n"
+            f"Model completion failed at {policy.base_url}: {exc}\n"
             "Restart with --resume after the endpoint is healthy."
         ) from exc
 
@@ -576,7 +733,8 @@ def main() -> None:
             f"narrative (30-season report v4): {narrative['mean_days']:.0f} days survived · "
             f"{narrative['mean_quests']:.1f} quests · {narrative['mean_friends']:.1f} friends · "
             f"{narrative['mean_journal_entries']:.1f} journal entries · "
-            f"{narrative['mean_festivals']:.1f} festivals · {narrative['mean_unique_tools']:.1f} tools"
+            f"{narrative['mean_festivals']:.1f} festivals · {narrative['mean_contacts']:.1f} contacts · "
+            f"{narrative['mean_unique_tools']:.1f} tools"
         )
     print(f"\nreport={args.output}")
     print(f"trajectories={args.trajectory_dir} replay=OK")

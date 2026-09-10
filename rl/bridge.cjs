@@ -3,7 +3,7 @@
 
 console.log = (...args) => console.error(...args);
 const readline = require('node:readline');
-const { FarmEnv, ITEMS, ACTION_TYPES, TOOLS, SEASONS, DAYS_PER_SEASON, NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS, ALIENS, CONTACT_DOCTRINES } = require('./env_core.cjs');
+const { FarmEnv, ITEMS, GAME_ACTIONS, ACTION_TYPES, ACTION_DEFINITIONS, TOOLS, SEASONS, DAYS_PER_SEASON, NPC_IDS, CROPS, SPECIES, SALEABLE, FISH_SPOTS, ALIENS, CONTACT_DOCTRINES, EVALUATION_CONTRACT } = require('./env_core.cjs');
 let env = null;
 const reply = (payload) => process.stdout.write(JSON.stringify({ ok: true, ...payload }) + '\n');
 const fail = (error) => process.stdout.write(JSON.stringify({
@@ -14,9 +14,13 @@ async function handle(command) {
   switch (command.cmd) {
     case 'spec':
       return reply({
-        protocolVersion: 2,
-        items: ITEMS, actionTypes: ACTION_TYPES, observationVersion: 1,
+        source: 'FarmRoom.GAME_ACTIONS',
+        items: ITEMS, actionTypes: ACTION_TYPES,
+        actions: GAME_ACTIONS.map(({ type, reply }) => ({
+          type, reply, ...ACTION_DEFINITIONS[type],
+        })),
         tools: TOOLS,
+        evaluation: EVALUATION_CONTRACT,
         vocabulary: {
           seasons: SEASONS, seasonDays: DAYS_PER_SEASON,
           npcs: NPC_IDS, crops: CROPS, species: SPECIES,
@@ -62,6 +66,9 @@ async function handle(command) {
     case 'step':
       if (!env) throw new Error('reset must be called before step');
       return reply(env.step(command.action));
+    case 'validate':
+      if (!env) throw new Error('reset must be called before validate');
+      return reply({ validation: env.validate(command.action) });
     case 'save':
       if (!env) throw new Error('reset must be called before save');
       return reply({ path: env.save(command.path || null) });

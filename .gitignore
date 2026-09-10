@@ -12,7 +12,14 @@ artifacts/*
 artifacts/demo/*
 !artifacts/demo/space-farmer-demo.mp4
 trajectories/
+*.pre-exchange-fix.bak
 checkpoints/
+# Endpoint eval outputs are large, reproducible run artifacts. Keep the
+# curated leaderboard metadata and archived fixtures already tracked, but do
+# not accidentally commit ad-hoc reports or probe batches.
+reports/evals/*.json
+!reports/evals/models.json
+reports/evals/trials/
 *.tmp
 *.orig
 *.rej

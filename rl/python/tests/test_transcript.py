@@ -22,8 +22,8 @@ def _make_trajectory(seed: int = 7) -> Path:
         {"type": "equip", "tool": "watering"},
         {"type": "water", "tileX": 0, "tileY": 0},
         {"type": "talk", "npc": "quasar"},
-        {"type": "advance_day"},
-        {"type": "advance_day"},
+        {"type": "advance"},
+        {"type": "advance"},
     ]
     for native in script:
         rec.step_native(native, tool=native["type"])
@@ -35,8 +35,8 @@ class TranscriptTests(unittest.TestCase):
     def test_markdown_diary(self):
         md = render_markdown(_make_trajectory())
         self.assertIn("# A Season on B-612", md)
-        self.assertIn("## Day 1", md)
-        self.assertIn("## Day 3", md)
+        self.assertIn("## Day 0", md)
+        self.assertIn("## Day 2", md)
         self.assertIn("soil sighs open", md)
         self.assertIn("stamina ceiling", md)      # training is visible
         self.assertIn("Replay-verified", md)

@@ -43,9 +43,9 @@ const fail = (msg) => { console.error(`FAIL: ${msg}`); process.exit(1); };
   env.step({ type: 'equip', tool: 'watering' });
   env.step({ type: 'water', tileX: 0, tileY: 0 });
   for (let d = 0; d < MATURITY; d++) {
-    env.step({ type: 'advance_day' });
+    env.step({ type: 'advance' });
     if (env.farm().tiles[0].type !== 'mature') {
-      if ((env.player().waterLevel || 0) < 20) env.step({ type: 'fill_water' });
+      if ((env.player().waterLevel || 0) < 20) env.step({ type: 'fillWater' });
       env.step({ type: 'water', tileX: 0, tileY: 0 });
     }
   }
@@ -71,11 +71,18 @@ for (let ep = 0; ep < EPISODES; ep++) {
   while (!done && ticks < 400) {
     const a = { type: ACTION_TYPES[Math.floor(rng() * ACTION_TYPES.length)] };
     if (a.type === 'sell') Object.assign(a, { item: 'space-wheat', quantity: 1 });
+    if (a.type === 'move') Object.assign(a, { x: 200, y: 200 });
+    if (a.type === 'order') Object.assign(a, { data: { item: 'space-wheat', quantity: 1, price: 20, type: 'sell' } });
+    if (a.type === 'buy') Object.assign(a, { item: 'seeds', quantity: 1 });
     if (a.type === 'gift') Object.assign(a, { npc: 'rhea', item: 'weeds' });
     if (a.type === 'talk') Object.assign(a, { npc: 'rhea' });
-    if (a.type === 'buy_animal') Object.assign(a, { species: 'chicken' });
+    if (a.type === 'propose') Object.assign(a, { npc: 'rhea' });
+    if (a.type === 'buyAnimal') Object.assign(a, { species: 'chicken' });
+    if (a.type === 'feedAnimal') Object.assign(a, { species: 'chicken' });
+    if (a.type === 'deposit' || a.type === 'withdraw') Object.assign(a, { item: 'seeds', qty: 1 });
+    if (a.type === 'upgradeTool') Object.assign(a, { tool: 'hoe' });
     if (a.type === 'equip') Object.assign(a, { tool: ['', 'hoe', 'watering', 'pickaxe', 'rod'][Math.floor(rng() * 5)] });
-    if (a.type === 'fill_water') Object.assign(a, {});
+    if (a.type === 'fillWater') Object.assign(a, {});
     if (['till', 'plant', 'water', 'harvest'].includes(a.type)) Object.assign(a, { tileX: Math.floor(rng() * 8), tileY: Math.floor(rng() * 8), crop: 'space-wheat' });
     if (a.type === 'fish') Object.assign(a, { spot: 'stardust' });
     seen.add(a.type);
@@ -99,13 +106,13 @@ const script = [
   { type: 'plant', tileX: 2, tileY: 3, crop: 'star-berry' },
   { type: 'equip', tool: 'watering' },
   { type: 'water', tileX: 2, tileY: 3 },
-  { type: 'advance_day' }, { type: 'water', tileX: 2, tileY: 3 },
-  { type: 'fill_water' },
+  { type: 'advance' }, { type: 'water', tileX: 2, tileY: 3 },
+  { type: 'fillWater' },
   { type: 'equip', tool: 'pickaxe' },
   { type: 'mine' }, { type: 'mine' }, { type: 'mine' },
   { type: 'equip', tool: 'rod' },
   { type: 'fish', spot: 'stardust' }, { type: 'fish', spot: 'copper' },
-  { type: 'advance_day' },
+  { type: 'advance' },
 ];
 const run = (seed) => {
   const e = new FarmEnv({ horizonDays: HORIZON });

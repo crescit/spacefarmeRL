@@ -30,16 +30,16 @@ console.log('== narrative ledger ==');
   env.writeJournal('second verse');
   env.step({ type: 'talk', npc: 'rhea' });
   env.step({ type: 'gift', npc: 'rhea', item: 'weeds' });
-  env.step({ type: 'advance_day' });
+  env.step({ type: 'advance' });
   const s = env.narrativeStats();
   check('seedsPlanted tallied', s.seedsPlanted === 1, JSON.stringify(s));
   check('illegal step not counted', s.cropsHarvested === 0 && s.tools.indexOf('harvest') < 0);
-  check('unique tools recorded (equip, till, plant, water, talk, gift, advance_day)',
-    s.tools.length === 7 && s.tools.indexOf('till') >= 0 && s.tools.indexOf('equip') >= 0 && s.tools.indexOf('advance_day') >= 0,
+  check('unique tools recorded (equip, till, plant, water, talk, gift, advance)',
+    s.tools.length === 7 && s.tools.indexOf('till') >= 0 && s.tools.indexOf('equip') >= 0 && s.tools.indexOf('advance') >= 0,
     JSON.stringify(s.tools));
   check('journal entries tallied via writeJournal', s.journalEntries === 2, String(s.journalEntries));
   check('friendships recorded', s.friendshipsTotal > 0 && s.friendsMade === 1, JSON.stringify(s.friendshipsTotal));
-  check('days survived = day - 1', s.daysSurvived === 1 && s.day === 2, JSON.stringify(s));
+  check('days survived equals elapsed live-game days', s.daysSurvived === 1 && s.day === 1, JSON.stringify(s));
   env.close();
 }
 
@@ -48,7 +48,7 @@ console.log('== reset clears the ledger ==');
   const env = new FarmEnv({ horizonDays: 12, narrative: true });
   env.reset({ seed: 1 });
   env.writeJournal('once');
-  env.step({ type: 'advance_day' });
+  env.step({ type: 'advance' });
   env.reset({ seed: 2 });
   const s = env.narrativeStats();
   check('fresh episode has zeroed journal + tools',

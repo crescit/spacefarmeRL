@@ -10,7 +10,7 @@ import numpy as np
 
 from rl.python.env_gym import ACTION_LABELS, FarmGymEnv
 
-ADVANCE = ACTION_LABELS.index("advance_day")
+ADVANCE = ACTION_LABELS.index("advance")
 SELL = ACTION_LABELS.index("sell")
 MINE = ACTION_LABELS.index("mine")
 

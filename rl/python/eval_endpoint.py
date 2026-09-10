@@ -14,6 +14,22 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 
+RELEASE_REASONING_EFFORT = "low"
+RELEASE_TRAJECTORY_PROFILE = "energy-grounded-native-stream"
+
+
+def evaluation_profile(
+    reasoning_effort: str, action_batch_size: int, model_task: str | None = None
+) -> str:
+    if action_batch_size == 1 and reasoning_effort == RELEASE_REASONING_EFFORT:
+        profile = RELEASE_TRAJECTORY_PROFILE
+    else:
+        profile = f"energy-grounded-native-batch-{action_batch_size}-{reasoning_effort}-stream"
+    if model_task:
+        profile += f"-{model_task}-task"
+    return profile
+
+
 def normalize_base_url(endpoint: str) -> str:
     value = endpoint.strip()
     if not value:
@@ -69,9 +85,18 @@ def model_slug(model: str) -> str:
 
 def build_command(args: argparse.Namespace, base_url: str, model: str) -> list[str]:
     slug = model_slug(model)
-    output = args.output or Path("reports/evals") / f"{slug}.json"
-    trajectories = args.trajectory_dir or Path("trajectories") / slug
-    return [
+    reasoning_effort = getattr(args, "reasoning_effort", RELEASE_REASONING_EFFORT)
+    action_batch_size = getattr(args, "action_batch_size", 1)
+    model_task = getattr(args, "model_task", "none")
+    if model_task == "none":
+        model_task = None
+    profile = evaluation_profile(reasoning_effort, action_batch_size, model_task)
+    output = args.output or Path("reports/evals") / f"{slug}-{profile}.json"
+    trajectories = (
+        args.trajectory_dir
+        or Path("trajectories") / slug / profile
+    )
+    command = [
         sys.executable, "-m", "rl.python.eval_local_model",
         "--base-url", base_url,
         "--model", model,
@@ -81,14 +106,19 @@ def build_command(args: argparse.Namespace, base_url: str, model: str) -> list[s
         "--workers", str(args.workers),
         "--max-steps", str(args.max_steps),
         "--timeout", str(args.timeout),
-        "--thinking",
-        "--reasoning-effort", "max",
+        "--no-thinking",
+        "--reasoning-effort", reasoning_effort,
         "--max-output-tokens", str(args.max_output_tokens),
         "--policy-retries", str(args.policy_retries),
+        "--action-batch-size", str(action_batch_size),
+        "--stream",
         "--resume",
         "--output", str(output),
         "--trajectory-dir", str(trajectories),
     ]
+    if model_task:
+        command.extend(("--model-task", model_task))
+    return command
 
 
 def main() -> None:
@@ -103,12 +133,28 @@ def main() -> None:
                         help="default 1 for comparable latency and single-sequence servers")
     parser.add_argument("--max-steps", type=int, default=500)
     parser.add_argument("--timeout", type=float, default=120.0)
-    parser.add_argument("--max-output-tokens", type=int, default=4096)
+    parser.add_argument("--max-output-tokens", type=int, default=256)
     parser.add_argument("--policy-retries", type=int, default=1)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("low", "medium", "high", "max", "xhigh"),
+        default=RELEASE_REASONING_EFFORT,
+        help="low is the locked release default; overrides create a separate profile",
+    )
+    parser.add_argument(
+        "--action-batch-size", type=int, default=1,
+        help="1 is the locked release default; values above 1 create a batched profile",
+    )
+    parser.add_argument(
+        "--model-task", choices=("none", "action"), default="none",
+        help="optional model-native diagnostic hint; release runs use none",
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--trajectory-dir", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.action_batch_size < 1:
+        parser.error("--action-batch-size must be positive")
 
     try:
         base_url = normalize_base_url(args.endpoint)
@@ -118,7 +164,11 @@ def main() -> None:
         parser.error(str(exc))
 
     command = build_command(args, base_url, model)
-    print(f"endpoint={base_url} model={model} effort=max workers={args.workers}")
+    print(
+        f"endpoint={base_url} model={model} "
+        f"effort={args.reasoning_effort} thinking=off stream=on "
+        f"batch={args.action_batch_size} model_task={args.model_task} workers={args.workers}"
+    )
     print("report=" + command[command.index("--output") + 1])
     if args.dry_run:
         print("command=" + " ".join(command))

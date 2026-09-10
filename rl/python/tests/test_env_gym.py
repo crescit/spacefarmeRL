@@ -11,7 +11,7 @@ class BridgeTests(unittest.TestCase):
     def test_protocol_and_determinism(self):
         script = [
             {"type": "mine"}, {"type": "mine"},
-            {"type": "fish", "spot": "stardust"}, {"type": "advance_day"},
+            {"type": "fish", "spot": "stardust"}, {"type": "advance"},
         ]
         trajectories = []
         for _ in range(2):
@@ -21,6 +21,23 @@ class BridgeTests(unittest.TestCase):
                 self.assertEqual(len(obs["farmState"]), 64)
                 trajectories.append([bridge.step(action) for action in script])
         self.assertEqual(trajectories[0], trajectories[1])
+
+    def test_spec_exposes_scored_episode_contract(self):
+        with SimBridge() as bridge:
+            contract = bridge.spec["evaluation"]
+            self.assertEqual(contract["dayAdvancesOnlyOn"], "advance")
+            self.assertEqual(contract["creditDeltaUnit"], 100)
+            self.assertEqual(contract["rewardWeights"]["dayCost"], -0.5)
+            self.assertIn("credits_after", contract["rewardFormula"])
+            facts = contract["planningFacts"]
+            self.assertEqual(facts["starter"]["inventory"]["seeds"], 5)
+            self.assertEqual(facts["economy"]["shopPrices"]["seeds"], 5)
+            self.assertEqual(facts["actionCosts"]["fish"]["baseEnergy"], 10)
+            self.assertEqual(facts["actionCosts"]["talk"]["baseEnergy"], 0)
+            self.assertEqual(facts["livestock"]["animals"]["chicken"]["cost"], 100)
+            self.assertEqual(len(facts["firstContact"]["aliens"]), 8)
+            self.assertEqual(len(facts["firstContact"]["doctrines"]), 5)
+            self.assertEqual(len(bridge.spec["actions"]), 26)
 
     def test_checkpoint_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -34,7 +51,7 @@ class BridgeTests(unittest.TestCase):
                 self.assertTrue(info["loaded"])
                 actual = bridge.step({"type": "mine"})
                 self.assertEqual(expected, actual)
-                self.assertEqual(restored["day"], 1)
+                self.assertEqual(restored["day"], 0)
 
 
 class GymTests(unittest.TestCase):
@@ -44,7 +61,7 @@ class GymTests(unittest.TestCase):
             obs, info = env.reset(seed=42)
             self.assertTrue(env.observation_space.contains(obs))
             self.assertEqual(info["action_mask"].shape, (len(ACTION_LABELS),))
-            self.assertEqual(info["action_mask"][-1], 1)
+            self.assertEqual(info["action_mask"][ACTION_LABELS.index("equip")], 1)
             obs2, reward, terminated, truncated, info2 = env.step(ACTION_LABELS.index("mine"))
             self.assertTrue(env.observation_space.contains(obs2))
             self.assertTrue(np.isfinite(reward))
@@ -69,7 +86,7 @@ class GymTests(unittest.TestCase):
             _obs, _reward, _terminated, _truncated, info = env.step(water)
             self.assertEqual(env.raw_obs["farmWatered"][0], 1)
             self.assertEqual(info["action_mask"][water], 0)
-            env.step(ACTION_LABELS.index("advance_day"))
+            env.step(ACTION_LABELS.index("advance"))
             self.assertEqual(env.raw_obs["farmWatered"][0], 0)
             self.assertEqual(env.action_masks()[water], 1)
         finally:
@@ -79,8 +96,8 @@ class GymTests(unittest.TestCase):
         env = FarmGymEnv(horizon_days=4)
         try:
             env.reset(seed=42)
-            feed = ACTION_LABELS.index("feed")
-            buy = ACTION_LABELS.index("buy_animal")
+            feed = ACTION_LABELS.index("feedAnimal")
+            buy = ACTION_LABELS.index("buyAnimal")
             talk = ACTION_LABELS.index("talk")
             self.assertEqual(env.action_masks()[feed], 0)
             self.assertEqual(env.action_masks()[buy], 1)
@@ -91,9 +108,10 @@ class GymTests(unittest.TestCase):
             self.assertEqual(env.raw_obs["animalsFedToday"][0], 1)
             self.assertEqual(env.action_masks()[feed], 0)
             self.assertEqual(env.action_masks()[talk], 1)
-            env.step(talk)
+            for _ in range(10):
+                env.step(talk)
             self.assertEqual(env.action_masks()[talk], 0)
-            env.step(ACTION_LABELS.index("advance_day"))
+            env.step(ACTION_LABELS.index("advance"))
             self.assertEqual(env.action_masks()[feed], 1)
             self.assertEqual(env.action_masks()[talk], 1)
         finally:

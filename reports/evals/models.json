@@ -11,6 +11,18 @@
       "speculative_decoding": "DSpark K5 with a K64 draft",
       "source": "ml-infra spark-vllm/deepseek-mia recipe"
     },
+    "qwen3.8-flash-next": {
+      "backend": "vLLM with MiaAI PLE mmap and native MTP",
+      "checkpoint": "Mia-AiLab/Qwen3.8-Flash-Next-NVFP4",
+      "context_window": 262144,
+      "display_name": "Qwen3.8 Flash-Next - MiaAI",
+      "family": "Qwen3.8 Flash-Next",
+      "hardware": "NVIDIA DGX Spark, single-system serving",
+      "quantization": "NVFP4",
+      "reasoning_provenance": "The Qwen serving recipe defaults to thinking with medium effort for interactive clients. Space Farmer release eval requests explicitly override that default with enable_thinking=false, thinking=false, and reasoning_effort=low so model families use the same protocol.",
+      "speculative_decoding": "Native MTP, 3 speculative tokens",
+      "source": "ml-infra spark-vllm/qwen-mia recipe"
+    },
     "qwen38-flash-longctx": {
       "backend": "vLLM with PLE mmap and MTP=3",
       "checkpoint": "RadixArk/Qwen3.8-Flash-Next-NVFP4",

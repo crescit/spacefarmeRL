@@ -15,9 +15,9 @@ from typing import Any
 
 TOOL_GLYPH = {
     "till": "🛠", "plant": "🌱", "water": "💧", "harvest": "🌾", "sell": "🪙",
-    "buy_animal": "🐔", "feed": "🌾", "upgrade_tool": "⚒", "fish": "🎣",
-    "mine": "⛏", "gift": "🎁", "talk": "💬", "claim_festival": "🎆",
-    "advance_day": "🌙", "rest": "🌙", "read_colony_log": "📜",
+    "buyAnimal": "🐔", "feedAnimal": "🌾", "upgradeTool": "⚒", "fish": "🎣",
+    "mine": "⛏", "gift": "🎁", "talk": "💬", "claimFestival": "🎆",
+    "advance": "🌙", "rest": "🌙", "read_colony_log": "📜",
     "write_journal": "📖", "get_state": "📊", "inspect": "🔍",
 }
 
@@ -55,8 +55,11 @@ def _records(path: Path) -> list[dict[str, Any]]:
 def build_diary(path: Path) -> tuple[dict[str, Any], list[tuple[int, list[dict[str, Any]]]]]:
     rows = _records(path)
     header, rest = rows[0], rows[1:]
-    summary = next((record for record in rest if record.get("kind") == "episode-summary"), None)
-    transitions = [record for record in rest if record.get("kind") != "episode-summary"]
+    summary = next(
+        (record for record in reversed(rest) if record.get("kind") == "episode-summary"),
+        None,
+    )
+    transitions = [record for record in rest if not record.get("kind")]
     days: list[tuple[int, list[dict[str, Any]]]] = []
     for record in transitions:
         if days and days[-1][0] == _day(record):
