@@ -141,6 +141,7 @@ const NPC_DIALOGUES = {
   airlock: {
     text: [
       '[C.O.R.A.]: You have earned enough credits for landing. Proceeding to airlock.',
+      '[C.O.R.A.]: The 500 cr landing-fuel fee is spent on descent fuel — you land with the colony\'s starter purse.',
       '[C.O.R.A.]: Prepare for planetary descent.',
     ],
     x: 46, y: 14,
@@ -1196,12 +1197,29 @@ class SpaceshipScene extends Phaser.Scene {
     this.renderSprites();
   }
 
+  _drainDescentFuel() {
+    if (!this.fuelFill || !this.tweens) return;
+    const startW = this.fuelFill.displayWidth || this.fuelW || 2;
+    const fuel = { w: startW };
+    this.tweens.add({
+      targets: fuel, w: 2, duration: 2400, ease: 'Sine.easeIn',
+      onUpdate: () => {
+        this.fuelFill.setDisplaySize(Math.max(2, fuel.w), 9);
+        const left = Math.round(500 * Math.max(0, fuel.w - 2) / Math.max(1, startW - 2));
+        if (this.fuelLabel) this.fuelLabel.setText(`fuel ${left} / 500 cr`);
+      },
+    });
+  }
+
   landOnPlanet() {
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('completeTutorial');
-    this.showDialogue(['[C.O.R.A.]: Planetary landing sequence initiated.']);
+    this.showDialogue(['[C.O.R.A.]: Planetary landing sequence initiated. 500 cr of descent fuel burning.']);
+    // SF19: the 500 cr is the landing-fuel fee — drain the fuel bar visibly,
+    // then land. The planet's credits come from the server, never from here.
+    this._drainDescentFuel();
     this.time.delayedCall(3000, () => {
-      this.scene.start('PlanetScene', { credits: this.credits });
+      this.scene.start('PlanetScene');
     });
   }
 }

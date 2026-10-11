@@ -531,7 +531,7 @@ class FarmEnv {
     const room = Object.create(FarmRoom.prototype);
     room.state = {
       players: new MapSchema(), farms: new MapSchema(), orders: new ArraySchema(),
-      day: 0, time: 0, isDay: true, season: 0, festival: false, festivalClaimed: false,
+      day: 1, time: 0, isDay: true, season: 0, festival: false, festivalClaimed: false,
       festivalPhase: 'none', feastPeak: false,
     };
     // inject OUR calendar into the room so every handler (season, maturity,
@@ -686,7 +686,7 @@ class FarmEnv {
       this.success = true; terminated = true; r += this.w.successBonus;
     }
     if (this.starveStreak >= EVALUATION_CONTRACT.starvationAfterEmptyRestDays) terminated = true;
-    if (!terminated && room.state.day >= this.horizonDays) truncated = true;
+    if (!terminated && room.state.day > this.horizonDays) truncated = true;
 
     const obs = this.obs();
     const messages = [

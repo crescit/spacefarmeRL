@@ -334,5 +334,127 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   check('hub fallback dedupes vs object over-list', /const ol = over \|\| \[\];/.test(hubSrc));
 }
 
+// ── 9. SF17 gate: returning players can CONTINUE straight to the farm. ──
+// PlanetScene stamps localStorage 'sf_landed'='1' on first landing; IntroScene
+// reads it and, on the title, SPACE starts PlanetScene directly (server-side
+// save restore supplies credits — no fake credits value is passed), N replays
+// the ship tutorial. No flag → behaviour unchanged (SpaceshipScene).
+{
+  const planetSrc = read('client/scenes/PlanetScene.js');
+  const introSrc = read('client/scenes/IntroScene.js');
+
+  check('PlanetScene stamps sf_landed in init', /localStorage\.setItem\('sf_landed', '1'\)/.test(planetSrc));
+  check('IntroScene reads the sf_landed flag', /localStorage\.getItem\('sf_landed'\)/.test(introSrc));
+  check('IntroScene CONTINUE path starts PlanetScene (no fake credits)',
+    /if \(this\.landed\) \{ this\.scene\.start\('PlanetScene'\); return; \}/.test(introSrc));
+  check('IntroScene NEW RUN — N still starts SpaceshipScene',
+    /startNewRun\(\) \{[\s\S]*?this\.scene\.start\('SpaceshipScene'\)/.test(introSrc));
+  check('IntroScene unchanged without the flag (spaceship on first run)',
+    /titleShown\) \{[\s\S]*?this\.scene\.start\('PlanetScene'\); return; \}[\s\S]*?this\.scene\.start\('SpaceshipScene'\)/.test(introSrc));
+  check('returning CONTINUE hint shows only for landed players', /setVisible\(this\.landed\)/.test(introSrc));
+}
+
+// ── 10. SF19 gate: ship credits don't silently vanish on landing. ──
+// The 500 cr is the descent-fuel fee: C.O.R.A. says so at the airlock, the
+// fuel bar drains on landing, and PlanetScene never seeds credits from scene
+// data (server value only; '—' until the first sync).
+{
+  const planetSrc = read('client/scenes/PlanetScene.js');
+  const shipSrc = read('client/scenes/SpaceshipScene.js');
+  const initBody = (planetSrc.match(/\n  init\(data\) \{[\s\S]*?\n  \}/) || [''])[0];
+  check('PlanetScene.init exists', initBody.length > 0);
+  check('PlanetScene.init does not read data.credits', !/data\.credits/.test(initBody));
+  check('PlanetScene HUD shows — until first credits sync', /'— CR'/.test(planetSrc));
+  check('SpaceshipScene does not pass credits to PlanetScene', !/scene\.start\('PlanetScene',\s*\{\s*credits/.test(shipSrc));
+  const airlock = (SPS.NPC_DIALOGUES || {}).airlock;
+  const airlockText = airlock ? airlock.text.join(' ') : (shipSrc.match(/airlock: \{[\s\S]*?\],/) || [''])[0];
+  check('descent copy mentions the fuel fee', /landing-fuel fee|descent fuel/i.test(airlockText));
+  check('landing drains the fuel bar', /landOnPlanet\(\) \{[\s\S]*?this\._drainDescentFuel\(\)/.test(shipSrc));
+}
+
+// ── 11. SF20 gate: context prompt — show what SPACE/A will do before you
+//     press it. handleInteract delegates target resolution to
+//     _resolveInteractTarget (EXACT existing priority order), and update()
+//     shows a small prompt chip above the resolved target (teal plate,
+//     amber key, font ≥ 11px, scroll-anchored world-local placement). ──
+{
+  const planetSrc = read('client/scenes/PlanetScene.js');
+
+  // handleInteract must delegate to the resolver, not inline its own lookups
+  const hiBody = (planetSrc.match(/\n  handleInteract\(\) \{[\s\S]*?\n  \}/) || [''])[0];
+  check('handleInteract exists', hiBody.length > 0);
+  check('handleInteract delegates to _resolveInteractTarget',
+    /_resolveInteractTarget\(\)/.test(hiBody));
+  // the resolver must run the current priority order: interior points → shore
+  // refill → equipped rod/pickaxe → aliens → NPCs → building doors → tiles
+  const resBody = (planetSrc.match(/\n  _resolveInteractTarget\(\) \{[\s\S]*?\n  \}/) || [''])[0];
+  check('_resolveInteractTarget exists', resBody.length > 0);
+  check('resolver reads interior points', /intPoints/.test(resBody));
+  check('resolver reads the shore tap (FILL_SPOT)', /FILL_SPOT/.test(resBody));
+  check('resolver checks the equipped rod/pickaxe', /_useEquippedTool/.test(resBody));
+  check('resolver reads alien envoys', /ALIEN_DATA/.test(resBody));
+  check('resolver reads npc brains', /npcBrains/.test(resBody));
+  check('resolver reads building doors', /BUILDINGS/.test(resBody));
+  check('resolver reads the farm tiles', /farmTiles/.test(resBody));
+  // priority = the pre-SF20 handleInteract order: interior points → shore →
+  // NPCs → aliens → doors → tiles (first occurrence of each lookup)
+  const order = ['intPoints', 'FILL_SPOT', 'npcBrains', 'ALIEN_DATA', 'BUILDINGS', 'farmTiles'];
+  const idxs = order.map((tok) => resBody.indexOf(tok));
+  check('resolver keeps the existing priority order',
+    idxs.every((i) => i > 0) && idxs.every((i, k) => k === 0 || i > idxs[k - 1]),
+    `indices ${idxs.join(',')} for ${order.join('>')}`);
+
+  // the prompt chip: world-space container pinned above the target
+  check('prompt chip object exists', /this\.interactPrompt\s*=\s*this\.add\.container\(/.test(planetSrc));
+  check('prompt chip plate is teal', /0x39c5bb/.test(planetSrc));
+  check('prompt chip key text is amber', /#f7d698/.test(planetSrc));
+  const buildBody = (planetSrc.match(/\n  _buildInteractPrompt\(\) \{[\s\S]*?\n  \}/) || [''])[0];
+  const fontSizes = [...buildBody.matchAll(/fontSize:\s*'(\d+)px'/g)];
+  check('prompt chip font ≥ 11px',
+    fontSizes.length > 0 && fontSizes.every((m) => parseInt(m[1], 10) >= 11),
+    fontSizes.map((m) => m[1] + 'px').join(','));
+  check('prompt chip lives in world space (scrollFactor 1, not 0)',
+    /setScrollFactor\(1\)/.test(buildBody) && !/setScrollFactor\(0\)/.test(buildBody));
+  const updBody = (planetSrc.match(/\n  _updateInteractPrompt\(time\) \{[\s\S]*?\n  \}/) || [''])[0];
+  check('prompt chip hides during panels/interiors (update() guard)',
+    /interactPrompt\?\.setVisible\(false\)/.test(updBody));
+  check('prompt chip positioned at the resolved target',
+    /this\.interactPrompt\.setPosition\(target\.x, target\.y\)/.test(updBody));
+  // every identifier the updater touches must be defined in it (a bare
+  // `plate.` here was a ReferenceError that crashed update() every frame)
+  for (const id of ['plate', 'keyTxt', 'bodyTxt']) {
+    check(`_updateInteractPrompt defines ${id} before use`,
+      !new RegExp(`\\b${id}\\.`).test(updBody) || new RegExp(`(const|let)[^;]*\\b${id}\\b`).test(updBody));
+  }
+  check('touch mode detected in-scene (Phaser drops custom config keys)', /navigator\.maxTouchPoints/.test(planetSrc));
+  check('update() calls the prompt refresher', /update\(time\) \{[\s\S]{0,400}this\._updateInteractPrompt\(time\)/.test(planetSrc));
+  check('touch says "A ·" instead of SPACE', /this\.touchMode \? 'A' : 'SPACE'/.test(planetSrc));
+}
+
+// ── 12. SF02 gate: the quest HUD chip never draws an empty box. questPlate's
+//     visibility is tied to non-empty chip text (hide when '' / show + width
+//     sized to text when a quest fills the chip), and a fresh-game questView
+//     with no current quest yet falls back to QUEST_ORDER[0] producing a
+//     non-empty chip string. ──
+{
+  const planetSrc = read('client/scenes/PlanetScene.js');
+  const chipBlock = (planetSrc.match(/SF02: populate the chip[\s\S]*?questChip\.setText\(chip\);[\s\S]*?questPlate\)[\s\S]*?}\n/) || [''])[0];
+  check('SF02 chip block exists in updateHUD', chipBlock.length > 0);
+  check('questPlate hidden when chip empty',
+    /if \(!chip\) \{\s*this\.questPlate\.setVisible\(false\);/.test(chipBlock));
+  check('questPlate shown when chip non-empty',
+    /else \{\s*this\.questPlate\.setVisible\(true\);/.test(chipBlock));
+  check('questPlate width sized to text (min 160, max current width)',
+    /Math\.max\(160,\s*Math\.min\(wMax,/.test(chipBlock) && /Math\.min\(430,\s*this\.game\.config\.width\s*\* 0\.54/.test(chipBlock));
+  check('chip populated from active quest with QUEST_ORDER[0] fallback',
+    /QUEST_ORDER\[0\]/.test(chipBlock) && /!view\.quest && !view\.arcDone/.test(chipBlock));
+  // fresh-game questView produces a non-empty chip string (pure helper test)
+  const QS = await import('../client/systems/QuestSystem.js');
+  const freshView = QS.questView({ current: QS.QUEST_ORDER[0], completed: [], progress: {}, arcDone: false }, null);
+  const freshChip = QS.questChip(freshView);
+  check('fresh-game questView produces non-empty chip',
+    typeof freshChip === 'string' && freshChip.length > 0 && freshChip.startsWith('◆'), freshChip);
+}
+
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);

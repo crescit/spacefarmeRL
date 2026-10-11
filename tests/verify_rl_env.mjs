@@ -119,7 +119,7 @@ console.log('== env_core ==');
   const o0 = env.reset({ seed: 7 });
   check('action surface is exactly FarmRoom wire messages',
     JSON.stringify(ACTION_TYPES) === JSON.stringify(GAME_ACTIONS.map((a) => a.type)));
-  check('reset starts on the live game day zero', o0.day === 0 && o0.time === 0);
+  check('reset starts on the live game day one', o0.day === 1 && o0.time === 0);
   check('starter inventory is lossless and matches onJoin', JSON.stringify(o0.inventory) === JSON.stringify({
     seeds: 5, 'tech-part': 2, 'starlight-crystal': 1, 'exotic-seed': 1,
     'space-feather': 1, 'data-crystal': 1, 'rare-mineral': 1,
@@ -210,7 +210,7 @@ console.log('== env_core ==');
 
   // episode isolation: reset wipes everything (fresh obs, day 1, starter state)
   const o1 = env.reset({ seed: 3 });
-  check('reset isolates state (day 0, credits reset)', o1.day === 0 && o1.credits === o0.credits && o1.farmState.every((v) => v === 0));
+  check('reset isolates state (day 1, credits reset)', o1.day === 1 && o1.credits === o0.credits && o1.farmState.every((v) => v === 0));
 
   // truncation: advance past horizon → truncated
   env.reset({ seed: 3 });

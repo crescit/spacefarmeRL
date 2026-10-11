@@ -16,7 +16,7 @@ import { TouchControls } from '../systems/TouchControls.js';
 import { ColonyHub } from '../systems/ColonyHub.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
-import { questView, questChip, QUESTS, rewardLine } from '../systems/QuestSystem.js';
+import { questView, questChip, QUESTS, QUEST_ORDER, rewardLine } from '../systems/QuestSystem.js';
 import { calendar, SEASON_NAMES, DAYS_PER_SEASON } from '../systems/CalendarService.js';
 import { schemaEntries } from '../systems/NetworkSystem.js';
 import {
@@ -162,14 +162,16 @@ class PlanetScene extends Phaser.Scene {
   }
 
   init(data) {
-    this.credits = data.credits || 100;
+    // SF19: credits are server-authoritative. Never seed them from scene data
+    // (the ship's 500 cr was spent on descent fuel); show '—' until first sync.
+    this.credits = null;
     this.energy = 100;
     this.staminaMax = 100;   // stamina ceiling — grows as you condition yourself
     this.tool = 'base';      // hoe tier (legacy alias for toolTiers.hoe)
     this.equipped = '';      // '' (hands) | 'hoe' | 'watering' | 'pickaxe' | 'rod'
     this.toolTiers = {};     // toolId → tier ('base'|'iron'|'gold')
     this.waterLevel = WATER_TANK_MAX;  // watering-can tank (server-authoritative)
-    this.dayCount = 0;
+    this.dayCount = 1;
     this.isNight = false;
     this.inventory = { seeds: 5 };
     this.friendships = {};
@@ -193,6 +195,12 @@ class PlanetScene extends Phaser.Scene {
     this._prevQuestId = null;    // last-seen current quest → drives the "quest complete" banner
     this._arcDoneFired = false;  // ending banner fires once
     this.playerDir = 'front';
+    // SF20: which input family the player is on — the touch bar says "A" where
+    // the keyboard says "SPACE" in the context prompt chip.
+    this.touchMode = (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+    // SF17: once the player has ever landed on the planet, remember it so the
+    // intro title can offer a straight "CONTINUE — SPACE" back to the farm.
+    try { localStorage.setItem('sf_landed', '1'); } catch {}
   }
 
   create() {
@@ -545,6 +553,7 @@ class PlanetScene extends Phaser.Scene {
     this.buildDialogue(width, height);
     this.buildContactUI(width, height);
     this.buildPanels(width, height);
+    this._buildInteractPrompt();
     this._bindSavedBlip();
     this._bindReflection();
 
@@ -656,6 +665,52 @@ class PlanetScene extends Phaser.Scene {
   }
 
   // ── UI builders ──
+  // SF20: the context prompt chip — a small teal pill above the target that
+  // says what SPACE/A will do BEFORE you press it ("SPACE · Talk to NOVA",
+  // "SPACE · Enter SUPPLY DEPOT", "SPACE · Water"...). Teal plate, amber key,
+  // ≥11px font, world-local placement above the resolved target. Touch players
+  // read "A ·" instead of "SPACE ·" (game.config.touchMode).
+  _buildInteractPrompt() {
+    const plate = this.add.rectangle(0, 0, 150, 22, 0x081a20, 0.88)
+      .setStrokeStyle(1, 0x39c5bb, 0.9);
+    const keyTxt = this.add.text(0, 0, 'SPACE', {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', fontStyle: 'bold', color: '#f7d698',
+    }).setOrigin(0, 0.5);
+    const bodyTxt = this.add.text(0, 0, '', {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#b8ffcf', stroke: '#061015', strokeThickness: 2,
+    }).setOrigin(0, 0.5);
+    // World-space (scrollFactor 1): x/y are the target's world pixels, so the
+    // chip stays pinned above it while the camera follows the player.
+    this.interactPrompt = this.add.container(0, 0, [plate, keyTxt, bodyTxt])
+      .setScrollFactor(1).setDepth(996).setVisible(false);
+    this._promptKey = keyTxt;
+    this._promptBody = bodyTxt;
+    this._promptPlate = plate;
+  }
+  // SF20: refresh the chip every ~8 frames from the live resolver result — the
+  // chip says "SPACE · Enter SUPPLY DEPOT" etc. before the press lands.
+  _updateInteractPrompt(time) {
+    if (!this.interactPrompt) return;
+    if (time - (this._promptLast || 0) < 125) return;
+    this._promptLast = time;
+    // hide while a dialogue/panel/interior is handled elsewhere
+    const hidden = !!(this.inAlienContact || this.eventQueue || this.inDialogue || this.showingGE ||
+      this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes ||
+      this.showingHub || this.showingBackpack || this.showingSmithy || this.inInterior);
+    if (hidden) { this.interactPrompt?.setVisible(false); return; }
+    const target = this._resolveInteractTarget();
+    if (!target) { this.interactPrompt?.setVisible(false); return; }
+    const keyTxt = this._promptKey, bodyTxt = this._promptBody, plate = this._promptPlate;
+    keyTxt.setText(`${this.touchMode ? 'A' : 'SPACE'} ·`);
+    bodyTxt.setText(target.label);
+    const w = keyTxt.width + 6 + bodyTxt.width;
+    keyTxt.setX(-w / 2);
+    bodyTxt.setX(-w / 2 + keyTxt.width + 6);
+    plate.setSize(w + 20, 22);
+    this.interactPrompt.setVisible(true);
+    this.interactPrompt.setPosition(target.x, target.y);
+  }
+
   buildHUD(width, height) {
     const f = { fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', fontStyle: 'bold' };
     const y = height - 48;
@@ -680,7 +735,7 @@ class PlanetScene extends Phaser.Scene {
       stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0).setDepth(1000); screenFix.push(this.colonyMark);
     this.questPlate = this.add.rectangle(12, 8, Math.min(430, width * 0.54), 38, 0x081a20, 0.78)
-      .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997); screenFix.push(this.questPlate);
+      .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997).setVisible(false); screenFix.push(this.questPlate);
     this.questChip = this.add.text(24, 18, '', {
       ...f, fontSize: '10px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(0, 0).setDepth(1000); screenFix.push(this.questChip);
@@ -1201,7 +1256,7 @@ rations, and your name on the manifest.
     const animals = this.animals || {};
     const inv = this.inventory || {};
     this.ranchContent.setPosition(0, -100);   // header above the tap rows; [CLOSE] stays at the foot
-    this.ranchContent.setText(`SPACE RANCH — tap a row (or [1-3]/[F]/[S])   ·   ${this.credits} CR on hand`);
+    this.ranchContent.setText(`SPACE RANCH — tap a row (or [1-3]/[F]/[S])   ·   ${this.credits ?? '—'} CR on hand`);
     this._panelRows('_ranchTapRows', [
       { label: '[1] BUY CHICKEN', item: 'chicken', hot: true, sub: `100 CR · eggs · own ${animals.chicken || 0}` },
       { label: '[2] BUY COW', item: 'cow', hot: true, sub: `350 CR · milk · own ${animals.cow || 0}` },
@@ -2076,6 +2131,9 @@ rations, and your name on the manifest.
 
   update(time) {
     const { width, height } = this.game.config;   // viewport in world coords (meteor/cloud spawn)
+    // SF20: the context prompt chip (throttled ~8×/s) — shows what SPACE/A will
+    // do at the resolved target, before the press lands.
+    this._updateInteractPrompt(time);
     // Task 4: lamp/door light-pool flicker — each pool wobbles on its own
     // phase (rare deep dip = "old lamp" feel). Cheap: alpha only, no textures.
     if (this.isNight && this.lightPools) {
@@ -2501,6 +2559,17 @@ rations, and your name on the manifest.
     if (!spr) return;
     b.timer -= dt;
 
+    // paused/talking: the NPC stands still and faces whoever is talking to them;
+    // closeAllPanels flips the flag back and errands resume on the next tick.
+    if (b.talking) {
+      b.dir = (this.playerSpr.x > b.x) ? 'right' : 'left';
+      spr.setPosition(b.x, b.y);
+      spr.setDepth(Math.floor(b.y / T) + 0.5);
+      spr.setTexture(`npc.${b.id}_${b.dir}_0`);
+      if (spr._label) spr._label.setPosition(b.x, b.y - 16);
+      return;
+    }
+
     if (b.state === 'idle') {
       if (b.timer <= 0) {
         b.state = 'walk';
@@ -2705,6 +2774,10 @@ rations, and your name on the manifest.
         this._syncFarmState();
         if (net.room && net.room.state) {
           this.roomState = net.room.state;
+          // colony calendar is server-authoritative: the local counter starts on
+          // Day 1 and always mirrors state.day, so the HUD and briefings never
+          // show "DAY 0" and a REJOIN lands on the same day everyone sees.
+          if (typeof net.room.state.day === 'number') this.dayCount = net.room.state.day;
           // M3 — festival phase is authoritative in room state: sync it here so
           // a REJOIN (mid-festival or during afterglow) shows the plaza/decor
           // immediately, not only after the next live transition message.
@@ -2740,7 +2813,8 @@ rations, and your name on the manifest.
       ? `${TOOL_TIER_NAME[this.toolTiers[this.equipped] || 'base']} ${(CLIENT_TOOLS[this.equipped] || {}).label || this.equipped}`
       : 'HANDS';
     const tankPart = this.equipped === 'watering' ? `   💧 ${this.waterLevel}/${WATER_TANK_MAX}` : '';
-    this.hudText.setText(`${this.credits} CR   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${equipLabel}${tankPart}   ·   ${sName}${hudFest}`);
+    const crPart = typeof this.credits === 'number' ? `${this.credits} CR` : '— CR';
+    this.hudText.setText(`${crPart}   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${equipLabel}${tankPart}   ·   ${sName}${hudFest}`);
     if (this.energyFill) {
       const energyRatio = Math.max(0, Math.min(1, this.energy / (this.staminaMax || 100)));
       this.energyFill.width = 170 * energyRatio;
@@ -2755,8 +2829,28 @@ rations, and your name on the manifest.
     // 'The Stardust Story' — quest chip + transition detection (banner on complete)
     this.checkQuestTransitions();
     if (this.questChip) {
-      const view = questView(this._questPS, this._questPS);
-      this.questChip.setText(questChip(view));
+      // SF02: populate the chip from the active quest as soon as quest state
+      // exists; a fresh farmer whose server state hasn't yet stamped a current
+      // quest falls back to the first chapter in QUEST_ORDER so the HUD never
+      // draws an empty plate box.
+      let view = questView(this._questPS, this._questPS);
+      if (!view.quest && !view.arcDone && this._questPS) {
+        const q = QUEST_ORDER[0];
+        view = questView({ current: q, completed: [], progress: {}, arcDone: false }, this._questPS);
+      }
+      const chip = questChip(view);
+      this.questChip.setText(chip);
+      // Hide the plate whenever the chip text is empty, and size its width to
+      // the text (min 160, max the buildHUD width) instead of fixed 430.
+      if (this.questPlate) {
+        if (!chip) {
+          this.questPlate.setVisible(false);
+        } else {
+          this.questPlate.setVisible(true);
+          const wMax = Math.min(430, this.game.config.width * 0.54);
+          this.questPlate.width = Math.max(160, Math.min(wMax, chip.length * 6.2 + 36));
+        }
+      }
     }
   }
 
@@ -2798,44 +2892,11 @@ rations, and your name on the manifest.
       else this.closeAllPanels();
       return;
     }
-    // Inside a room: A-near-a-point triggers it (chest/stove/bed/counter/door/exit)
-    if (this.inInterior && this.intPlayer) {
-      const pts = this.intPoints || [];
-      for (const pt of pts) {
-        if (Math.hypot(this.intPlayer.x - pt.x, this.intPlayer.y - pt.y) < 60) {
-          this._roomAction(pt.action);
-          return;
-        }
-      }
-    }
-
-    const ptx = Math.floor(this.playerSpr.x / T);
-    const pty = Math.floor(this.playerSpr.y / T);
-
-    // Shore tap: watering can in hand, the pond's edge refills the tank.
-    // Unconditional (not just when low) so a full can still gets feedback —
-    // the server answers "already full" instead of the press going dead.
-    if (this.equipped === 'watering' && Math.hypot(ptx - FILL_SPOT.x, pty - FILL_SPOT.y) <= 3.5) {
-      this.fillWater(); return;
-    }
-
-    for (const alien of ALIEN_DATA) {
-      const d = Math.hypot(alien.x - ptx, alien.y - pty);
-      if (d < 2) { this.startAlienContact(alien); return; }
-    }
-    for (const npc of NPCS) {
-      const d = Math.hypot(npc.x - ptx, npc.y - pty);
-      if (d < 2) { this.startNPCDialogue(npc); return; }
-    }
-    for (const b of BUILDINGS) {
-      const d = Math.hypot(b.door.x - ptx, b.door.y - pty);
-      if (d < 2) { this.buildingAction(b); return; }
-    }
-    const ft = this.farmTiles.find(t => t.x === ptx && t.y === pty);
-    if (ft) { this.handleTileAction(ft); return; }
-    const facing = { front: [0, 1], back: [0, -1], left: [-1, 0], right: [1, 0] }[this.playerDir] || [0, 1];
-    const ft2 = this.farmTiles.find(t => t.x === ptx + facing[0] && t.y === pty + facing[1]);
-    if (ft2) this.handleTileAction(ft2);
+    // SF20: target resolution lives in _resolveInteractTarget — the exact
+    // priority order the old inline lookups ran, in one reusable pass (update()
+    // draws the prompt chip from it, handleInteract executes it).
+    const target = this._resolveInteractTarget();
+    if (target && target.run) { target.run(); return; }
   }
 
   buildingAction(b) {
@@ -2948,6 +3009,84 @@ rations, and your name on the manifest.
     }
   }
 
+  // ── SF20: resolve what SPACE/A will do right now (no side effects). ──
+  // handleInteract calls it to act; update() calls it to draw the context
+  // prompt chip. The exact priority order the old handleInteract ran is
+  // preserved 1:1: dialogue → interior points → shore refill → equipped rod /
+  // pickaxe → NPCs (live brain position, SF18) → aliens → building doors →
+  // tile under/ahead.
+  _resolveInteractTarget() {
+    // interior interaction points (chest/stove/bed/counter/door/exit)
+    if (this.inInterior && this.intPlayer) {
+      for (const pt of (this.intPoints || [])) {
+        if (Math.hypot(this.intPlayer.x - pt.x, this.intPlayer.y - pt.y) < 60) {
+          return { kind: 'room', label: `${this._roomPointLabel(pt.action)} at ${this._roomName()}`, x: pt.x, y: pt.y - 30, run: () => this._roomAction(pt.action) };
+        }
+      }
+    }
+    const ptx = Math.floor(this.playerSpr.x / T);
+    const pty = Math.floor(this.playerSpr.y / T);
+    // shore tap refill (watering can in hand)
+    if (this.equipped === 'watering' && Math.hypot(ptx - FILL_SPOT.x, pty - FILL_SPOT.y) <= 3.5) {
+      return { kind: 'fill', label: 'Refill the can', x: FILL_SPOT.x * T + T / 2, y: FILL_SPOT.y * T - 18, run: () => this.fillWater() };
+    }
+    // equipped rod/pickaxe at their spots (same tests as _useEquippedTool)
+    const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
+    if (this.equipped === 'rod') {
+      const spot = Math.hypot(px - 27, py - 22) <= 3.5 ? 'stardust shore' : Math.hypot(px - 38, py - 21) <= 3.5 ? 'deep drop' : null;
+      if (spot) return { kind: 'fish', label: `Cast at the ${spot}`, x: this.playerSpr.x, y: this.playerSpr.y - 42, run: () => this._useEquippedTool() };
+    } else if (this.equipped === 'pickaxe') {
+      if (Math.hypot(px - this.mineX, py - this.mineY) <= 4) return { kind: 'mine', label: 'Mine the asteroid vein', x: this.mineX * T, y: this.mineY * T - 22, run: () => this._useEquippedTool() };
+    }
+    // NPCs — LIVE brain position (SF18), nearest within 1.6 tiles
+    const npcHit = { d: Infinity, npc: null, b: null };
+    for (const b of Object.values(this.npcBrains)) {
+      const d = Math.hypot(b.x / T - ptx, b.y / T - pty);
+      if (d < npcHit.d) { npcHit.d = d; npcHit.npc = b.data || NPC_DATA[b.id]; npcHit.b = b; }
+    }
+    if (npcHit.npc && npcHit.d < 1.6) {
+      const npc = npcHit.npc, b = npcHit.b;
+      return { kind: 'talk', label: `Talk to ${npc.name || npc.id || 'townsperson'}`, x: b.x, y: b.y - 42, run: () => this.startNPCDialogue(npc) };
+    }
+    // aliens (first contact) — first within 2 tiles
+    for (const alien of ALIEN_DATA) {
+      if (Math.hypot(alien.x - ptx, alien.y - pty) < 2) {
+        return { kind: 'contact', label: `Meet ${alien.name}`, x: alien.x * T + T / 2, y: alien.y * T - 18, run: () => this.startAlienContact(alien) };
+      }
+    }
+    // building doors — first within 2 tiles
+    for (const b of BUILDINGS) {
+      if (Math.hypot(b.door.x - ptx, b.door.y - pty) < 2) {
+        return { kind: 'enter', label: `Enter ${b.label}`, x: b.door.x * T + T / 2, y: b.door.y * T - 24, run: () => this.buildingAction(b) };
+      }
+    }
+    // farm tile under the player, else the one ahead
+    const facing = { front: [0, 1], back: [0, -1], left: [-1, 0], right: [1, 0] }[this.playerDir] || [0, 1];
+    const ft = this.farmTiles.find(f => f.x === ptx && f.y === pty)
+      || this.farmTiles.find(f => f.x === ptx + facing[0] && f.y === pty + facing[1]);
+    if (ft) return { kind: 'tile', label: this._tileActionLabel(ft.state), x: ft.x * T + T / 2, y: ft.y * T - 24, run: () => this.handleTileAction(ft) };
+    return null;
+  }
+
+  // SF20: human label for an interior interaction point's action
+  _roomPointLabel(action) {
+    const _roomToastFor = { exit: 'Leave the room', sleep: 'Sleep', recipes: 'Cook at the stove', chest: 'Open the chest', shop: 'Buy from the counter', exchange: 'Trade at the terminal', ranch: 'Visit the ranch stall', talk_rhea: 'Talk to Rhea' }[action];
+    return _roomToastFor || 'Interact';
+  }
+  _roomName() {
+    return { home: 'your dome', shop: 'Supply Depot', tavern: 'Stardust Tavern', exchange: 'Grand Exchange', ranch: 'ranch barn', barracks: 'barracks' }[this.intKind] || 'the room';
+  }
+  // SF20: human label for a farm tile state
+  _tileActionLabel(s) {
+    switch (s.type) {
+      case 'empty':   return this.equipped === 'hoe' ? 'Till the soil' : 'Till — equip the hoe';
+      case 'tilled':  return this.inventory.seeds > 0 ? 'Plant a crop' : 'Plant — no seeds';
+      case 'seeded':  case 'growing': return this.equipped === 'watering' ? (s.watered ? 'Watered' : 'Water') : 'Water — equip the can';
+      case 'mature':  return this.equipped === '' ? `Harvest ${(CROPS[s.crop] || {}).label || 'crop'}` : 'Harvest — hands free';
+      default:        return 'Interact';
+    }
+  }
+
   handleTileAction(ft) {
     const s = ft.state;
     switch (s.type) {
@@ -3002,7 +3141,7 @@ rations, and your name on the manifest.
         }
         const info = CROPS[s.crop] || { sellPrice: 20, label: 'crop' };
         const cs = CROP_SEASONS[s.crop] || { regrow: false };
-        this.credits += info.sellPrice;
+        this.credits = (this.credits || 0) + info.sellPrice;
         this._tileFX(s.x, s.y, 'harvest');             // a reaping flash
         if (cs.regrow) {
           // continuous crop stays planted & regrows (needs watering again)
@@ -3259,6 +3398,17 @@ rations, and your name on the manifest.
   startNPCDialogue(npc) {
     this.selectedNPC = npc;
     this.inDialogue = true;
+    // pause the wandering brain for this NPC so the conversation partner stays
+    // put and faces the player while the dialogue box is open
+    const brain = this.npcBrains && this.npcBrains[npc.id];
+    if (brain) {
+      brain.talking = true;
+      brain.path = [];
+      const facing = Math.abs(this.playerSpr.x - brain.x) > Math.abs(this.playerSpr.y - brain.y)
+        ? (this.playerSpr.x > brain.x ? 'right' : 'left')
+        : (this.playerSpr.y > brain.y ? 'front' : 'back');
+      brain.dir = facing;
+    }
     const data = npc.data || NPC_DATA[npc.id] || {};
     const { fp } = this.heartbeat(npc);
     const hearts = fp < 20 ? 1 : fp < 40 ? 2 : fp < 60 ? 3 : fp < 80 ? 4 : 5;
@@ -3453,6 +3603,8 @@ rations, and your name on the manifest.
     this.contactPhase = ""; this.contactQueue = null; this.contactIdx = 0;
     this.selectedAlien = null;
     this.selectedNPC = null;
+    // resume any NPC brain paused for dialogue so errands continue
+    for (const b of Object.values(this.npcBrains || {})) b.talking = false;
   }
 
   openGrandExchange() {
@@ -3481,7 +3633,7 @@ rations, and your name on the manifest.
     };
     this.geContent.setPosition(0, -100);
     this.geContent.setText(
-      `GRAND EXCHANGE — tap a row (or [1-4]) · each sells 1   ·   ${this.credits} CR on hand`
+      `GRAND EXCHANGE — tap a row (or [1-4]) · each sells 1   ·   ${this.credits ?? '—'} CR on hand`
     );
     this._panelRows('_geTapRows', [
       { label: '[1] CROP', kind: 'crop', sub: `${counts.crop} kinds you hold` },
@@ -3577,7 +3729,7 @@ rations, and your name on the manifest.
     const inv = this.inventory || {};
     this.shopContent.setPosition(0, -100);
     this.shopContent.setText(
-      `QUASAR'S SUPPLY DEPOT — tap a row (or [1-4])   ·   ${this.credits} CR on hand`
+      `QUASAR'S SUPPLY DEPOT — tap a row (or [1-4])   ·   ${this.credits ?? '—'} CR on hand`
     );
     this._panelRows('_shopTapRows', [
       { label: '[1] SPACE SEEDS', item: 'seeds', sub: `5 CR · have ${inv.seeds || 0}` },
@@ -3769,7 +3921,7 @@ rations, and your name on the manifest.
       this.smithyPanel.add([rect, name, hint]);
       this._smithyDynamic.push(rect, name, hint);
     });
-    const foot = this.add.text(0, 152, `${this.credits} CR on hand   ·   higher tiers cut energy costs`, {
+    const foot = this.add.text(0, 152, `${this.credits ?? '—'} CR on hand   ·   higher tiers cut energy costs`, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', color: '#ffe9a0',
       align: 'center',
     }).setOrigin(0.5);

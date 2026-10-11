@@ -103,4 +103,47 @@ for (const id of npcIds) {
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 if (fail === 0) console.log('NPC AI ALL GREEN ✓');
+
+// ── SF18 gate: proximity + talking-pause ─────────────────────────────────────
+// 1) handleInteract's NPC lookup must read the LIVE brain/sprite position
+//    (b.x/b.y pixels → tiles), NOT the static NPCS[].x/y home tile.
+// SF20 moved target lookup into _resolveInteractTarget (handleInteract runs it).
+const src = PlanetScene.prototype.handleInteract.toString() + '\n' +
+  (PlanetScene.prototype._resolveInteractTarget ? PlanetScene.prototype._resolveInteractTarget.toString() : '');
+const liveSrc = /npcHit[\s\S]*?b\.x \/ T[\s\S]*?b\.y \/ T/.test(src);
+const staticSrc = /Math\.hypot\(npc\.x - ptx, npc\.y - pty\)/.test(src);
+if (!liveSrc || staticSrc) console.log('  [SF18 probe] handleInteract src:', src.slice(Math.max(0, src.indexOf('npcHit') - 120), src.indexOf('npcHit') + 260));
+check('SF18 handleInteract reads live brain coords', liveSrc && !staticSrc, `live=${liveSrc} static=${staticSrc}`);
+check('SF18 proximity radius is 1.6 tiles', /d < 1\.6/.test(src));
+
+// 2) tickNpc must honour a paused/talking state: while talking=true it must
+//    not pick errands, walk, or work — it stands and faces the player.
+const tickSrc = PlanetScene.prototype.tickNpc.toString();
+const talkGuard = /if \(b\.talking\)[\s\S]*?return;/.test(tickSrc);
+const errandFirst = talkGuard && tickSrc.indexOf('if (b.talking)') < tickSrc.indexOf("_pickErrand");
+check('SF18 tickNpc honors talking pause before errands', errandFirst, `guard=${talkGuard}`);
+const ps2 = Object.create(PlanetScene.prototype);
+ps2.npcSprites = []; ps2.npcBrains = {};
+ps2.playerSpr = { x: 500, y: 900 };
+const probeId = npcIds[0];
+const probeHome = NPC_POS[probeId];
+{
+  const spr = fakeSprite(); spr.npcId = probeId;
+  const b = { id: probeId, home: probeHome, x: 500, y: 900, dir: 'front', path: [{ x: 600, y: 900 }], state: 'walk', working: false, walkT: 0, timer: 0, talking: true };
+  ps2.npcSprites.push(spr); ps2.npcBrains[probeId] = b;
+  let t = 0;
+  ps2.tickNpc(b, 16.67, (t += 16.67));
+  check('SF18 talking NPC does not walk (x unchanged)', b.x === 500 && b.y === 900, `x=${b.x} y=${b.y}`);
+  check('SF18 talking NPC faces the player', b.dir === 'left', `dir=${b.dir}`);
+  b.talking = false; // resume
+  ps2.tickNpc(b, 16.67, (t += 16.67));
+  check('SF18 resume: errands continue after talking=false', b.x !== 500 || b.path.length === 0 && b.state !== 'walk' ? true : b.x !== 500, `x=${b.x}`);
+}
+// 3) startNPCDialogue pauses the brain; closeAllPanels clears every brain's talking flag.
+const diaSrc = PlanetScene.prototype.startNPCDialogue.toString();
+check('SF18 startNPCDialogue sets brain.talking=true', /brain\.talking = true/.test(diaSrc));
+const closeSrc = PlanetScene.prototype.closeAllPanels.toString();
+check('SF18 closeAllPanels resumes all brains', /b\.talking = false/.test(closeSrc));
+
+console.log(`===== SF18 gate: ${pass} passed, ${fail} failed =====`);
 process.exit(fail > 0 ? 1 : 0);

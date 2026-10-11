@@ -103,7 +103,12 @@ class IntroScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', fontStyle: 'bold', color: '#f7d698',
       stroke: '#061116', strokeThickness: 3,
     }).setOrigin(0.5);
-    this.titleCard.add([orbit, titlePlate, this.houseImg, this.houseGlow, eyebrow, this.titleText, rule, this.subtitle, this.pressStart]);
+    // SF17: returning player sees a CONTINUE hint next to the press-start blink
+    this.continueHint = this.add.text(0, 176, 'CONTINUE — SPACE   NEW RUN — N', {
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', fontStyle: 'bold', color: '#9fd9cd',
+      stroke: '#061116', strokeThickness: 3,
+    }).setOrigin(0.5).setVisible(this.landed);
+    this.titleCard.add([orbit, titlePlate, this.houseImg, this.houseGlow, eyebrow, this.titleText, rule, this.subtitle, this.pressStart, this.continueHint]);
 
     // ── Text crawl (big, bright, on a dark panel for legibility) ──
     // Sliding window: only the last few lines stay on screen, so a long story
@@ -128,12 +133,17 @@ class IntroScene extends Phaser.Scene {
     }).setOrigin(0.5).setScrollFactor(0);
 
     // input: skip crawl (SPACE / A) or begin (once title shown)
+    // SF17: a returning player (sf_landed set by PlanetScene) gets a straight
+    // CONTINUE path — SPACE jumps to the farm, N starts the tutorial anew.
+    this.landed = false;
+    try { this.landed = localStorage.getItem('sf_landed') === '1'; } catch {}
     this.input.keyboard.on('keydown', (e) => {
       // Browsers report the spacebar's `key` as ' ' (not 'Space'); check BOTH the
       // key and code so SPACE advances/skips the crawl on every engine. Only
       // 'a'/'A' (and the spacebar) advance — other letters are ignored.
       const isSpace = e.key === ' ' || e.key === 'Space' || e.code === 'Space';
       if (isSpace || e.key === 'a' || e.key === 'A') this.handleSpace();
+      if (this.titleShown && this.landed && (e.key === 'n' || e.key === 'N')) this.startNewRun();
     });
     this.input.on('pointerdown', () => this.handleSpace());
 
@@ -149,7 +159,10 @@ class IntroScene extends Phaser.Scene {
 
   handleSpace() {
     if (this.titleShown) {
-      // begin
+      // SF17: returning player → straight back to the farm. Credits come from
+      // the server (stable player id restores the save); we pass NO credits
+      // value so PlanetScene/network can't be seeded with a fake number.
+      if (this.landed) { this.scene.start('PlanetScene'); return; }
       this.scene.start('SpaceshipScene');
       return;
     }
@@ -163,6 +176,12 @@ class IntroScene extends Phaser.Scene {
   // Touch A button → same as SPACE (advance crawl / begin)
   handleInteract() {
     this.handleSpace();
+  }
+
+  // SF17: NEW RUN — N replays the ship tutorial (flag stays set; landing
+  // again on the planet will re-set it when the tutorial completes).
+  startNewRun() {
+    this.scene.start('SpaceshipScene');
   }
 
   _renderCrawl() {

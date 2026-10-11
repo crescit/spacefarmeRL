@@ -51,7 +51,7 @@ class BridgeTests(unittest.TestCase):
                 self.assertTrue(info["loaded"])
                 actual = bridge.step({"type": "mine"})
                 self.assertEqual(expected, actual)
-                self.assertEqual(restored["day"], 0)
+                self.assertEqual(restored["day"], 1)
 
 
 class GymTests(unittest.TestCase):

@@ -157,11 +157,11 @@ class FarmState extends Schema {
     this.players = {};
     this.farms = {};
     this.orders = new ArraySchema();
-    this.day = 0;
-    this.time = 0;      // colony clock: a fresh world starts at dawn
-    this.isDay = true;  // the world owns the light — morning at day 0
+    this.day = 1;        // shared/calendar.js is 1-based — the world begins on Day 1
+    this.time = 0;      // colony clock: a fresh world starts at dawn of Day 1
+    this.isDay = true;  // the world owns the light — morning at day 1
     this.season = 0;   // start in spring
-    this.festival = false;      // no festival on day 0
+    this.festival = false;      // no festival on day 1
     this.festivalClaimed = false;
     this.festivalPhase = 'none'; // M3: 'none' | 'setup' | 'feast' | 'afterglow'
     this.feastPeak = false;      // M3: the Earth Feast was served this festival day

@@ -35,8 +35,9 @@ class TranscriptTests(unittest.TestCase):
     def test_markdown_diary(self):
         md = render_markdown(_make_trajectory())
         self.assertIn("# A Season on B-612", md)
-        self.assertIn("## Day 0", md)
+        self.assertIn("## Day 1", md)
         self.assertIn("## Day 2", md)
+        self.assertIn("## Day 3", md)
         self.assertIn("soil sighs open", md)
         self.assertIn("stamina ceiling", md)      # training is visible
         self.assertIn("Replay-verified", md)
