@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { FarmRoom, Player, ANIMALS } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
+const { WATER_USE_COST, WATER_TANK_MAX, TANK_MAX_FOR, tankMaxFor } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 
 let pass = 0, fail = 0;
 function check(name, cond, detail = '') {
@@ -290,6 +291,54 @@ console.log('== Sell integrity (inventory is authoritative) ==');
   // partial oversell → refused
   const over = rX.onSell(cli, { item: 'space-wheat', quantity: 4 });
   check('oversell refused', over && over.ok === false && (p.inventory.get('space-wheat') || 0) === 3);
+}
+
+console.log('== Watering-can tank (capacity grows with the can tier) ==');
+{
+  const rW = Object.create(FarmRoom.prototype);
+  rW.state = mkState();
+  const cli = { sessionId: 'farmer' };
+  rW.state.players.set('farmer', new Player('farmer', 'Farmer'));
+  const wp = rW.state.players.get('farmer');
+  wp.tools.set('watering', 'base');
+
+  check('tank helper: base can holds 100', tankMaxFor(wp) === 100 && TANK_MAX_FOR.base === 100,
+    `got ${tankMaxFor(wp)} TANK_MAX_FOR=${JSON.stringify(TANK_MAX_FOR)}`);
+  wp.waterLevel = 0;
+  const fill = rW.onFillWater(cli);
+  check('base refill → 100', fill.ok === true && wp.waterLevel === 100 && fill.tankMax === 100, JSON.stringify(fill));
+  const watersBase = Math.floor(wp.waterLevel / WATER_USE_COST);
+  check('base tank waters 5 crops (100/20)', watersBase === 5, `got ${watersBase}`);
+
+  wp.credits = 200;
+  const iron = rW.onUpgradeTool(cli, { tool: 'watering' });
+  check('iron upgrade ok', iron.ok === true && iron.tier === 'iron', JSON.stringify(iron));
+  check('iron can tank max 160 (water in tank untouched)', tankMaxFor(wp) === 160 && iron.tankMax === 160,
+    `got ${tankMaxFor(wp)} iron.tankMax=${iron.tankMax}`);
+  wp.waterLevel = 20;   // half-used tank before the upgrade stays half-used
+  const fillIron = rW.onFillWater(cli);
+  check('iron refill → 160', fillIron.ok === true && wp.waterLevel === 160 && fillIron.tankMax === 160, JSON.stringify(fillIron));
+  check('iron tank waters 8 crops (160/20)', Math.floor(wp.waterLevel / WATER_USE_COST) === 8);
+
+  wp.credits += 500;
+  const gold = rW.onUpgradeTool(cli, { tool: 'watering' });
+  check('gold upgrade ok', gold.ok === true && gold.tier === 'gold', JSON.stringify(gold));
+  check('gold can tank max 240', tankMaxFor(wp) === 240 && gold.tankMax === 240,
+    `got ${tankMaxFor(wp)} gold.tankMax=${gold.tankMax}`);
+  wp.waterLevel = 0;
+  const fillGold = rW.onFillWater(cli);
+  check('gold refill → 240', fillGold.ok === true && wp.waterLevel === 240 && fillGold.tankMax === 240, JSON.stringify(fillGold));
+  check('gold tank waters 12 crops (240/20)', Math.floor(wp.waterLevel / WATER_USE_COST) === 12);
+
+  const again = rW.onFillWater(cli);
+  check('refill a full gold can → already-full', again.ok === false && again.reason === 'already-full', JSON.stringify(again));
+  check('drain math unchanged (WATER_USE_COST still 20)', WATER_USE_COST === 20 && WATER_TANK_MAX === 100,
+    `cost=${WATER_USE_COST} base=${WATER_TANK_MAX}`);
+  wp.waterLevel = 240;
+  check('one water drains 20 regardless of tier', wp.waterLevel - WATER_USE_COST === 220);
+  // tier of another tool never touches the tank
+  wp.tools.set('hoe', 'gold');
+  check('gold hoe does not inflate the can', tankMaxFor(wp) === 240);
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);

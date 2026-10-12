@@ -78,6 +78,47 @@ class NetworkSystem {
         if (window.SpaceFarmer.onDaySummary) window.SpaceFarmer.onDaySummary(d);
       });
 
+      // ROADMAP A4 — message registry: the server replies to gameplay actions
+      // on the SAME channel the action was sent on (FarmRoom.dispatchGameAction
+      // mirrors NetworkSystem.request()). Every server-emitted type must have a
+      // registered handler, otherwise @colyseus/sdk warns per reply. These
+      // listeners route a reply to a fitting window.SpaceFarmer hook when one
+      // exists; otherwise they are quiet no-ops — request() adds its own
+      // per-request listener, so a second listener here is belt-and-braces.
+      const routeReply = (t, d) => {
+        const hook = window.SpaceFarmer.onActionReply;
+        if (hook) hook(t, d);
+      };
+      this.room.onMessage('sell', (d) => routeReply('sell', d));
+      this.room.onMessage('order', (d) => routeReply('order', d));
+      this.room.onMessage('buy', (d) => routeReply('buy', d));
+      this.room.onMessage('gift', (d) => routeReply('gift', d));
+      this.room.onMessage('talk', (d) => routeReply('talk', d));
+      this.room.onMessage('propose', (d) => routeReply('propose', d));
+      this.room.onMessage('newGamePlus', (d) => routeReply('newGamePlus', d));
+      this.room.onMessage('buyAnimal', (d) => routeReply('buyAnimal', d));
+      this.room.onMessage('feedAnimal', (d) => routeReply('feedAnimal', d));
+      this.room.onMessage('fish', (d) => routeReply('fish', d));
+      this.room.onMessage('mine', (d) => routeReply('mine', d));
+      this.room.onMessage('cook', (d) => routeReply('cook', d));
+      this.room.onMessage('deposit', (d) => routeReply('deposit', d));
+      this.room.onMessage('withdraw', (d) => routeReply('withdraw', d));
+      this.room.onMessage('upgradeTool', (d) => routeReply('upgradeTool', d));
+      this.room.onMessage('equip', (d) => routeReply('equip', d));
+      this.room.onMessage('fillWater', (d) => routeReply('fillWater', d));
+      this.room.onMessage('claimFestival', (d) => routeReply('claimFestival', d));
+      this.room.onMessage('contact', (d) => routeReply('contact', d));
+
+      // Catch-all for any server type this registry does not enumerate
+      // (future protocol types) — keeps live play quiet without shadowing
+      // the named handlers above (named keys fire first in this SDK).
+      this.room.onMessage('*', (type, msg) => {
+        const hook = { saved: 'onSaved', festivalPhase: 'onFestivalPhase',
+          feastPeak: 'onFeastPeak', milestone: 'onMilestone',
+          daySummary: 'onDaySummary' }[type];
+        if (hook && window.SpaceFarmer[hook]) window.SpaceFarmer[hook](msg);
+      });
+
       return true;
     } catch (err) {
       console.warn('Could not connect to server, running offline', err);

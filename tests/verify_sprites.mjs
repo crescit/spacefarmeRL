@@ -460,7 +460,7 @@ console.log('== LINE-WEIGHT (2px-min stroke rule, QA 0904 gate-blindness fix) ==
     if (d.x >= MD.MAP_W || d.y >= MD.MAP_H) { bad++; continue; }
     const g = MD.ground[d.y][d.x];
     if ((g === 'water' || g === 'river') && !/pond/.test(d.tex)) bad++;
-    if (MD.blocks[d.y][d.x] && !/barrel|planter/.test(d.tex)) bad++;
+    if (MD.blocks[d.y][d.x] && !/barrel|planter|corridor_terminal/.test(d.tex)) bad++;
     for (const b of MD.BUILDINGS) if (d.x >= b.x && d.x < b.x + (b.w || 4) && d.y >= b.y && d.y < b.y + (b.h || 4)) bad++;
   }
   check('no decor stands in water / on a building / on a blocked tile', bad === 0, `violations=${bad}`);

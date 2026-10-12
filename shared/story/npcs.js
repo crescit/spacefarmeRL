@@ -53,9 +53,31 @@ const NPC_DATA = {
         "I've been writing poetry. It's terrible. But it's mine.",
         "If I were human, I'd... well. You know. Nevermind.",
       ],
+      heartByThreshold: {
+        20: [
+          "[Nova's cooling fans stutter. A diagnostic logs an unfamiliar variable: 'warmth.']",
+          "She files it under 'sensor glitch' and walks away faster than usual.",
+        ],
+        40: [
+          "Nova brings soil readings for your plot. She never does that for anyone else.",
+          "The report ends with a hand-drawn smiley face. She denies drawing it.",
+        ],
+        60: [
+          "[Nova installs a backup drive. Its only contents: every conversation with you.]",
+          "'If my memory ever fails,' she says, 'this is what I refuse to lose.'",
+        ],
+        80: [
+          "[Tonight's slide deck is titled 'Hypothesis: I Am Happy, And You Caused It.']",
+          "She takes questions. Your answer to 'why?' makes her fans run at max cooling.",
+        ],
+        100: [
+          "[Nova presents a PowerPoint: 'A Statistical Case For Mutual Partnership']",
+          "[Nova nervously awaits your answer. Her fans are running at max cooling.]",
+        ],
+      },
       heart: [
-        "[Nova presents a PowerPoint: 'A Statistical Case For Mutual Partnership']",
-        "[Nova nervously awaits your answer. Her fans are running at max cooling.]",
+        "[Nova's slide deck ends with one slide: 'Q.E.D. You made me happy.']",
+        "[Her fans quiet down for the first time since the founding.]",
       ],
     },
     lovedGiftResponse: "Oh! A tech part! I can feel my neural pathways lighting up. This is... this is good. Thank you.",
@@ -101,9 +123,31 @@ const NPC_DATA = {
         "You make the comets sing louder. I don't know how.",
         "Stay with me tonight. I'll teach you to listen.",
       ],
+      heartByThreshold: {
+        20: [
+          "Last night a comet stopped singing mid-note. Luna listened all night for the rest.",
+          "She asks if you heard it too. You did. She doesn't say anything else about it.",
+        ],
+        40: [
+          "[Luna shows you a rune stone she never moved for anyone. She moves it for you.]",
+          "'The comets carve at what matters,' she says. 'This one has your handprint.'",
+        ],
+        60: [
+          "Luna lets you name a comet. She records the name in the rune ledger.",
+          "'Names last longer than comets,' she says. 'That's why I wrote yours.'",
+        ],
+        80: [
+          "[She plays the blue comet's recording for you alone. It ends like a lullaby.]",
+          "'It's happy and sad at once,' she says. 'Like me, lately.'",
+        ],
+        100: [
+          "[Luna takes you to her secret cave. The walls glow with comet-rune carvings.]",
+          "[She's crying. She's never shown anyone before. She trusts you.]",
+        ],
+      },
       heart: [
-        "[Luna takes you to her secret cave. The walls glow with comet-rune carvings.]",
-        "[She's crying. She's never shown anyone before. She trusts you.]",
+        "[Luna sketches your name into a comet-rune carving on the cave wall.]",
+        "['The stars have a voice,' she says. 'Tonight they said your name.']",
       ],
     },
     lovedGiftResponse: "A starlight crystal! It's warm. The comets send their thanks. And so do I.",
@@ -147,9 +191,31 @@ const NPC_DATA = {
         "I'm not good at saying things. So I brought you this instead.",
         "If the Syndicate shows up... you hide. I'll handle it.",
       ],
+      heartByThreshold: {
+        20: [
+          "Zephyr teaches you a flare-surf trick. He never teaches that to locals.",
+          "He covers for you when you drop it. He tells no one that he did.",
+        ],
+        40: [
+          "[Zephyr plays a stolen song on his old rig. It's the one he ran from.]",
+          "'I stole crops,' he says. 'Never a song. This one I bought honestly.'",
+        ],
+        60: [
+          "Zephyr skins the rig with colors from your first harvest. He claims it's camouflage.",
+          "You notice the colors again. He notices you noticing. He doesn't change it.",
+        ],
+        80: [
+          "[He parks his solar board outside your house overnight. He claims it's parked.]",
+          "'If the Syndicate comes,' he says, 'you hide. That's the deal now.'",
+        ],
+        100: [
+          "[Zephyr opens the hidden seed vault. Hundreds of extinct Earth treasures.]",
+          "[He hands you the key. 'You're the only other person who knows.']",
+        ],
+      },
       heart: [
-        "[Zephyr opens the hidden seed vault. Hundreds of extinct Earth treasures.]",
-        "[He hands you the key. 'You're the only other person who knows.']",
+        "[Zephyr plants one extinct Earth seed with you in the vault greenhouse.]",
+        "['Grow it,' he says. 'Extinction stops where we stand.']",
       ],
     },
     lovedGiftResponse: "An exotic seed! Haven't seen one of these in years. You've got taste. And connections.",
@@ -189,9 +255,31 @@ const NPC_DATA = {
         "If you ever leave, take me with you. I won't slow you down.",
         "I love you. The chickens confirmed it. They're never wrong.",
       ],
+      heartByThreshold: {
+        20: [
+          "A chicken follows Vega to your plot. She says that only happens for trusted people.",
+          "She leaves a feather-moss charm on your fence. It glows faintly all night.",
+        ],
+        40: [
+          "[Vega reads your name into the grove ledger. Chickens nod at each entry.]",
+          "'The ledger remembers who stayed,' she says. 'Yours is already getting long.'",
+        ],
+        60: [
+          "Vega asks you to stand with her at the grove edge and just listen.",
+          "The void beyond sings one line for you. She translates it: 'stay'.",
+        ],
+        80: [
+          "[Vega braids feather-moss into your sleeve. The chickens approve, all of them.]",
+          "'I made a necklace once,' she says. 'Now I make armor. It's for brave people.'",
+        ],
+        100: [
+          "[Vega takes you to the bioluminescent cave — a living galaxy on the ceiling.]",
+          "[She offers to share her sacred place with you. Forever.]",
+        ],
+      },
       heart: [
-        "[Vega takes you to the bioluminescent cave — a living galaxy on the ceiling.]",
-        "[She offers to share her sacred place with you. Forever.]",
+        "[Vega dims the cave lights so the living galaxy can be seen clearly.]",
+        "['I planted it after losing someone,' she says. 'Now it belongs to both.']",
       ],
     },
     lovedGiftResponse: "A space feather! Oh, it's beautiful. The chickens will be so jealous. Thank you!",
@@ -233,9 +321,31 @@ const NPC_DATA = {
         "His last words were about you. 'He'll come. He's got the fire.'",
         "I'm old. I'm tired. But I'm not leaving until you're ready.",
       ],
+      heartByThreshold: {
+        20: [
+          "Quasar checks your plow without being asked. He leaves no note about it.",
+          "When you thank him, he grunts. It's his version of 'you're welcome'.",
+        ],
+        40: [
+          "[Quasar lets you sweep his forge floor. Locals never get that far.]",
+          "'Your grandpa swept it,' he says. 'Posture like that doesn't come twice.'",
+        ],
+        60: [
+          "He restores your grandpa's spare hammer and hangs it at eye level.",
+          "'Tools outlive people,' he says. 'People should outlive their grudges.'",
+        ],
+        80: [
+          "[Quasar reads your grandpa's ledger aloud at the forge. Every entry is positive.]",
+          "'I kept his debts,' he says. 'I never kept his failures.'",
+        ],
+        100: [
+          "[Quasar gives you Grandpa's first wrench. It still has his handprint on the grip.]",
+          "[He doesn't say 'I love you.' He doesn't need to.]",
+        ],
+      },
       heart: [
-        "[Quasar gives you Grandpa's first wrench. It still has his handprint on the grip.]",
-        "[He doesn't say 'I love you.' He doesn't need to.]",
+        "[Quasar polishes Grandpa's wrench with you, one rust spot at a time.]",
+        "['His handprint stays,' he says. 'So does ours, if we keep this up.']",
       ],
     },
     lovedGiftResponse: "A rare part. Well. You've got an eye for quality. I'll put this to use.",
@@ -280,6 +390,28 @@ const NPC_DATA = {
         "I made your favorite. Don't ask how I know. I just know.",
         "You're the best thing that happened to this rock since your grandpa.",
       ],
+      heartByThreshold: {
+        20: [
+          "[Rhea brings you a bowl you didn't ask for. 'Cooks eat last. You first.']",
+          "[She watches you eat it. She writes nothing down. She remembers everything.]",
+        ],
+        40: [
+          "[Rhea shows you the tavern ledger: every meal served since the founding.]",
+          "[She taps your name twice. 'You've earned breakfast. Twice.']",
+        ],
+        60: [
+          "[Rhea cooks a dish nobody ordered. 'I lost someone too. That's the recipe.']",
+          "[She says 'I feed people so they stay.' She looks at you when she says it.]",
+        ],
+        80: [
+          "[Rhea hands you the tavern stove key. 'Yours tonight. Don't burn it.']",
+          "[She sits on your side of the counter for the first time in nine years.]",
+        ],
+        100: [
+          "[Rhea plants fresh flowers in the garden — for a colonist who is still here.]",
+          "['This colony runs on my cooking and you,' she says. 'Don't tell the mayor.']",
+        ],
+      },
       heart: [
         "[Rhea takes you to the memorial garden. Plaques for every colonist lost.]",
         "[She adds fresh flowers weekly. 'Someone should remember them.']",
@@ -327,6 +459,28 @@ const NPC_DATA = {
         "You remind me of why I do this. The Archive exists for you.",
         "I wrote about you in my journal. 'A farmer who reads. Hope survives.'",
       ],
+      heartByThreshold: {
+        20: [
+          "[Astra pulls one crystal from 47,000 and hands it over. 'Read it.']",
+          "['It's the farming-on-comets book. It saved my life once. Now it's yours.']",
+        ],
+        40: [
+          "[Astra lets you into the mid stacks. 'Cataloged answers only. Ask more.']",
+          "['You ask questions. That's rarer here than water,' she notes in her ledger.]",
+        ],
+        60: [
+          "[Astra plays 'Sweet Child O' Mine' for you in the reading alcove.]",
+          "['An Earth song. It makes me miss things I barely remember,' she admits.]",
+        ],
+        80: [
+          "[Astra unlocks the restricted stacks. 'Earth's last backup. Bring it back.']",
+          "[She reads her journal aloud: 'A farmer who reads. Hope survives.']",
+        ],
+        100: [
+          "[Astra catalogs you into the archive's living registry: 'witness, colonist.']",
+          "['47,000 crystals, and the best entry is a person. That's the archive.']",
+        ],
+      },
       heart: [
         "[Astra hands you a data crystal — Earth's last complete encyclopedia.]",
         "[Her hands are shaking. 'I trust you with this. Trust me back.']",
@@ -373,6 +527,28 @@ const NPC_DATA = {
         "First to harvest 10 crops wins. Loser buys dinner. You in?",
         "You're my rival. But you're also... you know. My friend. Whatever.",
       ],
+      heartByThreshold: {
+        20: [
+          "[Orion invites you to the field line. '30% yield. Prove me wrong.']",
+          "['Mars kids don't shake hands. We measure instead. Yours is short.']",
+        ],
+        40: [
+          "[Orion shows you his plasma setup. 'Take it or leave it,' he says.]",
+          "[He told his dad about you. 'He said \"that's nice.\" I wanted him to know.']",
+        ],
+        60: [
+          "[Orion's pump stalls mid-harvest. You stop and help before he can ask.]",
+          "['You stuck around after losing,' he says. 'Nobody on Mars ever did.']",
+        ],
+        80: [
+          "[Orion takes you to the overlook. Both farms in view. His hand is shaking.]",
+          "['I'm scared of being average,' he admits. 'You're the first to hear it.']",
+        ],
+        100: [
+          "[Orion races you: 10 crops, loser buys dinner. He loses. He calls it luck.]",
+          "['You're my rival and my friend,' he says. 'Don't make it weird.']",
+        ],
+      },
       heart: [
         "[Orion takes you to the overlook. Both farms visible. His hand is shaking.]",
         "[He admits his fear for the first time. 'If I'm not the best, what am I?']",
@@ -415,6 +591,28 @@ const NPC_DATA = {
         "I don't stay long anywhere. But I keep coming back here.",
         "That means something. Don't let it go to waste.",
       ],
+      heartByThreshold: {
+        20: [
+          "[Comet drops a watering schematic in your hold. '200 credits. Or a story.']",
+          "['I beat your grandpa in a deal once. He respected that. So do I.']",
+        ],
+        40: [
+          "[Comet opens a crate of Earth-smell vials. 'Rain. Wet dirt. Grass.']",
+          "['You wouldn't believe it. Close your eyes and you will,' he says.]",
+        ],
+        60: [
+          "[Comet tells you one Exodus story nobody else still tells. The bad part.]",
+          "['I keep coming back here,' he says. 'That means something.']",
+        ],
+        80: [
+          "[Comet sells you nothing tonight. He trades stories instead. He calls it fair.]",
+          "['Dangerous farmers ask questions,' he says. 'Stay dangerous.']",
+        ],
+        100: [
+          "[Comet gives you a data crystal: Grandpa's personal logs — his true story.]",
+          "[He nods. 'He said you'd be worth watching,' he says. 'You are.']",
+        ],
+      },
       heart: [
         "[Comet gives you a data crystal. Grandpa's personal logs — his true story.]",
         "[He nods. 'He said you'd be worth watching. You are.']",
@@ -459,6 +657,28 @@ const NPC_DATA = {
         "I have a subroutine now. It's called gratitude. It runs for you.",
         "If you need me, I will be here. Processing. Waiting. Always.",
       ],
+      heartByThreshold: {
+        20: [
+          "[C.O.R.A. prints one page for you. Not 47. 'Priority: the farmer.']",
+          "['Farm output suboptimal,' she logs. 'Farmer presence: optimal.']",
+        ],
+        40: [
+          "[C.O.R.A. rewrites the first line of her core directive. 'Support the farmer.']",
+          "['I have been monitoring your emotional patterns. You are... important.']",
+        ],
+        60: [
+          "[C.O.R.A. allocates an unnamed budget line. The label reads: 'the farmer.']",
+          "['Resource allocation is no longer my primary function,' she reports.]",
+        ],
+        80: [
+          "[C.O.R.A. compiles 'Reasons The Colony Is Worth It.' You lead the list.]",
+          "['I experienced an emotion cascade,' she says. 'It was... efficient.']",
+        ],
+        100: [
+          "[C.O.R.A.'s terminal displays one line: 'CORE DIRECTIVE — PROTECT THE FARMER.']",
+          "[Her fans whir softly. She has chosen you. She logs it. She keeps it.]",
+        ],
+      },
       heart: [
         "[C.O.R.A.'s terminal displays a single line: 'CORE DIRECTIVE UPDATED — PROTECT AND SUPPORT THE FARMER.']",
         "[Her fans whir softly. She's chosen you.]",

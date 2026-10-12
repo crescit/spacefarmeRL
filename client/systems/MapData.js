@@ -157,6 +157,20 @@ export const BUILDINGS = [
 
 // ── Decor ── (tex key, tile anchor)
 export const DECOR = [
+  // ── ROADMAP A1 'The first bell' — the old mission bell tower ──
+  // A subtle plaza landmark (NOT in BUILDINGS: not enterable). Verified tile
+  // (34,41): inside TOWN plaza, clear of every building footprint (18..21 /
+  // 28..31 rows 28..31 & 40..43), the vertical road (x24..25), NPC_POS, and
+  // every other DECOR anchor. Not added to BLOCKING_DECOR — the plaza floor
+  // around it stays walkable and verifyWalkability still passes.
+  { tex: 'bld.bell_tower', x: 34, y: 41 },
+  // ── SF51 'Companion Corridor' — the plaza agent terminal ──
+  // Verified tile (36,42): 2.2 tiles from the bell tower anchor (34,41), inside
+  // the TOWN plaza, clear of every building footprint, the vertical road and
+  // every NPC_POS — so SPACE beside the console never hijacks the tower lore.
+  // Added to BLOCKING_DECOR: the console is solid hardware and the player reads
+  // it as a walkable-adjacent prop they must walk up to.
+  { tex: 'bld.corridor_terminal', x: 36, y: 42 },
   // solar lamps — roads + downtown + lake shore
   { tex: 'decor.lamp', x: 24, y: 22 },
   { tex: 'decor.lamp', x: 26, y: 24 },
@@ -360,7 +374,8 @@ for (const bld of BUILDINGS) {
       if (y < MAP_H && x < MAP_W) blocks[y][x] = true;
 }
 // blocking decor
-const BLOCKING_DECOR = new Set(['decor.barrel_cargo', 'decor.barrel_water', 'decor.planter']);
+// SF51: the corridor terminal is solid colony hardware — walk up beside it
+const BLOCKING_DECOR = new Set(['decor.barrel_cargo', 'decor.barrel_water', 'decor.planter', 'bld.corridor_terminal']);
 for (const d of DECOR) {
   if (BLOCKING_DECOR.has(d.tex) && d.y < MAP_H && d.x < MAP_W) blocks[d.y][d.x] = true;
 }

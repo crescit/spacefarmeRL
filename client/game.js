@@ -8,8 +8,14 @@ import { NetworkSystem } from './systems/NetworkSystem.js';
 import { TEXTURES } from './systems/SpriteSystem.js';
 import { MusicDirector } from './systems/MusicDirector.js';
 import { AudioSystem } from './systems/AudioSystem.js';
+import { reducedMotion, setReducedMotion } from './systems/Motion.js';
 
 window.SpaceFarmer = {};
+// SF49: expose the reduced-motion toggle for QA + embedders. The scene reads
+// Motion.reducedMotion() live at every motion site, so a flip applies on the
+// very next frame.
+window.SpaceFarmer.setReducedMotion = setReducedMotion;
+window.SpaceFarmer.reducedMotion = reducedMotion;
 
 // ── Register all sprites as Phaser textures ──
 // TEXTURES is the single source of truth (name → canvas) from SpriteSystem.
@@ -17,6 +23,8 @@ function registerTextures(game) {
   for (const [name, canvas] of Object.entries(TEXTURES)) {
     if (game.textures.exists(name)) continue;
     game.textures.addCanvas(name, canvas);
+    // SF06: envoy sprites are hard-edged pixel art — nearest filtering keeps them crisp
+    if (name.startsWith('alien.')) game.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 }
 
@@ -116,6 +124,9 @@ function init() {
             if (params.get('night') === '1' && sc && sc.isNight !== undefined) {
               sc._nightOverride = true;   // screenshot debug: keep night even though the clock says day
               sc.isNight = true; sc.updateNightVisuals?.(); sc.nightOverlay?.setAlpha(0.42);
+              // SF52: shapes render their fill via fillAlpha on the Canvas renderer,
+              // so mirror the debug alpha there too (otherwise the wash stays invisible)
+              sc.nightOverlay?.setFillStyle(0x0e1838, 1);
               (sc.glowRegistry || []).forEach(g => g.setVisible(true));
               (sc.lampGlows || []).forEach(g => g.setVisible(true));
             }

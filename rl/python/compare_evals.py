@@ -33,6 +33,14 @@ def report_row(report: dict[str, Any], source: Path) -> dict[str, Any]:
     journal, _ = mean_std(model_episodes, "journal_entries")
     festivals, _ = mean_std(model_episodes, "festivals")
     days, _ = mean_std(model_episodes, "days")
+    narrative = all("days" in row for row in model_episodes)
+    testimony = ""
+    if narrative:
+        for episode in model_episodes:
+            value = episode.get("testimony") or ""
+            if value:
+                testimony = value
+                break
     return {
         "source": str(source),
         "file": source.name,
@@ -54,7 +62,8 @@ def report_row(report: dict[str, Any], source: Path) -> dict[str, Any]:
         "oracle_gap": economic_reward - reward if economic_episodes else None,
         "replay_ok": all(bool(row.get("replay_ok")) for row in model_episodes),
         # report v4 narrative record ("a report row reads like a biography")
-        "narrative": all("days" in row for row in model_episodes),
+        "narrative": narrative,
+        "testimony": testimony,
         "days": days,
         "quests": quests,
         "friends": friends,
@@ -127,6 +136,11 @@ def metric(value: float | None, digits: int = 2) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
 
 
+def testimony_cell(value: object) -> str:
+    text = str(value or "").replace("\n", " ").replace("|", "\\|")
+    return text[:80] + ("…" if len(text) > 80 else "")
+
+
 def render_markdown(
     rows: list[dict[str, Any]],
     invalid: list[dict[str, Any]] | None = None,
@@ -151,8 +165,8 @@ def render_markdown(
         narrative = all(bool(row.get("narrative")) for row in rows)
         if narrative:
             lines += [
-                "| Model | Reward μ±σ | Credits μ±σ | Steps μ | Days μ | Quests μ | Friends μ | Journal μ | Fest'ls μ | Latency/action | Δ vs random | Gap to oracle | Replay |",
-                "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|",
+                "| Model | Reward μ±σ | Credits μ±σ | Steps μ | Days μ | Quests μ | Friends μ | Journal μ | Fest'ls μ | Latency/action | Δ vs random | Gap to oracle | Replay | Testimony |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|:---|",
             ]
         else:
             lines += [
@@ -184,6 +198,8 @@ def render_markdown(
                 f"| {metric(row['oracle_gap'], 3)} ",
                 f"| {'✓' if row['replay_ok'] else '✗'} |",
             ]
+            if narrative:
+                tail = tail[:-1] + [f"| {'✓' if row['replay_ok'] else '✗'} ", f"| {testimony_cell(row.get('testimony'))} |"]
             lines.append("".join(base + middle + tail))
         lines += [
             "",

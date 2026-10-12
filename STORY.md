@@ -14,6 +14,12 @@ Now he's gone. And the farm is yours.
 
 ---
 
+## The Old Mission
+
+The plaza carries a ruined mission tower, and the bell hanging in it was **cast before the colony** — no living record names its caster. It rings when the colony gathers: festival dawn, the naming of the land, the shared meal. Nobody agrees what the tower itself was. Some colonists say a civilizing beam once fired from its deck, seeding the light the fields now drink; others say it was a refuge, built so ships that could not reach the domes would still find a place to set down. The envoys knew the mission before the colony built anything beside it, and their memories do not match the colony record — nobody has dared ask them twice. The tower is a landmark of the plaza, a reminder that B-612 was found, not founded.
+
+---
+
 ## Core Characters — Full Backstories
 
 ### Nova 🤖 — The AI Who's Too Aware For Her Own Good

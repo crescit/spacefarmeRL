@@ -28,6 +28,7 @@ ws.on('message', (raw) => {
     const a = (msg.params && msg.params.args) || [];
     logs.push(a.map(x => x.value !== undefined ? x.value : (x.description || x.type)).join(' '));
   }
+  if (msg.method === 'Runtime.exceptionThrown') { const d=msg.params.exceptionDetails; logs.push('[EXC] '+((d.exception&&d.exception.description)||d.text).slice(0,600)); }
   if (msg.method === 'Log.entryAdded') {
     const e = msg.params && msg.params.entry;
     if (e && (e.level === 'error' || e.level === 'warning')) logs.push('[' + e.level + '] ' + e.text);

@@ -21,7 +21,8 @@
     "transcript": "python3 -m rl.python.transcript",
     "eval:alignment": "python3 -m rl.python.eval_alignment",
     "mcp": "node mcp/server.cjs",
-    "test:mcp": "node mcp/smoke.cjs"
+    "test:mcp": "node mcp/smoke.cjs",
+    "qa:seasons": "node client/_qa/season_sheet.mjs"
   },
   "keywords": [
     "game",

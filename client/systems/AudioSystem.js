@@ -31,6 +31,17 @@ class AudioSystem {
     scene.load.audio('glow', '/sounds/glow.wav');
     scene.load.audio('bounce', '/sounds/bounce.wav');
     scene.load.audio('alarm', '/sounds/alarm.wav');
+    // SF25 — soft planet-action one-shots (<0.35s each)
+    scene.load.audio('till', '/sounds/till.wav');
+    scene.load.audio('plant', '/sounds/plant.wav');
+    scene.load.audio('mine_hit', '/sounds/mine_hit.wav');
+    scene.load.audio('ore', '/sounds/ore.wav');
+    scene.load.audio('fish_catch', '/sounds/fish_catch.wav');
+    scene.load.audio('sell', '/sounds/sell.wav');
+    scene.load.audio('equip', '/sounds/equip.wav');
+    scene.load.audio('door', '/sounds/door.wav');
+    scene.load.audio('refill', '/sounds/refill.wav');
+    scene.load.audio('tired', '/sounds/tired.wav');
   }
 
   constructor(scene) {

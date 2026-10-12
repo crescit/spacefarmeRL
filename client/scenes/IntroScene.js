@@ -28,8 +28,34 @@ class IntroScene extends Phaser.Scene {
     this.touchCtrl = new TouchControls(this);
     this.touchCtrl.build();
 
-    // ── Backdrop: nebula tile + planet + twinkling stars ──
+    // SF03: gameplay keys (Colony Hub / Shop / Upgrades) mean nothing during
+    // the crawl — hide the hint strip below the canvas until gameplay starts.
+    // The shutdown hook restores it when Spaceship/Planet take over.
+    this.touchCtrl.hideInfo();
+    this.events.on('shutdown', () => this.touchCtrl.showInfo());
+
+    // ── Backdrop: nebula + planet + twinkling stars ──
+    // QA 0904B.4: a single tileSprite shows the SAME blob cluster 3×3 → the
+    // opening frame reads as wallpaper. Two layers now cross-fade (0.6/0.4)
+    // at different tile scales so the blob pattern never repeats visibly,
+    // each with its own drift vector, plus five single cloud sprites at
+    // hand-picked positions to break the grid outright.
     this.nebula = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.nebula'));
+    this.nebula2 = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.nebula'))
+      .setAlpha(0.4).setTileScale(2.6);
+    // hand-picked cloud placements (positions chosen in the config viewport
+    // — fixed, never random, so they read as deliberate compositing)
+    const cloudSpec = [
+      { x: width * 0.22, y: height * 0.16, scale: 1.9, alpha: 0.34, drift: 0.016 },
+      { x: width * 0.78, y: height * 0.30, scale: 2.6, alpha: 0.28, drift: 0.010 },
+      { x: width * 0.08, y: height * 0.62, scale: 2.2, alpha: 0.24, drift: 0.013 },
+      { x: width * 0.55, y: height * 0.86, scale: 3.1, alpha: 0.22, drift: 0.009 },
+      { x: width * 0.90, y: height * 0.72, scale: 1.6, alpha: 0.30, drift: 0.018 },
+    ];
+    this.nebulaClouds = cloudSpec.map((c) => ({
+      ...c,
+      img: this.add.image(c.x, c.y, tex('fx.nebula-cloud')).setScale(c.scale).setAlpha(c.alpha),
+    }));
     this.planet = this.add.image(width - 170, height - 190, tex('fx.planet'));
     this.planet2 = this.add.image(120, 150, tex('fx.planet')).setScale(0.55).setAlpha(0.6).setFlipX(true);
 
@@ -119,10 +145,7 @@ class IntroScene extends Phaser.Scene {
     this.currentLine = '';
     this.titleShown = false;
     this.crawlWindow = 7;
-    // dark backing panel so the crawl reads cleanly over the busy starfield
-    this.crawlPanel = this.add.rectangle(width / 2, height * 0.42, Math.min(Math.round(width * 0.8), 680), 300, 0x1b2436, 0.88)
-      .setStrokeStyle(3, 0x39c5bb, 0.75).setScrollFactor(0);
-    this.textObject = this.add.text(width / 2, height * 0.42, '', {
+    const crawlStyle = {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
       fontSize: '20px',
       color: '#eafff0',
@@ -130,7 +153,39 @@ class IntroScene extends Phaser.Scene {
       lineSpacing: 12,
       stroke: '#000000',
       strokeThickness: 3,
-    }).setOrigin(0.5).setScrollFactor(0);
+    };
+    // SF13: the slab used to be a fixed 300px slate — taller than the text it
+    // holds, and the droid cameo sailed straight through it. The panel height
+    // is now DERIVED from the crawl text bounds (longest line × the window,
+    // measured with the exact style the crawl uses) + 28px padding.
+    const sampleText = Array.from({ length: this.crawlWindow }, () => INTRO_TEXT.reduce((a, b) => (b.length > a.length ? b : a), '')).join('\n');
+    const sampler = this.add.text(width / 2, height * 0.42, sampleText, crawlStyle).setVisible(false);
+    const panelH = Math.round(sampler.height) + 28;
+    sampler.destroy();
+    const panelW = Math.min(Math.round(width * 0.8), 680);
+    const panelY = height * 0.42;
+    // subtle vertical gradient: two stacked rects, darker crown over a base
+    const crownH = Math.round(panelH * 0.55);
+    const crawlPanelTop = this.add.rectangle(width / 2, panelY - panelH / 2 + crownH / 2, panelW, crownH, 0x141c2e, 0.88)
+      .setStrokeStyle(1, 0x39c5bb, 0.75);
+    const crawlPanelBase = this.add.rectangle(width / 2, panelY + panelH / 2 - (panelH - crownH) / 2, panelW, panelH - crownH, 0x232e43, 0.88)
+      .setStrokeStyle(1, 0x39c5bb, 0.75);
+    const brackets = this.add.graphics();
+    brackets.lineStyle(2, 0x67e1cd, 0.85);
+    this._drawCrawlBrackets(brackets, width / 2 - panelW / 2, panelY - panelH / 2, width / 2 + panelW / 2, panelY + panelH / 2);
+    // dark backing panel so the crawl reads cleanly over the busy starfield
+    this.crawlPanel = this.add.container(0, 0).add([crawlPanelTop, crawlPanelBase, brackets]).setScrollFactor(0);
+    // geometry the droid's drift path is bounds-checked against every frame
+    this.crawlPanelRect = { left: width / 2 - panelW / 2, right: width / 2 + panelW / 2, top: panelY - panelH / 2, bottom: panelY + panelH / 2 };
+    // SF13: pick the droid's OUTER lane — above the panel band if the cameo
+    // started above its centre, below it otherwise — measured with a 22px
+    // margin plus half the sprite size so its bounds can never intersect.
+    const droidHalf = Math.round(this.introDroid.displayWidth / 2);
+    const laneTop = this.crawlPanelRect.top - 22 - droidHalf;
+    const laneBottom = this.crawlPanelRect.bottom + 22 + droidHalf;
+    this.droidLane = this.introDroid.y <= panelY ? laneTop : laneBottom;
+    this.textObject = this.add.text(width / 2, panelY, '', crawlStyle)
+      .setOrigin(0.5).setScrollFactor(0);
 
     // input: skip crawl (SPACE / A) or begin (once title shown)
     // SF17: a returning player (sf_landed set by PlanetScene) gets a straight
@@ -227,7 +282,7 @@ class IntroScene extends Phaser.Scene {
       targets: [this.textObject, this.crawlPanel],
       alpha: 0,
       duration: 600,
-      onComplete: () => { this.textObject.destroy(); this.crawlPanel.destroy(); },
+      onComplete: () => { this.textObject.destroy(); this.crawlPanel.destroy(); this.crawlPanelRect = null; },
     });
     this.titleCard.setVisible(true);
     this.titleCard.setScale(0.9);
@@ -262,6 +317,27 @@ class IntroScene extends Phaser.Scene {
     });
   }
 
+  // SF13: colony-style corner bracket ticks framing the crawl panel —
+  // four small L marks (14px arms, 6px inset) on the panel rect corners.
+  _drawCrawlBrackets(gfx, left, top, right, bottom) {
+    const inset = 6;
+    const arm = 14;
+    const corners = [
+      [left - inset, top - inset, 1, 1],
+      [right + inset, top - inset, -1, 1],
+      [left - inset, bottom + inset, 1, -1],
+      [right + inset, bottom + inset, -1, -1],
+    ];
+    for (const [cx, cy, sx, sy] of corners) {
+      gfx.beginPath();
+      gfx.moveTo(cx, cy);
+      gfx.lineTo(cx + arm * sx, cy);
+      gfx.moveTo(cx, cy);
+      gfx.lineTo(cx, cy + arm * sy);
+      gfx.strokePath();
+    }
+  }
+
   drawStarfield() {
     const { width, height } = this.game.config;
     for (const L of this.starLayers) L.gfx.clear();
@@ -280,8 +356,22 @@ class IntroScene extends Phaser.Scene {
   update() {
     // gentle parallax drift on the backdrop — each star layer drifts at its
     // own rate (QA 0904 8.4: depth comes from the RELATIVE drift speeds)
+    // gentle parallax drift on the backdrop — each layer drifts at its own
+    // rate (QA 0904B.4: the two nebula sheets slide at different vectors so
+    // the blob clusters shear apart instead of repeating as wallpaper)
     this.nebula.tilePositionX -= 0.02;
     this.nebula.tilePositionY -= 0.006;
+    if (this.nebula2) {
+      this.nebula2.tilePositionX -= 0.043;
+      this.nebula2.tilePositionY += 0.011;
+    }
+    if (this.nebulaClouds) {
+      const W = this.game.config.width;
+      for (const c of this.nebulaClouds) {
+        c.img.x -= c.drift;
+        if (c.img.x < -320) c.img.x = W + 340; // wrap the drifting clouds
+      }
+    }
     if (this.starLayers) {
       for (const L of this.starLayers) {
         L.gfx.x -= L.speed;
@@ -295,13 +385,23 @@ class IntroScene extends Phaser.Scene {
       this.asteroid.y += Math.sin(this.time.now * 0.0004) * 0.06;
     }
     // the droid drifts slowly across the nebula, bobbing and swaying like a
-    // little probe — a living detail behind the crawl text
+    // little probe — a living detail BEHIND the crawl, never over its text:
+    // SF13 bounds the drift lane against the panel rect (outer margins only).
     if (this.introDroid) {
       const { width } = this.game.config;
-      this.introDroid.x += 0.22;
-      this.introDroid.y = 300 + Math.sin(this.time.now * 0.0008) * 9;
-      this.introDroid.rotation = Math.sin(this.time.now * 0.0005) * 0.16;
-      if (this.introDroid.x > width + 40) this.introDroid.x = -40;
+      const d = this.introDroid;
+      d.x += 0.22;
+      d.y = this.droidLane + Math.sin(this.time.now * 0.0008) * 9;
+      d.rotation = Math.sin(this.time.now * 0.0005) * 0.16;
+      if (d.x > width + 40) d.x = -40;
+      // defensive bounds check: if the bob ever clips the panel band, the lane
+      // is re-asserted (both lane values sit ≥22px + half-sprite outside it)
+      if (this.crawlPanelRect) {
+        const pb = this.crawlPanelRect;
+        const halfD = Math.round(d.displayWidth / 2);
+        const db = { left: d.x - halfD, right: d.x + halfD, top: d.y - halfD, bottom: d.y + halfD };
+        if (db.right > pb.left && db.left < pb.right && db.bottom > pb.top && db.top < pb.bottom) d.y = this.droidLane;
+      }
     }
     this.drawStarfield();
   }

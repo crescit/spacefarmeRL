@@ -26,16 +26,19 @@
   // Each entry is [HEADING, BODY] — the plaza renders the heading bold and
   // the body wrapped beneath it.
   const entries = [
-    ["THE ARRIVAL", "Sol 0: the Stardust lander set down in the Sleepy Mane crater. The first domes went up before the survey dust settled. We farmed because the colony ships ran on grown air long before they ran on credits."],
-    ["WHY WE FARM", "The hydroponic decks are life support. Every nebula-pepper you ripen is a breath the colony breathes tonight. Farming is the quiet engine under all the blinking screens."],
+    ["THE FIRST BELL", "Cast before the colony, older than anyone remembers. It rings when the colony gathers."],
+    ["THE OLD MISSION", "A ruined mission tower leans over the plaza, and nobody agrees what it was. Some say a civilizing beam once fired from its deck; others say it was a refuge for ships that could not reach the domes."],
+    ["WHAT THE ENVOYS REMEMBER", "The envoys knew the mission before the colony built anything beside it. Their memories disagree with the colony record, and nobody has dared ask them twice."],
+    ["THE ARRIVAL", "Sol 0: the Stardust lander set down in the Sleepy Mane crater, and the first domes went up before the survey dust settled. We farmed because the colony ships ran on grown air long before they ran on credits."],
+    ["WHY WE FARM", "The hydroponic decks are life support, and every nebula-pepper you ripen is a breath the colony breathes tonight. Farming is the quiet engine under all the blinking screens."],
     ["THE EXCHANGE", "The Grand Exchange trusts one currency and one promise: fair trade. The pulsing orb above the post ticks once for every contract honored since Sol 3."],
-    ["THE CANTINA", "Sol 12 rumor: the cantina serves a drink that glows the color of old supernova light. Nobody confirms. Everybody orders it."],
-    ["THE DOMES", "Each habitat dome is pressurized twice a week — one bad seal and the colony learns a new definition of silence. So far: never. The seam lights are not decoration."],
-    ["THE METAL SIDE", "Nova and Cora farm the circuits, not the soil. They keep the deck warm and the reactor honest. Treat them well - they log everything."],
-    ["GRAVITY IS A RUMOR", "The colony runs at 0.4g and nobody bothers to say sorry when you float into a shelf. Grandpa's last rule, painted above the airlock: \"Farms are not for throwing things.\" The paint is peeling. So is the rule."],
-    ["THE RANCHED HEARTHS", "Our cows, chickens, and sheep all wear flight helmets. Official reason: solar wind. Unofficial reason, per Rhea: \"They look ridiculous and the colony needed it.\""],
-    ["SOL EARTH FESTIVAL", "Once a year the whole rock eats a meal reconstituted from Earth rations. It tastes like grief and salt. The line to the cantina still wraps the block."],
-    ["THE STARDUST STORY", "The colony has a story, and you are in it. The ◆ marker up top is your place in it; [Q] opens the full log. Villagers will tell you what comes next — they always know, which is the creepy part."],
+    ["THE CANTINA", "Sol 12 rumor says the cantina serves a drink that glows the color of old supernova light — nobody confirms, everybody orders it. Ask the barkeep once and you will be remembered forever."],
+    ["THE DOMES", "Each habitat dome is pressurized twice a week — one bad seal and the colony learns a new definition of silence, so far never. The seam lights are not decoration."],
+    ["THE METAL SIDE", "Nova and Cora farm the circuits, not the soil, and they keep the deck warm and the reactor honest. Treat them well — they log everything."],
+    ["GRAVITY IS A RUMOR", "The colony runs at 0.4g and nobody bothers to say sorry when you float into a shelf — Grandpa's last rule painted above the airlock still reads Farms are not for throwing things, though the paint is peeling. So is the rule."],
+    ["THE RANCHED HEARTHS", "Our cows, chickens, and sheep all wear flight helmets — official reason solar wind, unofficial reason per Rhea, because they look ridiculous and the colony needed it. The helmets stay."],
+    ["SOL EARTH FESTIVAL", "Once a year the whole rock eats a meal reconstituted from Earth rations, and it tastes like grief and salt. The line to the cantina still wraps the block."],
+    ["THE STARDUST STORY", "The colony has a story, and you are in it — the ◆ marker up top is your place in it, and [Q] opens the full log. Villagers will tell you what comes next, because they always know, which is the creepy part."],
   ];
 
   return {

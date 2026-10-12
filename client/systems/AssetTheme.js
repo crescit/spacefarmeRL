@@ -29,8 +29,13 @@ export const THEME = {
     // as one flat cyan billboard even on a still frame.
     water: ['tile.water', 'tile.water2', 'tile.water3'],
     water2: 'tile.water2',
-    soil: 'tile.soil',
+    // QA 0904B.9: untilled soil carries a per-position variant family
+    // (plain + 3 ridge-row variants) so the farm block never reads as one
+    // flat rust slab; tex() keeps working for ship-interior plots.
+    soil: ['tile.soil', 'tile.soil_b', 'tile.soil_c', 'tile.soil_d'],
     soilB: 'tile.soil_b',
+    // packed sand/slate border ring drawn over soil tiles that touch grass
+    soilEdge: 'tile.soil_edge',
     sand: 'tile.sand',
     wetSand: 'tile.wet_sand',
     cliff: 'tile.cliff',
@@ -47,6 +52,9 @@ export const THEME = {
   // spaceship interior
   ship: {
     floor: 'ship.floor',
+    floorSeamR: 'ship.floorSeamR',
+    floorSeamB: 'ship.floorSeamB',
+    floorSeamRB: 'ship.floorSeamRB',
     wall: 'ship.wall',
     cryopod: 'ship.cryopod',
     console: 'ship.console',
@@ -68,6 +76,9 @@ export const THEME = {
     fencePost: 'decor.fence_post',
     fenceBeamA: 'decor.fence_beam_a',
     fenceBeamB: 'decor.fence_beam_b',
+    // SF10 farm fence — colony palette (slate metal + teal cap)
+    farmPost: 'decor.farm_post',
+    farmBeam: 'decor.farm_beam',
     lamp: 'decor.lamp',
     lampGlow: 'decor.lamp_glow',
     planter: 'decor.planter',
@@ -95,10 +106,17 @@ export const THEME = {
     tavern: ['bld.tavern_a', 'bld.tavern_b', 'bld.tavern_c'],
     tavernGlow: 'bld.tavern_glow',
     barn: 'bld.barn',
+    // ROADMAP A1 'The first bell' — plaza landmark (decor role, not enterable)
+    bellTower: 'bld.bell_tower',
+    // MapData semantic key 'bld.bell_tower' resolves through this role
+    bell_tower: 'bld.bell_tower',
+    // SF51 'Companion Corridor' — plaza agent terminal (decor role, not enterable)
+    corridor_terminal: 'bld.corridor_terminal',
   },
   // screen-space fx / atmosphere
   fx: {
     nebula: 'fx.nebula',
+    'nebula-cloud': 'fx.nebula-cloud', // SF12 intro cloud sprites
     planet: 'fx.planet',
     sun: 'fx.sun',
     moon: 'fx.moon',

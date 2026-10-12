@@ -39,10 +39,10 @@ export class ColonyHub {
       fontSize: '16px', color: '#9dffec', fontStyle: 'bold',
     }).setOrigin(0.5);
     const sub = scene.add.text(0, -panelH / 2 + 44, 'one menu, every activity — keys 1-9 / arrows / tap a row', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#7fb8ae',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#93d7cc',
     }).setOrigin(0.5);
     const footer = scene.add.text(0, panelH / 2 - 22, '[ESC / B] close', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0.5);
     panel.add([bg, title, sub, footer]);
     this.panel = panel;
@@ -132,7 +132,7 @@ export class ColonyHub {
         color: i === this.sel ? '#9dffec' : '#e8ecff', fontStyle: 'bold',
       }).setOrigin(0, 0.5);
       const hintText = scene.add.text(this.bg.width / 2 - 34, y, s.hint || '', {
-        fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', color: '#8fb8ae',
+        fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#a9d9d0',
       }).setOrigin(1, 0.5);
       rect.on('pointerdown', () => this.confirm(i));
       rect.on('pointerover', () => rect.setFillStyle(0x244154, 1));

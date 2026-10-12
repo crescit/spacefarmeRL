@@ -9,8 +9,49 @@ let pass = 0, fail = 0;
 const ok = (n, c, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (d ? ' ' + d : '')); } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// ── SF08 static night-light gate: the scene's day/night wiring must be
+// readable straight from the source before the live wire is checked —
+// (1) night overlay alpha ≥ 0.6, (2) every lamp gets ≥ 3 concentric ADD-blend
+// pool discs, (3) pools hidden by day (updateNightVisuals drives visibility).
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const SCENE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'client', 'scenes', 'PlanetScene.js');
+
+function checkNightScene() {
+  const src = readFileSync(SCENE, 'utf8');
+  console.log('  — SF08 static night-light gate —');
+  // 1: night overlay alpha ≥ 0.6
+  const alpha = src.match(/nightOverlay\.setAlpha\(this\.isNight \? ([\d.]+) : 0\)/);
+  ok('night overlay alpha ≥ 0.6', !!alpha && Number(alpha[1]) >= 0.6, alpha ? `alpha=${alpha[1]}` : 'no nightOverlay.setAlpha line');
+  // deeper blue tint (e.g. 0x0e1838) on the overlay rectangle
+  const tint = src.match(/nightOverlay = this\.add\.rectangle\([^;]*, 0x([0-9a-fA-F]{6}), 0\)/);
+  ok('night overlay uses a deeper blue tint', !!tint && tint[1] !== '142048', tint ? `0x${tint[1]}` : 'no rectangle tint');
+  // 2: every lamp gets ≥ 3 concentric ADD-blend amber pool discs
+  const rings = src.match(/const POOL_RINGS = \[[\s\S]*?\n\];/);
+  ok('POOL_RINGS table defines ≥ 3 concentric rings', !!rings && (rings[0].match(/\{ scale:/g) || []).length >= 3,
+    rings ? `${(rings[0].match(/\{ scale:/g) || []).length} rings` : 'no POOL_RINGS table');
+  ok('pool discs are amber (0xffbe5a) + ADD blend', src.includes('setTint(0xffbe5a)')
+    && (src.match(/\.setBlendMode\(Phaser\.BlendModes\.ADD\)/g) || []).length >= 4);
+  // the rings loop is inside the lamp branch (guarded by decor.lamp key)
+  const lampBranch = src.match(/decKey === resolveKey\('decor\.lamp'\)[\s\S]{0,1200}?for \(const ring of POOL_RINGS\)/);
+  ok('every lamp branch creates 3 pool discs', !!lampBranch);
+  // 3: pools hidden by day — the shared registry toggles with isNight
+  // 3: pools hidden by day — the shared registry toggles with isNight.
+  // Simple line-level check, not a fragile distance regex.
+  ok('light pools hidden by day (visible=setAlpha driven by isNight)',
+    /for \(const p of this\.lightPools\)/.test(src)
+    && /p\.img\.setVisible\(this\.isNight\)/.test(src)
+    && /p\.img\.setAlpha\(this\.isNight \? p\.base : 0\)/.test(src));
+}
+
+checkNightScene();
+
 async function main() {
   const room = await new Client('http://localhost:8900').joinOrCreate('farm', { name: 'night-wire-' + Math.random().toString(36).slice(2) });
+  // Raw client: no-op catch-all so server replies (sell results, milestone
+  // toasts) never warn "onMessage() not registered".
+  room.onMessage('*', () => {});
   await sleep(500);
   const st = () => ({ isDay: room.state.isDay, time: room.state.time });
   ok('fresh world starts at dawn', st().isDay === true, JSON.stringify(st()));

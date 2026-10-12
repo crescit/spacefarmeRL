@@ -9,7 +9,7 @@ const U = 3;
 const W0 = 40, H0 = 48, GAP = 10, PAD = 14;
 const npcs = Object.keys(NPC_COLORS); // nova..cora
 
-const COLS = npcs.length, ROWS = 3; // 3 mouth frames
+const COLS = npcs.length, ROWS = 5; // 3 mouth frames + warm + troubled (SF46)
 const cellW = W0 * U, cellH = H0 * U;
 const Wpx = PAD * 2 + COLS * (cellW + GAP);
 const Hpx = PAD * 2 + ROWS * (cellH + GAP) + 40;
@@ -70,7 +70,7 @@ for (let i = 0; i < npcs.length; i++) {
 // frame index markers in a footer band
 const bandY = PAD + ROWS * (cellH + GAP) + 8;
 for (let y = 0; y < 2; y++) for (let x = 0; x < Wpx - PAD * 2; x++) put(x + PAD, bandY + y, [90, 90, 120]);
-for (let f = 0; f < 3; f++) {
+for (let f = 0; f < ROWS; f++) {
   const cx = PAD + Math.floor((COLS / 2) - 1) * (cellW + GAP);
   for (let w = 0; w < 4; w++) for (let h = 0; h < 16; h++) put(cx + f * 56, bandY - 22 + h, [230, 230, 240]);
 }

@@ -9,6 +9,12 @@
 // A single shared instance routes to whichever scene is currently active,
 // so it persists cleanly across the intro → ship → planet flow.
 
+// SF03: single source of truth for the keyboard-hint strip below the canvas.
+// index.html renders an EMPTY #controls-info div (normal flow, never fixed
+// over the canvas); TouchControls fills it with this one constant everywhere.
+export const CONTROLS_HINT_TEXT =
+  'WASD/Arrows: Move · SPACE/E: Interact · M: Colony Hub · I: Shop · U: Upgrades · ESC: Close';
+
 let activeScene = null;      // the scene whose handlers the buttons drive
 let wired = false;           // have the DOM listeners been attached once?
 let activeDir = null;        // current held D-pad direction
@@ -89,18 +95,32 @@ export class TouchControls {
     const show = userPref !== null ? userPref === '1' : isTouch;
     this.bar.classList.toggle('hidden', !show);
 
-    // The corner instructions (#controls-info) must describe the controls the
-    // player actually has: keyboard hints on desktop, and hidden entirely when
-    // the touch bar is up — it sits fixed at bottom-left, so on a phone it would
-    // cover the D-pad. The on-screen buttons are self-explanatory.
+    // SF03: the controls hint lives in normal flow BELOW the canvas (never
+    // fixed over it), so it can't cover the ship HUD, planet HUD bar, or the
+    // D-pad. It uses the one exported CONTROLS_HINT_TEXT string.
     const info = document.getElementById('controls-info');
     if (info) {
       if (show) {
-        info.style.display = 'none';      // bar is up → don't let it block the D-pad
+        info.classList.add('hidden');     // bar is up → on-screen buttons explain everything
       } else {
-        info.style.display = '';
-        info.textContent = 'WASD/Arrows: Move · SPACE/E: Interact · M: Colony Hub · I: Shop · U: Upgrades · ESC: Close';
+        info.classList.remove('hidden');
+        info.textContent = CONTROLS_HINT_TEXT;
       }
+    }
+  }
+
+  /** Hide the hint strip (IntroScene: gameplay keys mean nothing yet). */
+  hideInfo() {
+    const info = document.getElementById('controls-info');
+    if (info) info.classList.add('hidden');
+  }
+
+  /** Restore the hint strip on gameplay scenes (Spaceship/Planet). */
+  showInfo() {
+    const info = document.getElementById('controls-info');
+    if (info) {
+      info.classList.remove('hidden');
+      if (!info.textContent) info.textContent = CONTROLS_HINT_TEXT;
     }
   }
 

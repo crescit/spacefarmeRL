@@ -15,11 +15,18 @@ const {
   FarmRoom, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY,
   SHOP_PRICES, SELL_PRICES, MINING_INFO, CROP_INFO, FISH_INFO, ANIMALS,
   PRODUCE_PRICES, RECIPES, NPC_GIFTS, HEART_THRESHOLDS, QUESTS,
-  ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TOOL_ORDER, TOOL_FOR_ACTION,
+  ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TOOL_ORDER, TOOL_FOR_ACTION, TANK_MAX_FOR,
   WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE,
   STAMINA_TRAIN_RATE, STAMINA_MAX,
 } = require(path.join(__dirname, '..', 'server', 'rooms', 'FarmRoom.js'));
 const { MapSchema, ArraySchema } = require('@colyseus/schema');
+// tank capacity by can tier (mirror of server tankMaxFor, tolerant of MapSchema
+// and plain-object tools maps) — obs strings and the fresh-player briefing use it
+function tankMaxForSchema(p) {
+  const t = (p && p.tools) || {};
+  const tier = (typeof t.get === 'function' ? t.get('watering') : t.watering) || 'base';
+  return TANK_MAX_FOR[tier] || WATER_TANK_MAX;
+}
 // The calendar is a SERVICE with ONE implementation (shared/calendar.js). This
 // env never re-implements season math, crop maturity, growth pacing, or
 // festival dates — it asks the injected calendar the same questions the server
@@ -613,7 +620,7 @@ class FarmEnv {
       talkedRheaToday: p.lastTalkDay.get('rhea') === st.day ? 1 : 0,
       isDay: st.isDay ? 1 : 0, festival: st.festival ? 1 : 0, festivalClaimed: st.festivalClaimed ? 1 : 0,
       tool: TOOL_ID[p.tool] ?? 0, married: p.marriedTo ? 1 : 0,
-      equipped: p.equipped || '', toolTiers, waterLevel: p.waterLevel ?? WATER_TANK_MAX,
+      equipped: p.equipped || '', toolTiers, waterLevel: p.waterLevel ?? tankMaxForSchema(p),
       questsCurrent: p.quests.current, questsCompleted: p.quests.completed.length, arcDone: p.quests.arcDone ? 1 : 0,
       // Lossless maps/records are the public observation. inventoryVector and
       // the compact farm arrays are derived conveniences for numeric learners.
@@ -889,7 +896,7 @@ class FarmEnv {
     const friends = Object.fromEntries(p.friendships || []);
     const equipped = obs.equipped ? this.toolName(obs.equipped) : 'bare hands';
     const parts = [
-      `stamina ${obs.energy}/${obs.staminaMax || 100} · credits ${obs.credits} · day ${st.day} · ${this.calendar.seasonName(st.day)} · in hand ${equipped}${obs.equipped === 'watering' ? ` · tank ${obs.waterLevel}/${WATER_TANK_MAX}` : ''}`,
+      `stamina ${obs.energy}/${obs.staminaMax || 100} · credits ${obs.credits} · day ${st.day} · ${this.calendar.seasonName(st.day)} · in hand ${equipped}${obs.equipped === 'watering' ? ` · tank ${obs.waterLevel}/${tankMaxForSchema(p)}` : ''}`,
       `farm [${counts.join(' ')}]`,
     ];
     if (inv.length) parts.push(`inventory ${inv.join(', ')}`);
@@ -918,7 +925,7 @@ class FarmEnv {
     const cargo = Object.entries(obs.inventory || {}).filter(([, count]) => count > 0).map(([item, count]) => `${item} x${count}`);
     return [
       'BACKPACK — what you carry',
-      `in hand: ${equipped}${obs.equipped === 'watering' ? ` (can tank ${obs.waterLevel}/${WATER_TANK_MAX})` : ''}`,
+      `in hand: ${equipped}${obs.equipped === 'watering' ? ` (can tank ${obs.waterLevel}/${tankMaxForSchema(this.player())})` : ''}`,
       `tools owned: ${tools}`,
       `cargo: ${cargo.join(', ') || 'empty — plant a field!'}`,
     ].join('\n');
@@ -998,7 +1005,7 @@ class FarmEnv {
     return {
       seed: this._seed,
       day: st.day,
-      daysSurvived: Math.max(0, st.day),
+      daysSurvived: Math.max(0, st.day - 1),
       season: this.calendar.seasonName(st.day),
       credits: p.credits,
       energy: p.energy,

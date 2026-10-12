@@ -58,9 +58,14 @@
     .spinner { width: 42px; height: 42px; margin: auto; border: 3px solid #333; border-top-color: #7c5; border-radius: 50%; animation: spin 1s linear infinite; }
     .title { color: #9ddd72; font-size: 24px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
     @keyframes spin { to { transform: rotate(1turn); } }
-    #controls-info { position: fixed; bottom: 8px; left: 8px; color: #39c5bb; font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif; z-index: 5; background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid #39c5bb33; pointer-events: none; }
-    /* Touch-friendly note (removed: the fixed bottom-right hint sat over the
-       touch bar's SLEEP/MENU buttons on phones — buttons are self-explanatory). */
+    /* SF03: controls hint is a normal-flow strip below the canvas (like
+       #touchbar) — never position:fixed/absolute, so it can't cover the
+       ship HUD stats, the planet HUD bar, or the touchbar D-pad. */
+    #controls-info { width: min(100vw, 960px); flex: 0 0 auto; color: #39c5bb;
+      font-size: 11px; font-family: system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif;
+      text-align: center; padding: 4px 8px; border: 1px solid #39c5bb33;
+      background: rgba(0,0,0,0.5); pointer-events: none; }
+    #controls-info.hidden { display: none; }
     /* 2026 visual system: bioluminescent frontier glass + warm harvest accents. */
     :root { --ink:#061116; --teal:#67e1cd; --amber:#f2bd68; --coral:#ef786d; }
     html, body { background:#061116; }
@@ -87,6 +92,9 @@
 <body>
   <div id="wrap">
     <div id="game"></div>
+    <!-- SF03: keyboard hint in normal flow below the canvas (empty markup —
+         TouchControls fills it from the single CONTROLS_HINT_TEXT constant). -->
+    <div id="controls-info" class="hidden"></div>
     <div id="touchbar">
       <div class="tdpad">
         <button class="tbtn" data-dir="up" style="grid-column:2;grid-row:1">▲</button>
@@ -109,9 +117,6 @@
     <div class="title">SPACE FARMER</div>
     <div id="message">Loading…</div>
   </div>
-  <div id="controls-info">
-    WASD/Arrows: Move · SPACE/E: Interact · M: Colony Hub · I: Shop · ESC: Close
-  </div>
 
   <!-- Phaser 3 (vendored locally — no CDN dependency) -->
   <script src="vendor/phaser.min.js"></script>
@@ -133,6 +138,7 @@
   <script src="shared/story/intro.js"></script>
   <script src="shared/story/season.js"></script>
   <script src="shared/story/codex.js"></script>
+  <script src="shared/story/rumors.js"></script>
 
   <!-- Game client (module) -->
   <script type="module" src="client/game.js"></script>

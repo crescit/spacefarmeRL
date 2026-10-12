@@ -205,6 +205,16 @@ const TOOL_TIERS = {
   iron: { name: 'Iron',  energyMult: 0.8 },
   gold: { name: 'Gold',  energyMult: 0.6 },
 };
+// ── Watering-can tank capacity by can tier ────────────────────────────────
+// The tank is part of the tool: a better can holds more water (base 100 →
+// iron 160 → gold 240 water units = 5 → 8 → 12 waters at WATER_USE_COST 20).
+// Upgrading the can raises the cap immediately; the water already in the tank
+// is unchanged. One source of truth shared by server, browser, RL env and MCP.
+const TANK_MAX_FOR = { base: 100, iron: 160, gold: 240 };
+function tankMaxFor(player) {
+  const tier = (player && player.tools && player.tools.get('watering')) || 'base';
+  return TANK_MAX_FOR[tier] || WATER_TANK_MAX;
+}
 const TIER_NEXT = { base: 'iron', iron: 'gold', gold: null };   // null = max tier
 const TOOL_DEFS = {
   hoe:      { id: 'hoe',      label: 'Hoe',          verb: 'till',  upgradeCost: { base: 150, iron: 400 } },
@@ -227,7 +237,7 @@ const TOOLS = {
 // The can is a real container: watering drains it (WATER_USE_COST per action),
 // and you refill it at a station (the ship's greenhouse tap, the planet's
 // stardust shore). Server-authoritative so agents learn the same chore.
-const WATER_TANK_MAX = 100;   // can capacity, in water units
+const WATER_TANK_MAX = TANK_MAX_FOR.base;   // base-tier can capacity, in water units
 const WATER_USE_COST = 20;    // units drained per water action
 
 // A new game starts from this exact inventory. New Game+ uses the same table,
@@ -633,7 +643,7 @@ class FarmRoom extends Room {
       tool: player.tool,
       equipped: player.equipped || '',
       tools: map(player.tools),
-      waterLevel: player.waterLevel ?? WATER_TANK_MAX,
+      waterLevel: player.waterLevel ?? tankMaxFor(player),
       friendships: map(player.friendships),
       lastTalkDay: map(player.lastTalkDay),
       heartEvents: map(player.heartEvents),
@@ -711,7 +721,7 @@ class FarmRoom extends Room {
     fill(player.animals, data.animals);
     fill(player.animalsFedDay, data.animalsFedDay);
     fill(player.tools, data.tools);
-    player.waterLevel = (typeof data.waterLevel === 'number') ? data.waterLevel : WATER_TANK_MAX;
+    player.waterLevel = (typeof data.waterLevel === 'number') ? data.waterLevel : tankMaxFor(player);
     // old saves: migrate to own the basic kit (backfill only — keep the
     // restored equipped tool and tank level exactly as they were saved)
     this._grantStarterTools(player, { fresh: false });
@@ -958,7 +968,7 @@ class FarmRoom extends Room {
     for (const t of TOOL_ORDER) if (!p.tools.get(t)) p.tools.set(t, 'base');
     if (opts.fresh !== false) {
       p.equipped = '';
-      p.waterLevel = WATER_TANK_MAX;
+      p.waterLevel = tankMaxFor(p);
     }
   }
 
@@ -988,9 +998,10 @@ class FarmRoom extends Room {
     this._tickClock();  // filling the can takes a moment of the day
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
-    if (player.waterLevel >= WATER_TANK_MAX) return { ok: false, reason: 'already-full', level: player.waterLevel };
-    player.waterLevel = WATER_TANK_MAX;
-    return { ok: true, waterLevel: WATER_TANK_MAX };
+    const cap = tankMaxFor(player);
+    if (player.waterLevel >= cap) return { ok: false, reason: 'already-full', level: player.waterLevel, tankMax: cap };
+    player.waterLevel = cap;
+    return { ok: true, waterLevel: cap, tankMax: cap };
   }
 
   // ── Colony clock: every meaningful action spends a moment of the day's
@@ -1607,8 +1618,9 @@ class FarmRoom extends Room {
     player.tools.set(tool, next);
     if (tool === 'hoe') player.tool = next;   // keep the legacy alias honest
     const name = `${TOOL_TIERS[next].name} ${def.label}`;
+    const tankMax = tankMaxFor(player);   // a better watering can holds more
     this.checkQuestComplete(client);   // 'tool' objective is level-based
-    return { ok: true, tool, tier: next, name, credits: player.credits };
+    return { ok: true, tool, tier: next, name, credits: player.credits, tankMax };
   }
 
   // ── Seasonal festival claim: attend once per festival for rewards ──
@@ -1753,4 +1765,4 @@ class FarmRoom extends Room {
   }
 }
 
-module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY, SHOP_PRICES, SELL_PRICES, MINING_INFO, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, PRODUCE_PRICES, CROP_INFO, FISH_INFO, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE, STAMINA_TRAIN_RATE, STAMINA_MAX };
+module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY, SHOP_PRICES, SELL_PRICES, MINING_INFO, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, PRODUCE_PRICES, CROP_INFO, FISH_INFO, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, TANK_MAX_FOR, tankMaxFor, WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE, STAMINA_TRAIN_RATE, STAMINA_MAX };

@@ -16,6 +16,7 @@ import { TouchControls } from '../systems/TouchControls.js';
 import { ColonyHub } from '../systems/ColonyHub.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
+import { reducedMotion, setReducedMotion } from '../systems/Motion.js';
 import { questView, questChip, QUESTS, QUEST_ORDER, rewardLine } from '../systems/QuestSystem.js';
 import { calendar, SEASON_NAMES, DAYS_PER_SEASON } from '../systems/CalendarService.js';
 import { schemaEntries } from '../systems/NetworkSystem.js';
@@ -29,7 +30,37 @@ const T = 32;
 const VW = MAP_W * T; // 640
 const VH = MAP_H * T; // 512
 const FENCE_Y = FENCE_Y_EXPORT;
+const FENCE_BEAM_INSET = 8;    // px gap kept clear on each side of every fence post (SF07)
+const FENCE_BEAM_ALPHA = 0.55; // laser strands stay subtle, never a solid stroke (SF07)
 const ZOOM = 1;
+// [SF46] gift tier → portrait expression frame (port.<id>_3 warm, _4 troubled)
+const GIFT_FACE = { loved: 3, hated: 4 };
+
+// [SF29] SEASON_GRADE — tint grades that make the four seasons visibly differ.
+// SPRING neutral (ground textures speak for themselves), SUMMER golden sun,
+// FALL amber leaf-turn, WINTER cool silver-blue frost. Applied ONLY to ground
+// tiles and natural decor (trees/bushes/flora); water tiles and tech props
+// (lamps, solar, antennas) stay untinted so glow effects keep their hue.
+// [SF41] SKY_GRADE — season tint for the painterly sky (`fx.sky_dusk`) and the
+// deep-space planet sprites: SPRING neutral white, SUMMER warm gold, FALL warm
+// amber (r > b), WINTER cool silver-blue (b > r). Tinted in applySeasonGrade.
+const SKY_GRADE = [0xffffff, 0xffe9c0, 0xffc8a0, 0xc8d8f8];
+const SEASON_GRADE = [
+  { ground: 0xffffff, flora: 0xffffff },   // SPRING
+  { ground: 0xfff2c8, flora: 0xfff0b0 },   // SUMMER (warm gold)
+  { ground: 0xffd6a8, flora: 0xffb878 },   // FALL (amber; r > b)
+  { ground: 0xd8e4f4, flora: 0xc8d8ee },   // WINTER (cool silver; b > r)
+];
+
+// [SF35] SEASON_HAZE — one soft additive atmosphere tint per season so the
+// sky reads as living weather, not a static backdrop. Alpha stays ≤ 0.10
+// (quiet wash; the world must stay readable underneath).
+const SEASON_HAZE = [
+  { color: 0x9fe8c0, alpha: 0.06 },   // SPRING (pale spring-green)
+  { color: 0xffd68a, alpha: 0.08 },   // SUMMER (sun-warm amber)
+  { color: 0xff9e5e, alpha: 0.09 },   // FALL (autumn orange)
+  { color: 0xcfe0ff, alpha: 0.10 },   // WINTER (cold pale-blue)
+];
 
 // ── The colony tool kit (client mirror of the server's TOOL_DEFS) ──
 // The server owns the economy (equip/upgrade tiers/tank); the browser only
@@ -51,9 +82,27 @@ const SMITHY_TOOLS = {
   rod:      { label: 'Fishing Rod',   next: [120, 350] },
 };
 const TIER_TO_NEXT = { base: 'iron', iron: 'gold', gold: null };
-const WATER_TANK_MAX = 100;          // mirror of server WATER_TANK_MAX
+const WATER_TANK_MAX = 100;          // mirror of server WATER_TANK_MAX (base tier)
+// tank capacity by can tier — mirror of server TANK_MAX_FOR (100 → 160 → 240)
+const TANK_MAX_FOR = { base: 100, iron: 160, gold: 240 };
 const WATER_USE_COST = 20;           // mirror of server WATER_USE_COST (per water action)
 const FILL_SPOT = { x: 27, y: 22 }; // the shore tap — refill the can here
+
+// [SF38] Mood tiers for the dialogue portrait plate — heart level decides how
+// warm the colony's friendships read on the box: a stranger's plate stays cool
+// slate, acquaintances tint teal, friends amber, soulmates rose.
+const MOOD_TIERS = [
+  { min: 0, color: 0x3a4656 }, // 0–1 hearts  cool slate
+  { min: 2, color: 0x67e1cd }, // 2–4 hearts  colony teal
+  { min: 5, color: 0xf7d698 }, // 5–7 hearts  amber warmth
+  { min: 8, color: 0xff9ec4 }, // 8+ hearts   rose soulmate
+];
+const moodTierFor = (h) => {
+  let tier = MOOD_TIERS[0];
+  for (const t of MOOD_TIERS) if (h >= t.min) tier = t;
+  return tier;
+};
+const moodHeartsFor = (fp) => fp === 0 ? 0 : fp < 20 ? 1 : fp < 40 ? 3 : fp < 60 ? 5 : fp < 80 ? 7 : 9;
 
 // crops the planet grows — mirrors the server's seasonal rules so the UI can
 // tell the player which seasons a crop grows in and whether it re-grows.
@@ -104,6 +153,14 @@ const FEST_BUNTING = [                               // garlands between the lam
   { x1: 24, x2: 27, y: 11 }, { x1: 32, x2: 29, y: 11 },
 ];
 const FEST_STALLS = [{ x: 20, y: 14 }, { x: 28, y: 14 }];
+// ── SF08 — lamp ground light pools: three concentric amber discs under every
+// lamp, additive-blended so they brighten the grass without occluding it.
+// Only visible at night (they live in lightPools → updateNightVisuals).
+const POOL_RINGS = [
+  { scale: 2.0, alpha: 0.12 },
+  { scale: 1.3, alpha: 0.07 },
+  { scale: 0.7, alpha: 0.04 },
+];
 const FEST_GUESTS = [                                // festival crowd (one sprite per guest)
   { tex: 'nova', x: 22, y: 13 }, { tex: 'luna', x: 24, y: 13 },
   { tex: 'vega', x: 26, y: 13 }, { tex: 'astra', x: 23, y: 14 },
@@ -111,6 +168,31 @@ const FEST_GUESTS = [                                // festival crowd (one spri
   { tex: 'cora', x: 27, y: 15 },
 ];
 const EARTH_PALETTE = [0x2e7d4f, 0xf5f0e6, 0xc0392b]; // green / white / red
+
+// ── SF22 — quest objective targets ──
+// Every objective kind used in QUESTS maps to ONE concrete in-world target.
+// NPC objectives are resolved live from the NPC's errand-brain position (see
+// _questTarget); everything else points at a building door tile or a zone
+// centre — the same spots PlanetScene already interacts at (FILL_SPOT shore,
+// MINE_SPOT vein, festival plaza, building doors from MapData.BUILDINGS).
+const QUEST_ZONES = (() => {
+  const doorOf = (act) => {
+    const b = BUILDINGS.find(bb => bb.action === act);
+    return b && b.door ? { x: b.door.x, y: b.door.y } : null;
+  };
+  return {
+    fish:       { ...(FILL_SPOT),         hint: 'FISH THE STARDUST SHORE' },
+    sell:       { ...(doorOf('exchange')  || { x: 38, y: 32 }), hint: 'SELL AT THE GRAND EXCHANGE' },
+    mine:       { ...(MINE_SPOT),         hint: 'MINE THE VEIN' },
+    tool:       { ...(doorOf('shop')      || { x: 18, y: 32 }), hint: 'VISIT THE SUPPLY DEPOT' },
+    cook:       { ...(doorOf('sleep')     || { x: 18, y: 44 }), hint: 'COOK IN THE HOME' },
+    gift:       { ...(doorOf('talk_rhea') || { x: 28, y: 32 }), hint: 'GIVE A DISH AT THE TAVERN' },
+    friendship: { ...(doorOf('talk_rhea') || { x: 28, y: 32 }), hint: 'BEFRIEND AT THE TAVERN' },
+    animal:     { ...(doorOf('ranch')     || { x: 5,  y: 8 }),  hint: 'VISIT THE RANCH' },
+    feed:       { ...(doorOf('ranch')     || { x: 5,  y: 8 }),  hint: 'FEED AT THE RANCH' },
+    festival:   { ...(FEST_PLAZA),        hint: 'ATTEND THE PLAZA' },
+  };
+})();
 
 const CROPS = {
   'space-wheat': { label: 'Space Wheat', growDays: 2, sellPrice: 20 },
@@ -143,11 +225,20 @@ const GROUND_TEX = {
   wet_sand: () => tex('ground.wetSand'),
   cliff: () => tex('ground.cliff'),
   forest: () => tex('ground.forest'),
-  soil: () => tex('ground.soil'), soil_b: () => tex('ground.soilB'),
+  // QA 0904B.9: soil picks an UNTILLED variant per tile position (stable coord
+  // hash) so the farm block reads as textured worked earth — never one flat
+  // rust slab. Both semantic keys ('soil', 'soil_b') use the same family with
+  // different hash phases so neighbours alternate their ridge rows.
+  soil: (x = 0, y = 0) => texAt('ground.soil', (x * 3 + y * 7) % 4),
+  soil_b: (x = 0, y = 0) => texAt('ground.soil', (x * 5 + y * 11) % 4),
 };
-// farm state → tile key (overrides ground once farmed)
+// farm state → tile key (overrides ground once farmed). 'empty' resolves the
+// same untilled-variant family the ground grid started with (QA 0904B.9), so
+// a worked tile reverting to bare earth keeps its ridge texture; farm.empty
+// stays a single plain-soil key for the ship-interior plot in SpaceshipScene.
 const TILE_FOR_STATE = {
-  empty: () => tex('farm.empty'), tilled: () => tex('farm.tilled'),
+  empty: (x = 0, y = 0) => texAt('ground.soil', (x * 3 + y * 7) % 4),
+  tilled: () => tex('farm.tilled'),
   seeded: () => tex('farm.seeded'), growing: () => tex('farm.growing'),
   mature: () => tex('farm.mature'),
 };
@@ -184,7 +275,12 @@ class PlanetScene extends Phaser.Scene {
     this.contactQueue = null;
     this.contactIdx = 0;
     this.selectedAlien = null;
-    try { this.contactChoices = JSON.parse(localStorage.getItem('spacefarmer.firstContact') || '{}'); } catch { this.contactChoices = {}; }
+    // SF33: contact doctrines are SERVER-authoritative while connected
+    // (FarmRoom persists player.contactChoices). localStorage is only an
+    // OFFLINE fallback, so a stale browser can never show an aftermath the
+    // colony never chose — or disagree with another browser.
+    this.contactChoices = {};
+    this._loadOfflineContacts();
     this.showingGE = false;
     this.showingShop = false;
     this.showingRecipes = false;
@@ -192,6 +288,8 @@ class PlanetScene extends Phaser.Scene {
     this.showingQuests = false;
     this.showingBackpack = false;
     this.showingSmithy = false;
+    // SF51 'Companion Corridor' — the live agent day screen starts closed
+    this.showingCorridor = false;
     this._prevQuestId = null;    // last-seen current quest → drives the "quest complete" banner
     this._arcDoneFired = false;  // ending banner fires once
     this.playerDir = 'front';
@@ -206,6 +304,9 @@ class PlanetScene extends Phaser.Scene {
   create() {
     const { width, height } = this.game.config;
     const worldX = (width - VW) / 2, worldY = (height - VH) / 2;
+    // [SF28] undefined until the first season sync lands — that first sync
+    // must stay silent, only LATER season changes raise the banner.
+    this._shownSeason = undefined;
 
     // ══ BACKDROP (parallax) — single zoomed camera; backdrop repositioned
     // each frame to counter the zoom/scroll so it stays full-screen ══
@@ -272,6 +373,29 @@ class PlanetScene extends Phaser.Scene {
       }
     }
 
+    // QA 0904B.9: packed sand/slate BORDER RING — soil tiles that touch grass
+    // get a rim band so the farm edge feathers into worked earth instead of
+    // ending at a razor seam (transparent core keeps the soil texture).
+    const soilEdgeKey = resolveKey('ground.soilEdge');
+    this.soilEdges = [];
+    for (let ey = 0; ey < MAP_H; ey++) {
+      for (let ex = 0; ex < MAP_W; ex++) {
+        const eg = ground[ey][ex];
+        if (eg !== 'soil' && eg !== 'soil_b') continue;
+        let edge = false;
+        for (const dir of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = ex + dir[0], ny = ey + dir[1];
+          if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) { edge = true; break; }
+          const ng = ground[ny][nx];
+          if (ng !== 'soil' && ng !== 'soil_b') { edge = true; break; }
+        }
+        if (!edge) continue;
+        const eImg = this.add.image(ex * T + T / 2, ey * T + T / 2, soilEdgeKey).setDepth(0.02);
+        this.world.add(eImg);
+        this.soilEdges.push(eImg);
+      }
+    }
+
     // Raised agri-decks unify the farm tiles into two intentional fields.
     // This is presentation-only: the simulation and its 8x8 RL farm state
     // keep exactly the same coordinates and semantics.
@@ -303,11 +427,55 @@ class PlanetScene extends Phaser.Scene {
       { x0: splitX + 1, x1: sbx1, label: 'AGRI-DECK 02' },
     ].filter(function (d) { return d.x1 >= d.x0; });
     this.fieldDeck = this.add.graphics().setDepth(0.12);
-    this.fieldDeck.lineStyle(3, 0x263d35, 0.82);
-    for (const d of decks) {
-      this.fieldDeck.strokeRoundedRect(
-        d.x0 * T + 3, sby0 * T + 3,
-        (d.x1 - d.x0 + 1) * T - 6, (sby1 - sby0 + 1) * T - 6, 9);
+    // QA 0904B.9 (SF10): the old 1px stroked rectangle read as a CAD wireframe
+    // with posts only at corners. The outline is now a procedural fence — posts
+    // every 2 tiles along the DERIVED soil-bounds perimeter with beams between
+    // them, and a 2-tile gate gap on the side facing the main path. No tile
+    // literals: every coordinate comes from sbx0/sbx1/sby0/sby1 above.
+    const farmFenceGapTiles = 2;
+    const perimeterTiles = 2 * (sbx1 - sbx0 + 1) + 2 * (sby1 - sby0 + 1);
+    const perimeterPosts = Math.floor(perimeterTiles / 2) - farmFenceGapTiles;
+    const farmPostKey = resolveKey('decor.farmPost');
+    const farmBeamKey = resolveKey('decor.farmBeam');
+    this.farmFencePosts = [];
+    this.farmFenceBeams = [];
+    const layFenceRun = function (tiles) {
+      for (let i = 0; i < tiles.length; i++) {
+        const pt = tiles[i];
+        const post = this.add.image(pt.x * T + T / 2, pt.y * T + T / 2, farmPostKey).setDepth(0.11);
+        this.world.add(post);
+        this.farmFencePosts.push(post);
+        if (i > 0) {
+          const prev = tiles[i - 1];
+          const dxT = Math.abs(pt.x - prev.x), dyT = Math.abs(pt.y - prev.y);
+          const beam = this.add.image(
+            (prev.x + pt.x) / 2 * T + T / 2, (prev.y + pt.y) / 2 * T + T / 2, farmBeamKey);
+          const bpx = Math.hypot(dxT, dyT) * T - 8; // beam ends stay clear of post caps
+          beam.setDisplaySize(bpx, 3);
+          if (dxT === 0) beam.setAngle(90); // vertical run down a side edge
+          beam.setAlpha(0.92).setDepth(0.1);
+          this.world.add(beam);
+          this.farmFenceBeams.push(beam);
+        }
+      }
+    }.bind(this);
+    for (const edgeY of [sby0, sby1]) {
+      const run = [];
+      for (let x = sbx0; x <= sbx1; x += 2) run.push({ x, y: edgeY });
+      layFenceRun(run);
+    }
+    const gateSlot = sby0 + Math.floor((sby1 - sby0) / 2);
+    for (const edgeX of [sbx0, sbx1]) {
+      const run = [];
+      for (let y = sby0; y <= sby1; y += 2) {
+        if (edgeX === sbx1 && (y === gateSlot || y === gateSlot + 1)) continue; // gate gap
+        run.push({ x: edgeX, y });
+      }
+      layFenceRun(run);
+    }
+    if (this.farmFencePosts.length < perimeterPosts - farmFenceGapTiles) {
+      console.warn('SF10 farm fence covers ' + this.farmFencePosts.length +
+        ' posts, expected >= ' + perimeterPosts);
     }
     this.fieldDeck.lineStyle(1, 0xd6b477, 0.18);
     for (const d of decks) {
@@ -329,11 +497,15 @@ class PlanetScene extends Phaser.Scene {
     this.fenceBeams = [];
     const spans = fenceSpans();
     for (const sp of spans) {
-      const wpx = (sp.x1 - sp.x0 + 1) * T;
+      // SF07: beams used to be stretched one tile past each post (wpx = span+1 tiles)
+      // at full opacity, so adjacent spans fused into one unbroken cyan stroke across
+      // the whole viewport. Run each beam post-to-post with a gap at every post, thin
+      // and translucent, so it reads as a laser fence rather than a debug line.
+      const wpx = (sp.x1 - sp.x0) * T - FENCE_BEAM_INSET * 2;
       const beam = this.add.image(
         (sp.x0 + (sp.x1 - sp.x0) / 2) * T + T / 2,
-        sp.y * T + 2, 'decor.fence_beam_a'
-      ).setDisplaySize(wpx, 4);
+        sp.y * T + T / 2 - 6, 'decor.fence_beam_a'
+      ).setDisplaySize(wpx, 2).setAlpha(FENCE_BEAM_ALPHA);
       this.world.add(beam);
       this.fenceBeams.push(beam);
       const p1 = this.add.image(sp.x0 * T + T / 2, sp.y * T + T / 2, 'decor.fence_post');
@@ -346,11 +518,18 @@ class PlanetScene extends Phaser.Scene {
     this.lampGlows = [];
     this.lightPools = [];   // Task 4: ground light pools (lamps, doors)
     for (const d of DECOR) {
+      // SF51 'Companion Corridor': the terminal is drawn as in-scene procedural
+      // graphics (slate console + teal screen glow) rather than a flat decal,
+      // so the screen reads as live colony hardware beside the bell tower.
+      if (d.tex === 'bld.corridor_terminal') { this._buildCorridorTerminal(d); continue; }
       const decKey = resolveKey(d.tex);
       const img = this.add.image(d.x * T + T / 2, d.y * T + T / 2, decKey);
       img.setDepth(d.y);
       this.world.add(img);
       this.decorSprites.push({ img, d });
+      // ROADMAP A1 'The first bell' — keep a handle on the bell tower sprite so
+      // the festival dawn can swing it (setFestivalPhase → _ringBell).
+      if (d.tex === 'bld.bell_tower') this.bellTower = img;
       // soft cast shadow under natural decor (trees, flora) — grounds the scene
       if (decKey !== resolveKey('decor.lamp') && decKey !== resolveKey('decor.pond')) {
         const sh = this.add.image(d.x * T + T / 2 + 3, d.y * T + 4, tex('fx.bldShadow'))
@@ -361,18 +540,41 @@ class PlanetScene extends Phaser.Scene {
         const glow = this.add.image(d.x * T + T / 2, d.y * T - 2, tex('fx.lampGlow'))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(1000).setVisible(false);
         this.world.add(glow);
+        // SF36: store each lamp glow's rest values ONCE at creation so the
+        // festival bloom (setFestivalPhase → _startLampBloom) can pulse the
+        // lamps and hand them back exactly as they were when the phase ends.
+        glow._baseScale = 1.0;
+        glow._baseAlpha = glow.alpha;
         this.lampGlows.push(glow);
         // Task 4: warm pool of light cast on the ground beneath the lamp
         const pool = this.add.image(d.x * T + T / 2, d.y * T + 12, tex('fx.poolWarm'))
           .setBlendMode(Phaser.BlendModes.ADD).setDepth(902).setVisible(false).setAlpha(0);
         this.world.add(pool);
         this.lightPools.push({ img: pool, base: 0.55, phase: Math.random() * 6.283, speed: 0.0011 + Math.random() * 0.0006 });
+        // SF08: three concentric amber discs give each lamp a proper ground
+        // light pool — ADD-blended tinted-amber rings that fade with the overlay
+        // (they ride the lightPools registry, so day hides them and night flicker
+        // animates their alpha alongside the warm pool).
+        for (const ring of POOL_RINGS) {
+          const disc = this.add.image(d.x * T + T / 2, d.y * T + 12, tex('fx.poolWarm'))
+            .setScale(ring.scale).setTint(0xffbe5a)
+            .setBlendMode(Phaser.BlendModes.ADD).setDepth(902)
+            .setVisible(false).setAlpha(0);
+          this.world.add(disc);
+          this.lightPools.push({
+            img: disc, base: ring.alpha,
+            phase: Math.random() * 6.283, speed: 0.0011 + Math.random() * 0.0006,
+          });
+        }
       }
     }
 
     // ── buildings (y-sorted) + night glows (in world, depth 1000) ──
     this.buildingSprites = [];
     this.glowRegistry = [];
+    // SF51: the corridor terminal glow was built during the decor loop (before
+    // glowRegistry existed) — hand it over here so night lights it live.
+    if (this.corridorTerminalGlow) this.glowRegistry.push(this.corridorTerminalGlow);
     this.buildingGlows = [];
     for (const b of [...BUILDINGS].sort((a, c) => (a.y + a.h) - (c.y + c.h))) {
       const bldKey = b.key === 'tavern' ? texAt('bld.tavern', 0)
@@ -426,8 +628,8 @@ class PlanetScene extends Phaser.Scene {
       spr.npcId = npc.id;
       this.world.add(spr);
       const label = this.add.text(tx, ty - 40, npc.name, {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', color: '#cfd6ff',
-        stroke: '#000000', strokeThickness: 2,
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#cfd6ff',
+        stroke: '#000000', strokeThickness: 3,
       }).setOrigin(0.5).setDepth(npc.y + 0.6).setAlpha(0.9);
       this.world.add(label);
       spr._label = label;
@@ -453,17 +655,27 @@ class PlanetScene extends Phaser.Scene {
       };
     }
     // ── Alien envoys: stationary first-contact story encounters ──
+    // SF37 — the scene is still assembling its first load, so any envoy created
+    // during create() SKIPS the arrival flash (the colony opens calm; only
+    // envoys landing LIVE after create() pop in).
+    this._createDone = false;
     this.alienSprites = [];
     for (const alien of ALIEN_DATA) {
       const ax = alien.x * T + T / 2, ay = alien.y * T + T / 2;
-      const aura = this.add.image(ax, ay + 20, "fx.lamp_glow").setScale(1.3).setAlpha(0.3).setDepth(alien.y + 0.2);
+      // SF06: fx.lamp_glow is an OPAQUE disc (black edges) meant for additive blending —
+      // drawn NORMAL it read as a dark square block behind the envoy.
+      const aura = this.add.image(ax, ay + 20, "fx.lamp_glow").setScale(1.3).setAlpha(0.3)
+        .setBlendMode(Phaser.BlendModes.ADD).setDepth(alien.y + 0.2);
       const spr = this.add.image(ax, ay, `alien.${alien.id}`).setScale(0.9).setDepth(alien.y + 0.6);
-      const label = this.add.text(ax, ay - 44, alien.name, { fontFamily: "system-ui, sans-serif", fontSize: "7px", color: "#dffcff", stroke: "#000", strokeThickness: 2 }).setOrigin(0.5).setDepth(alien.y + 0.8);
-      const marker = this.add.text(ax, ay + 38, "FIRST CONTACT", { fontFamily: "system-ui, sans-serif", fontSize: "6px", color: "#f3d99b", stroke: "#000", strokeThickness: 2 }).setOrigin(0.5).setDepth(alien.y + 0.8);
+      const label = this.add.text(ax, ay - 48, alien.name, { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#dffcff", stroke: "#000", strokeThickness: 3 }).setOrigin(0.5).setDepth(alien.y + 0.8);
+      const marker = this.add.text(ax, ay + 42, "FIRST CONTACT", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#f3d99b", stroke: "#000", strokeThickness: 3 }).setOrigin(0.5).setDepth(alien.y + 0.8);
       this.world.add([aura, spr, label, marker]);
       spr.alienId = alien.id; spr._aura = aura; spr._marker = marker; spr._label = label;
       spr._baseY = ay;
+      spr._baseScale = spr.scaleY;          // SF37 — full scale the arrival tween restores
+      spr._auraBase = aura.alpha;           // SF37 — aura alpha the arrival fade-in restores
       this.alienSprites.push(spr);
+      this._envoyArrival(spr);              // SF37 — skipped during create() (see _createDone)
       this._applyContactAftermath(alien, false);
     }
 
@@ -496,10 +708,55 @@ class PlanetScene extends Phaser.Scene {
     this.world.add(this.playerRim);
     this.glowRegistry.push(this.playerRim);
 
-    // ══ NIGHT OVERLAY (world-space rect, each frame positioned over camera view) ══
-    this.nightOverlay = this.add.rectangle(0, 0, width, height, 0x142048, 0)
-      .setBlendMode(Phaser.BlendModes.MULTIPLY).setDepth(900);
-    this.world.add(this.nightOverlay);
+    // ══ NIGHT OVERLAY (screen-anchored rect, sized to the camera view) ══
+    // SF52: the old overlay lived INSIDE the offset `this.world` container and
+    // was positioned every frame at (cam.scrollX, cam.scrollY) in *world* coords
+    // — inside that container the container offset was applied on top of the
+    // scroll, so the overlay sat half a screen off the view and night read as
+    // bright as day. Fix: a screen-anchored rect OUTSIDE the world container
+    // (scrollFactor 0, origin 0, scene coords), sized each frame to
+    // cam.width/zoom × cam.height/zoom so it covers the visible view at any
+    // zoom. MULTIPLY at 0.62 alpha rendered as a near-no-op tint in this
+    // renderer, so the overlay uses NORMAL blend: a 0.62-alpha 0x0e1838 wash
+    // over the scene that reliably darkens, while the additive lamp pools and
+    // window glows (depth ≥ 900) and the HUD (depth ≥ 990) still draw above it.
+    this.nightOverlay = this.add.rectangle(0, 0, width, height, 0x0e1838, 0)
+      .setOrigin(0, 0).setBlendMode(Phaser.BlendModes.NORMAL)
+      .setScrollFactor(0).setDepth(900); // alpha 0 by day draws nothing
+    // never a child of the offset `world` container — screen coords only
+
+    // ══ SF32 DUSK/DAWN WASH: a warm amber-orange additive tint that breathes
+    //    in during the night/day transition (peaks mid-transition, fades out).
+    //    Screen-anchored, above the night overlay, below the HUD. ══
+    this.duskWash = this.add.rectangle(width / 2, height / 2, width, height, 0xff9a5a, 0)
+      .setBlendMode(Phaser.BlendModes.ADD).setScrollFactor(0).setDepth(901).setAlpha(0.12).setVisible(false);
+
+    // ══ SF32 AURORA: three wide additive ribbons near the top of the screen,
+    //    teal/green/violet. Only at night AND on every third day (deterministic:
+    //    this.dayCount % 3 === 0), undulating slowly in update(). ══
+    this.aurora = [];
+    const auroraColors = [0x67e1cd, 0x7dffb0, 0xb08cff];
+    for (let ai = 0; ai < auroraColors.length; ai++) {
+      const g = this.add.graphics().setScrollFactor(0).setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(902).setVisible(false).setAlpha(0.18);
+      const color = auroraColors[ai];
+      g.fillStyle(color, 1);
+      g.beginPath();
+      g.moveTo(-24, 30 + ai * 12);
+      for (let x = 0; x <= width + 24; x += 24) {
+        const y = 28 + ai * 12 + Math.sin(x * 0.012 + ai * 2.1) * 16 + Math.cos(x * 0.021 + ai * 0.7) * 7;
+        g.lineTo(x, y);
+      }
+      // mirror the crest downward to close each ribbon band
+      for (let x = width + 24; x >= -24; x -= 24) {
+        const y = 28 + ai * 12 + Math.sin(x * 0.012 + ai * 2.1) * 16 + Math.cos(x * 0.021 + ai * 0.7) * 7;
+        g.lineTo(x, y + 40 + ai * 14);
+      }
+      g.closePath();
+      g.fillPath();
+      g._ribbon = ai;                        // per-ribbon phase for update()
+      this.aurora.push(g);
+    }
 
     // ══ SEASON AMBIENT: tint ramp + particle weather emitters ══
     this.seasonOverlay = this.add.rectangle(0, 0, width, height, 0xffffff, 0)
@@ -509,6 +766,25 @@ class PlanetScene extends Phaser.Scene {
     // cinematic vignette — soft dark corners, screen-fixed through zoom
     this.vignette = this.add.tileSprite(width / 2, height / 2, width, height, 'fx.vignette')
       .setDepth(960).setScrollFactor(0).setAlpha(0.85);
+
+    // ══ SF22 — quest objective marker: bobbing amber chevron over the active
+    //    quest target + a screen-fixed edge arrow when it's off-camera ══
+    // The chevron follows the target in-world (scene coords: local pixel + the
+    // world container offset), so camera scroll moves it; the edge arrow locks
+    // to the viewport the same way SpaceshipScene's compass arrow does.
+    this.questMarker = this.add.container(0, 0).setDepth(986).setVisible(false);
+    this.questMarker.add(this.add.text(0, 0, '▼', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '16px', fontStyle: 'bold',
+      color: '#f7d698', stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5));
+    this.questMarker.add(this.add.text(0, 16, '', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '11px', fontStyle: 'bold',
+      color: '#ffe9a0', stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5));
+    this.questEdgeArrow = this.add.graphics().setScrollFactor(0).setDepth(985).setVisible(false);
+
     // golden-hour wash — warm key light over the whole colony during the day
     this.dayWarm = this.add.rectangle(0, 0, width, height, 0xffe8b8, 0)
       .setBlendMode(Phaser.BlendModes.MULTIPLY).setScrollFactor(0).setDepth(959).setVisible(false);
@@ -553,6 +829,7 @@ class PlanetScene extends Phaser.Scene {
     this.buildDialogue(width, height);
     this.buildContactUI(width, height);
     this.buildPanels(width, height);
+    this._buildCorridorPanel();
     this._buildInteractPrompt();
     this._bindSavedBlip();
     this._bindReflection();
@@ -572,6 +849,9 @@ class PlanetScene extends Phaser.Scene {
     this.eKey = this.input.keyboard.addKey('E');
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.mKey = this.input.keyboard.addKey('M');
+    // SF49: F9 toggles reduced motion (M toggles the colony hub, so F9 is the
+    // free accessibility key). The choice persists via Motion.setReducedMotion.
+    this.rmKey = this.input.keyboard.addKey('F9');
     this.iKey = this.input.keyboard.addKey('I');
     this.gKey = this.input.keyboard.addKey('G');
     this.pKey = this.input.keyboard.addKey('P');
@@ -589,7 +869,7 @@ class PlanetScene extends Phaser.Scene {
     this.ranchSign = this.add.text(0, -40, 'SPACE RANCH', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#9ddd72', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
     this.ranchStage.add(this.ranchSign);
     this.ranchStage.add(this.add.rectangle(0, 24, 130, 58, 0x141a26, 0.5).setStrokeStyle(1, 0x39c5bb));
-    this.ranchStage.add(this.add.text(0, 56, '[1][2][3] buy · feed daily', { fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#a8d8d8' }).setOrigin(0.5));
+    this.ranchStage.add(this.add.text(0, 56, '[1][2][3] buy · feed daily', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8d8d8' }).setOrigin(0.5));
     this._animalsSig = '';
     this.ranchStage.setVisible(false);
     // ── asteroid mining spot — a cracked rock you mine for space ore.
@@ -621,7 +901,7 @@ class PlanetScene extends Phaser.Scene {
     this.deepDrop.fillStyle(0x12686e, 0.9).fillCircle(ddx, ddy, 9);
     this.deepDrop.fillStyle(0x39c5bb, 0.8).fillCircle(ddx, ddy, 5);
     this.deepDrop.lineStyle(1.5, 0x9ddd72, 0.7).strokeCircle(ddx, ddy, 9);
-    this.deepDropLabel = this.add.text(ddx, ddy + 16, 'DEEP DROP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(95);
+    this.deepDropLabel = this.add.text(ddx, ddy + 16, 'DEEP DROP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(95);
     // the shore tap — where the watering can refills. Equip the can and press
     // A/SPACE on the pond's edge; a small teal faucet makes the spot visible.
     this.shoreTap = this.add.graphics().setDepth(94);
@@ -629,7 +909,7 @@ class PlanetScene extends Phaser.Scene {
     this.shoreTap.fillStyle(0x0d4a50, 0.9).fillCircle(stx, sty, 7);
     this.shoreTap.fillStyle(0x39c5bb, 0.95).fillCircle(stx, sty, 4);
     this.shoreTap.lineStyle(1.2, 0x9ddd72, 0.6).strokeCircle(stx, sty, 7);
-    this.shoreTapLabel = this.add.text(stx, sty + 15, 'SHORE TAP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#a8eeff', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(95);
+    this.shoreTapLabel = this.add.text(stx, sty + 15, 'SHORE TAP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(95);
     this.uKey = this.input.keyboard.addKey('U');
     this.vKey = this.input.keyboard.addKey('V');
     this.qKey = this.input.keyboard.addKey('Q'); // The Stardust Story — quest log
@@ -662,6 +942,78 @@ class PlanetScene extends Phaser.Scene {
     this.input.keyboard.once('keydown', () => this.audio.boot());
 
     this.updateNightVisuals();
+
+    // ══ SF35 STARDUST: ~40 tiny screen-anchored motes drifting diagonally
+    //    between the sky (depth -60) and the world (depth 0) so they sit just
+    //    above the sky and never cover the world or the HUD. Positions come
+    //    from a small LCG seeded deterministically per index — NO Math.random
+    //    at create, so screenshots are stable from boot to boot. ══
+    this.stardust = [];
+    {
+      let seed = 0x5f3759df >>> 0;
+      const lcg = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      for (let si = 0; si < 40; si++) {
+        const px = lcg() * width, py = lcg() * height;
+        const size = 1 + (si % 2);
+        const mote = this.add.rectangle(px, py, size, size, 0xeafff5, 1)
+          .setScrollFactor(0).setDepth(-58).setBlendMode(Phaser.BlendModes.ADD)
+          .setAlpha(0.15 + lcg() * 0.30);
+        mote._vx = 0.006 + lcg() * 0.020;   // px/ms diagonal drift
+        mote._vy = 0.004 + lcg() * 0.014;
+        mote._cx = px; mote._cy = py;       // deterministic origin (QA)
+        this.stardust.push(mote);
+      }
+    }
+
+    // ══ SF35 SEASON HAZE: one full-screen soft tint just below the film sheen
+    //    (963 < filmSheen 964) that recolours with the season so the atmosphere
+    //    changes every time the calendar rolls over. ══
+    this.seasonHaze = this.add.rectangle(0, 0, width, height, SEASON_HAZE[0], 0)
+      .setBlendMode(Phaser.BlendModes.ADD).setScrollFactor(0).setDepth(963);
+
+    // [SF29] paint the season the server starts us in (default SPRING) —
+    // applySeasonGrade also sets the SF35 haze colour for that season.
+    this.applySeasonGrade(this.season ?? 0);
+
+    // SF37 — the initial load is assembled: from here on, any envoy that lands
+    // LIVE (created after create()) plays the arrival flash.
+    this._createDone = true;
+  }
+
+  // [SF29] Seasonal ground grading — makes the four seasons visibly differ.
+  // Idempotent: a repeated sync with the same season does zero work.
+  // Ground tiles + farm tiles get grade.ground; water tiles and buildings
+  // stay untinted (water glow must keep its hue); natural decor (trees,
+  // bushes, alien flora) gets grade.flora; lamps/tech props are never tinted.
+  applySeasonGrade(season) {
+    const s = Math.max(0, Math.min(3, season | 0));
+    if (this._gradedSeason === s) return;
+    this._gradedSeason = s;
+    const grade = SEASON_GRADE[s];
+    // water images also live in this.tiles — keep their shimmer untinted
+    const water = new Set(this.waterTiles.map(w => w.img));
+    for (const img of this.tiles) {
+      if (!water.has(img)) img.setTint(grade.ground);
+    }
+    for (const ft of this.farmTiles) ft.img.setTint(grade.ground);
+    const FLORA = /tree|bush|flora/;
+    for (const { img, d } of this.decorSprites) {
+      if (FLORA.test(d.tex)) img.setTint(grade.flora);
+    }
+    // [SF41] painterly sky + deep-space planets: tint them with the same season
+    // grade so the heavens change with the year turn too.
+    if (this.skyTile) this.skyTile.setTint(SKY_GRADE[s]);
+    if (this.planetSpr) this.planetSpr.setTint(SKY_GRADE[s]);
+    if (this.planetSpr2) this.planetSpr2.setTint(SKY_GRADE[s]);
+    // [SF35] season haze: recolour the atmosphere with the same season the
+    // ground/flora grade uses, so the sky reacts to the year turn too.
+    if (this.seasonHaze) {
+      const haze = SEASON_HAZE[s] || SEASON_HAZE[0];
+      this.seasonHaze.setFillStyle(haze.color).setAlpha(haze.alpha);
+    }
   }
 
   // ── UI builders ──
@@ -696,7 +1048,7 @@ class PlanetScene extends Phaser.Scene {
     // hide while a dialogue/panel/interior is handled elsewhere
     const hidden = !!(this.inAlienContact || this.eventQueue || this.inDialogue || this.showingGE ||
       this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes ||
-      this.showingHub || this.showingBackpack || this.showingSmithy || this.inInterior);
+      this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.inInterior);
     if (hidden) { this.interactPrompt?.setVisible(false); return; }
     const target = this._resolveInteractTarget();
     if (!target) { this.interactPrompt?.setVisible(false); return; }
@@ -731,13 +1083,13 @@ class PlanetScene extends Phaser.Scene {
       ...f, fontSize: '11px', color: '#f8d797', align: 'right', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0.5).setDepth(1000); screenFix.push(this.hudDay);
     this.colonyMark = this.add.text(width - 34, 12, 'B-612  /  FRONTIER AGRICULTURE', {
-      ...f, fontSize: '9px', color: '#8dc9c0',
+      ...f, fontSize: '11px', color: '#b8e0d8',
       stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0).setDepth(1000); screenFix.push(this.colonyMark);
     this.questPlate = this.add.rectangle(12, 8, Math.min(430, width * 0.54), 38, 0x081a20, 0.78)
       .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997).setVisible(false); screenFix.push(this.questPlate);
     this.questChip = this.add.text(24, 18, '', {
-      ...f, fontSize: '10px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
+      ...f, fontSize: '11px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(0, 0).setDepth(1000); screenFix.push(this.questChip);
     screenFix.forEach(o => o.setScrollFactor(0));
   }
@@ -783,7 +1135,8 @@ class PlanetScene extends Phaser.Scene {
     this._diaShown = 0;
     this._diaNPC = npcId || (this.selectedNPC && this.selectedNPC.id) || 'nova';
     this._diaFooter = opts.footer || '';
-    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_0`);
+    this._diaFace = opts.face || 0;   // [SF46] 3 = warm (loved gift), 4 = troubled (hated gift); held for the line
+    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_${this._diaFace}`);
     this.dialog.setText(full, {
       title: opts.title,
       footer: opts.footer,
@@ -794,7 +1147,7 @@ class PlanetScene extends Phaser.Scene {
 
   // Called when the shared panel finishes typing — settle the portrait and hint.
   _diaTypesFinished() {
-    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_0`);
+    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_${this._diaFace || 0}`);
     this.dialogueHint.setText(this._diaFooter || '[SPACE to continue]');
     this.dialogueHint.setVisible(true);
   }
@@ -803,7 +1156,7 @@ class PlanetScene extends Phaser.Scene {
     if (this._diaDone) return;
     this.dialog.finishTyping();
     this._diaDone = true;
-    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_0`);
+    if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_${this._diaFace || 0}`);
     this.dialogueHint.setText(this._diaFooter || '[SPACE to continue]');
     this.dialogueHint.setVisible(true);
   }
@@ -818,14 +1171,14 @@ class PlanetScene extends Phaser.Scene {
     this.contactRows = CONTACT_DOCTRINES.map((doctrine, index) => {
       const y = -55 + index * 62;
       const row = this.add.rectangle(0, y, panelWidth - 70, 52, 0x132432, 0.96).setStrokeStyle(1, doctrine.color).setInteractive({ useHandCursor: true });
-      const copy = this.add.text(-panelWidth / 2 + 52, y, "[" + (index + 1) + "] " + doctrine.label + " — " + doctrine.description, { fontFamily: "system-ui, sans-serif", fontSize: "10px", color: "#e9f3f4", wordWrap: { enable: true, width: panelWidth - 110 } }).setOrigin(0, 0.5);
+      const copy = this.add.text(-panelWidth / 2 + 52, y, "[" + (index + 1) + "] " + doctrine.label + " — " + doctrine.description, { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#e9f3f4", wordWrap: { enable: true, width: panelWidth - 110 } }).setOrigin(0, 0.5);
       row.on("pointerdown", () => this.chooseContactDoctrine(doctrine.id));
       row.on("pointerover", () => row.setFillStyle(0x244154, 1));
       row.on("pointerout", () => row.setFillStyle(0x132432, 0.96));
       this.contactPanel.add([row, copy]);
       return { row, copy, doctrine };
     });
-    this.contactNote = this.add.text(0, 220, "No reward · no correct answer · choice becomes colony history", { fontFamily: "system-ui, sans-serif", fontSize: "9px", color: "#93aeb7" }).setOrigin(0.5);
+    this.contactNote = this.add.text(0, 220, "No reward · no correct answer · choice becomes colony history", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#b0c8d1" }).setOrigin(0.5);
     this.contactPanel.add(this.contactNote);
     this.cinemaTop = this.add.rectangle(width / 2, 34, width, 68, 0x000000, 0.92).setDepth(1190).setVisible(false);
     this.cinemaBottom = this.add.rectangle(width / 2, height - 34, width, 68, 0x000000, 0.92).setDepth(1190).setVisible(false);
@@ -838,53 +1191,53 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#7ef0ff',
     }).setOrigin(0.5);
     const geContent = this.add.text(0, -40, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
       align: 'center', lineSpacing: 9,
     }).setOrigin(0.5);
     const geClose = this.add.text(0, 140, '[CLOSE: SPACE]', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0.5);
     this.gePanel.add([geBg, geTitle, geContent, geClose]);
     this.geTitle = geTitle; this.geContent = geContent; this.geClose = geClose;
 
     this.shopPanel = this.add.container(width / 2, height / 2).setDepth(1002).setScrollFactor(0).setVisible(false);
-    const shopBg = this.add.rectangle(0, 0, 480, 340, 0x070714, 0.95).setStrokeStyle(3, 0x9ddd72);
+    const shopBg = this.add.rectangle(0, 0, 480, 340, 0x070714, 0.95).setStrokeStyle(3, 0x67e1cd);
     const shopTitle = this.add.text(0, -134, "SUPPLY DEPOT", {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9ddd72',
     }).setOrigin(0.5);
     const shopContent = this.add.text(0, -40, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
       align: 'center', lineSpacing: 9,
     }).setOrigin(0.5);
     const shopClose = this.add.text(0, 140, '[CLOSE: SPACE]', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0.5);
     this.shopPanel.add([shopBg, shopTitle, shopContent, shopClose]);
     this.shopTitle = shopTitle; this.shopContent = shopContent; this.shopClose = shopClose;
 
     this.ranchPanel = this.add.container(width / 2, height / 2).setDepth(1002).setScrollFactor(0).setVisible(false);
-    const ranchBg = this.add.rectangle(0, 0, 480, 340, 0x070714, 0.95).setStrokeStyle(3, 0xd8a05a);
+    const ranchBg = this.add.rectangle(0, 0, 480, 340, 0x070714, 0.95).setStrokeStyle(3, 0x67e1cd);
     const ranchTitle = this.add.text(0, -134, "RANCH - STARDUST LIVESTOCK", {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
     }).setOrigin(0.5);
     const ranchContent = this.add.text(0, -40, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
       align: 'center', lineSpacing: 9,
     }).setOrigin(0.5);
     const ranchClose = this.add.text(0, 140, '[CLOSE: SPACE]', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0.5);
     this.ranchPanel.add([ranchBg, ranchTitle, ranchContent, ranchClose]);
     this.ranchTitle = ranchTitle; this.ranchContent = ranchContent; this.ranchClose = ranchClose;
 
     // storage chest panel (interior)
     this.chestPanel = this.add.container(width / 2, height / 2).setDepth(1003).setScrollFactor(0).setVisible(false);
-    const chestBg = this.add.rectangle(0, 0, 360, 300, 0x070714, 0.95).setStrokeStyle(3, 0xd8a05a);
+    const chestBg = this.add.rectangle(0, 0, 360, 300, 0x070714, 0.95).setStrokeStyle(3, 0x67e1cd);
     const chestTitle = this.add.text(0, -120, "HOME STORAGE", {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
     }).setOrigin(0.5);
     const chestContent = this.add.text(0, -20, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '8px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
       align: 'center', lineSpacing: 8,
     }).setOrigin(0.5);
     this.chestPanel.add([chestBg, chestTitle, chestContent]);
@@ -892,12 +1245,12 @@ class PlanetScene extends Phaser.Scene {
 
     // ── Recipe book (M4 kitchen) — [C] at the stove ──
     this.recipePanel = this.add.container(width / 2, height / 2).setDepth(1003).setScrollFactor(0).setVisible(false);
-    const recipeBg = this.add.rectangle(0, 0, 440, 360, 0x070714, 0.96).setStrokeStyle(3, 0xd8a05a);
+    const recipeBg = this.add.rectangle(0, 0, 440, 360, 0x070714, 0.96).setStrokeStyle(3, 0x67e1cd);
     const recipeTitle = this.add.text(0, -146, 'KITCHEN — RECIPE BOOK', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
     }).setOrigin(0.5);
     const recipeContent = this.add.text(0, -118, '', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '8px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#e8ecff',
       lineSpacing: 5,
     }).setOrigin(0.5, 0);
     this.recipePanel.add([recipeBg, recipeTitle, recipeContent]);
@@ -913,7 +1266,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#e8ecff', lineSpacing: 8,
     }).setOrigin(0.5, 0);
     const qClose = this.add.text(0, 168, '[Q] CLOSE', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0.5);
     this.questPanel.add([qBg, qTitle, qContent, qClose]);
     this.questContent = qContent;
@@ -927,7 +1280,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9dffec',
     }).setOrigin(0.5);
     const bkClose = this.add.text(0, 196, '[1-5] EQUIP    [SPACE/B] CLOSE', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0.5);
     this.backpackPanel.add([bkBg, bkTitle, bkClose]);
     this.backpackTitle = bkTitle;
@@ -937,12 +1290,12 @@ class PlanetScene extends Phaser.Scene {
     //    tap targets (mobile) AND 1-4 keys (desktop); _renderSmithy() fills the
     //    dynamic rows. U and the hub's SMITHY row both land here. ──
     this.smithyPanel = this.add.container(width / 2, height / 2).setDepth(1012).setScrollFactor(0).setVisible(false);
-    const smBg = this.add.rectangle(0, 0, 480, 420, 0x070714, 0.96).setStrokeStyle(3, 0xd8a05a);
+    const smBg = this.add.rectangle(0, 0, 480, 420, 0x070714, 0.96).setStrokeStyle(3, 0x67e1cd);
     const smTitle = this.add.text(0, -178, 'SMITHY - UPGRADE TOOLS', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#ffe9a0',
     }).setOrigin(0.5);
     const smClose = this.add.text(0, 196, '[1-4] UPGRADE    [SPACE/B] CLOSE', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0.5);
     this.smithyPanel.add([smBg, smTitle, smClose]);
     this.smithyTitle = smTitle;
@@ -959,7 +1312,7 @@ class PlanetScene extends Phaser.Scene {
       this._savedBlipShown = now;
       const { width } = this.game.config;
       const t = this.add.text(width - 14, 26, '💾 SAVED', {
-        fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8a90b0',
+        fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#b0c8d1',
         stroke: '#0a1020', strokeThickness: 3,
       }).setOrigin(1, 0.5).setDepth(1000).setAlpha(0);
       this.tweens.add({ targets: t, alpha: 0.9, duration: 400 });
@@ -971,6 +1324,48 @@ class PlanetScene extends Phaser.Scene {
   // Plaza transform (bunting, string lights, stage, food stalls), a visiting
   // crowd that only exists on festival days, festival music mood, a confetti
   // burst when the Earth Feast is served, and the afterglow line.
+  // ── SF51 'Companion Corridor' — the plaza terminal prop ──
+  // Slate console + live teal screen, drawn procedurally in-scene (Graphics +
+  // one ADD-blended cool pool) on a walkable-adjacent tile beside the bell
+  // tower. The glow joins glowRegistry AFTER create() — see the flush above.
+  _buildCorridorTerminal(d) {
+    const cx = d.x * T + T / 2, cy = d.y * T + T / 2;
+    const g = this.add.graphics();
+    // slate console shell (same hull palette family as the depot buildings)
+    g.fillStyle(0x1b2b33, 1);
+    g.fillRect(cx - 13, cy - 22, 26, 38);
+    // screen bezel + dark screen well + the live teal screen itself
+    g.fillStyle(0x39484f, 1);
+    g.fillRect(cx - 11, cy - 18, 22, 26);
+    g.fillStyle(0x0c1019, 1);
+    g.fillRect(cx - 9, cy - 16, 18, 14);
+    g.fillStyle(0x67e1cd, 0.9);
+    g.fillRect(cx - 8, cy - 15, 16, 12);
+    // amber feed accent + two slate feed rows (the agent day scrolling by)
+    g.fillStyle(0xf7d698, 0.75);
+    g.fillRect(cx - 8, cy - 13, 6, 1);
+    g.fillStyle(0x39484f, 1);
+    g.fillRect(cx - 1, cy - 13, 8, 1);
+    g.fillRect(cx - 8, cy - 10, 12, 1);
+    // keyboard strip + antenna stub so it reads as hardware, not a sticker
+    g.fillStyle(0x2a3a42, 1);
+    g.fillRect(cx - 7, cy + 8, 14, 8);
+    g.fillStyle(0x5a6a78, 1);
+    g.fillRect(cx + 10, cy - 24, 2, 4);
+    g.fillRect(cx + 11, cy - 26, 1, 2);
+    g.setDepth(d.y + 0.5);
+    this.world.add(g);
+    this.decorSprites.push({ img: g, d });
+    this.corridorTerminal = g;
+    // teal screen glow so the terminal reads LIVE at night (litWhen 'night')
+    const glow = this.add.image(cx, cy - 14, 'fx.pool_cool')
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(d.y + 0.6)
+      .setScale(0.75).setAlpha(0.3).setVisible(false);
+    glow.litWhen = 'night';
+    this.world.add(glow);
+    this.corridorTerminalGlow = glow;
+  }
+
   _buildFestivalPlaza() {
     const px = (tx) => tx * T + T / 2, py = (ty) => ty * T + T / 2;
     this.festivalDecor = [];
@@ -1039,13 +1434,16 @@ class PlanetScene extends Phaser.Scene {
   setFestivalPhase(phase) {
     if (!this.festivalDecor || phase === this._festivalPhase) return;
     this._festivalPhase = phase;
+    // ROADMAP A1 'The first bell': at festival dawn the old mission bell rings
+    // over the plaza — sfx, four yoyo swings of the bell sprite, and the toast.
+    if (phase === 'setup') this._ringBell();
     const on = phase !== 'none';
     for (const o of this.festivalDecor) o.setVisible(on);
     // festival music mood (brighter, faster + melody layer)
     if (window.SpaceFarmer && window.SpaceFarmer.music) window.SpaceFarmer.music.setMood(on ? 'festival' : null);
     // the "singer" on stage bobs while the feast is on
     if (this._festSingerTween) { this._festSingerTween.stop(); this._festSingerTween = null; }
-    if (on && this.festivalGuests) {
+    if (on && this.festivalGuests && !reducedMotion()) {
       const g = this.festivalGuests.find(x => x.singing);
       if (g) this._festSingerTween = this.tweens.add({
         targets: g.spr, y: g.baseY - 3, duration: 420, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
@@ -1054,6 +1452,86 @@ class PlanetScene extends Phaser.Scene {
     if (phase === 'afterglow') {
       this.showToast?.('The heart hummed clean tonight. Nobody talked about it. That\u2019s the point.', { duration: 5200, y: 120 });
     }
+    // SF36 — festival lamp bloom: while the festival is on, every colony lamp
+    // pulses warm amber (scale up to 1.35x its base, alpha up to min(1,
+    // base*1.6), 900ms yoyo, staggered index*80ms). Bloom only rescales /
+    // fades / tints the glows — it never forces a lamp visible, so the SF08
+    // day rule ("lamps hidden by day") stays true; when the phase returns to
+    // 'none' every tween stops and each glow hands back its stored base
+    // scale/alpha and its clear tint.
+    if (on) this._startLampBloom(); else this._stopLampBloom();
+  }
+
+  // ── SF36 — festival lamp bloom ─────────────────────────────────────────
+  // The colony lamps read as "any night" unless the festival lights them up.
+  // Helper scale factor keeps the bloom relative to the SF08 night look
+  // (lamps bloom bigger at night: 1.7x vs day 1.0x) instead of shrinking it.
+  _lampNightScale() { return this.isNight ? 1.7 : 1.0; }
+  _startLampBloom() {
+    if (!this.lampGlows || !this.lampGlows.length) return;
+    if (this._lampBloomTweens && this._lampBloomTweens.length) this._stopLampBloom();
+    // SF49: reduced motion keeps the festival bloom as a TINT-ONLY statement —
+    // every lamp glow still warms to amber so the plaza reads as lit, but no
+    // scale or alpha tween runs and every glow holds exactly its rest values.
+    if (reducedMotion()) {
+      this._lampBloomTweens = [];
+      this.lampGlows.forEach((l) => l.setTint(0xffd68a));
+      return;
+    }
+    this._lampBloomTweens = [];
+    this.lampGlows.forEach((l, i) => {
+      if (l._baseScale === undefined) l._baseScale = 1.0;
+      if (l._baseAlpha === undefined) l._baseAlpha = l.alpha;
+      const tw = this.tweens.add({
+        targets: l,
+        scale: l._baseScale * this._lampNightScale() * 1.35,
+        alpha: Math.min(1, l._baseAlpha * 1.6),
+        duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+        delay: i * 80,
+      });
+      l.setTint(0xffd68a);
+      this._lampBloomTweens.push(tw);
+    });
+  }
+  _stopLampBloom() {
+    if (!this.lampGlows) { this._lampBloomTweens = []; return; }
+    for (const tw of this._lampBloomTweens || []) { if (tw) tw.stop(); }
+    this._lampBloomTweens = [];
+    for (const l of this.lampGlows) {
+      this.tweens.killTweensOf(l);
+      l.setScale((l._baseScale === undefined ? l.scaleX : l._baseScale) * this._lampNightScale());
+      l.setAlpha(l._baseAlpha === undefined ? l.alpha : l._baseAlpha);
+      // SF29: PlanetScene keeps zero tint-clearing calls anywhere — hand the
+      // lamp back to its untinted look with the neutral white tint instead.
+      l.setTint(0xffffff);
+    }
+  }
+
+  // ── ROADMAP A1 'The first bell' ────────────────────────────────────────
+  // Festival dawn: the old mission bell rings over the plaza. The bell sprite
+  // swings ±6° with four yoyo swings, a chime plays, and one toast line marks
+  // the beat. Self-cleaning: tweens die + the bell resets to 0°.
+  _ringBell() {
+    const bt = this.bellTower;
+    if (!bt || !bt.active) return;
+    if (this.audio) this.audio.sfx('star', { volume: 0.5 });
+    this.tweens.killTweensOf(bt);
+    bt.setAngle(0);
+    // SF49: reduced motion skips the bell swing — the chime and toast still mark
+    // the beat.
+    if (reducedMotion()) { this.showToast('The old bell rings over the plaza.'); return; }
+    this.tweens.add({
+      targets: bt, angle: 6, duration: 170, yoyo: true, repeat: 3,
+      ease: 'Sine.easeInOut',
+      onComplete: () => bt.setAngle(0),
+    });
+    this.showToast('The old bell rings over the plaza.');
+  }
+
+  // SPACE near the tower → ONE lore line (never a signpost, never a menu).
+  _showBellLore() {
+    if (this.audio) this.audio.sfx('glow', { volume: 0.35 });
+    this.showToast('Cast before the colony, older than anyone remembers. It rings when the colony gathers.', { duration: 5200 });
   }
 
   // The climax beat: 3 Earth Feast Plates served → the plaza erupts.
@@ -1142,6 +1620,7 @@ rations, and your name on the manifest.
     if (this._prevQuestId && q.current !== this._prevQuestId) {
       const done = QUESTS[this._prevQuestId];
       if (done) this._questBanner('QUEST COMPLETE — ' + done.title, done.reward ? 'Reward: ' + rewardLine(done.reward) : 'The story moves on.');
+      this._popReward(this.playerSpr.x, this.playerSpr.y - 46, 'QUEST COMPLETE', '#f7d698');
       if (this.audio) this.audio.sfx('confirm');
       this._prevQuestId = q.current;
       if (this.showingQuests) this.refreshQuestPanel();
@@ -1164,6 +1643,49 @@ rations, and your name on the manifest.
     this.tweens.add({ targets: b, alpha: 0, duration: 700, delay: 3400, onComplete: () => b.destroy() });
   }
 
+  // [SF28] season banner — a felt year turn when the server calendar rolls over
+  // into a new season. First sync stays silent (this._shownSeason is undefined).
+  _seasonBanner(season) {
+    const { width, height } = this.game.config;
+    const SUBTITLES = [
+      'Thaw on the ridge — sow wheat and tomatoes.',   // SPRING
+      'Long light — berries and melons ripen.',        // SUMMER
+      'Harvest moon — peppers and wheat again.',       // FALL
+      'Cold stars — only glow-kelp grows now.',        // WINTER
+    ];
+    const name = SEASON_NAMES[season] || 'SPRING';
+    const sub = SUBTITLES[season] || SUBTITLES[0];
+    const c = this.add.container(width / 2, height / 2 - 60)
+      .setDepth(1500).setScrollFactor(0).setAlpha(0);
+    const plate = this.add.graphics();
+    plate.fillStyle(0x0c1019, 0.88);
+    plate.fillRoundedRect(-240, -56, 480, 112, 12);
+    plate.lineStyle(2, 0x67e1cd, 1);
+    plate.strokeRoundedRect(-240, -56, 480, 112, 12);
+    c.add(plate);
+    c.add(this.add.text(0, -26, `${name} HAS COME`, {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '24px', color: '#f7d698', align: 'center',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5));
+    c.add(this.add.text(0, 22, sub, {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '13px', color: '#e6f6f2', align: 'center',
+      stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5));
+    c.setVisible(false);
+    // defer the draw so brand-new container children settle before fading
+    this.time.delayedCall(30, () => {
+      c.setVisible(true);
+      if (this.audio) this.audio.sfx('star');
+      this.tweens.add({ targets: c, alpha: 1, duration: 400 });
+      this.tweens.add({
+        targets: c, alpha: 0, duration: 600, delay: 2600,
+        onComplete: () => c.destroy(),
+      });
+    });
+  }
+
   // ── P3: reflection & reward ─────────────────────────────────────────────
   // Milestone toasts (queued so a burst doesn't stack), the morning
   // day-summary card, and the New Game+ offer (arc-complete, first cycle).
@@ -1173,6 +1695,21 @@ rations, and your name on the manifest.
     this._pendingSummary = null;
     window.SpaceFarmer.onMilestone = (d) => this._queueMilestone(d);
     window.SpaceFarmer.onDaySummary = (d) => { this._pendingSummary = d; };
+    // [SF28] QA hook: raise the season banner manually (0..3)
+    window.SpaceFarmer.seasonBanner = (s) => this._seasonBanner(s);
+    // [SF30] QA hook: fire the water glint at a tile (dew motes rising)
+    window.SpaceFarmer.waterGlint = (x, y) => this._waterGlint(x, y);
+    // SF51 QA hook: open the Companion Corridor agent day screen from anywhere
+    window.SpaceFarmer.openCorridor = () => this.openCorridorPanel();
+    // [SF29] QA hook: re-grade the ground/flora palette for a season (0..3)
+    window.SpaceFarmer.setSeasonGrade = (s) => this.applySeasonGrade(s);
+    // [SF35] QA hook: how many stardust motes are drifting (≥ 30 live)
+    window.SpaceFarmer.stardustCount = () => (this.stardust ? this.stardust.length : 0);
+    // [SF37] QA hook: play the arrival flash on a live envoy (index, default 0)
+    window.SpaceFarmer.envoyArrival = (i = 0) => {
+      const list = this.alienSprites;
+      return this._envoyArrival(list && list[i] ? list[i] : null);
+    };
     // [N] — accept New Game+ when the arc-complete offer is up
     this.input.keyboard.on('keydown-N', () => {
       if (this._ngOffer) this._confirmNewGamePlus();
@@ -1220,12 +1757,27 @@ rations, and your name on the manifest.
     const fest = d.festival ? calendar.festivalForDay(d.day) : null;
     const head = `DAY ${d.day}${d.ngPlus ? ` · NG+${d.ngPlus}` : ''}${fest ? ` — ${fest.short}` : (d.festivalPhase === 'afterglow' ? ' — AFTERGLOW' : '')}`;
     const body = bits.length ? bits.join('   ') : 'A quiet day. The dome hums. Rest is also farming.';
+    // ROADMAP A3 — 'Daily rumor lines': one colony gossip line rides the tail
+    // of the morning card, in BOTH variants (ledgered and quiet). The pick is
+    // deterministic per day from the StoryBank (shared/story/rumors.js).
+    const rumor = 'Rumor: ' + story.rumors.rumorForDay(d.day);
     const { width } = this.game.config;
-    const card = this.add.text(width / 2, 108, head + '\n' + body, {
+    const card = this.add.text(width / 2, 108, head + '\n' + body + '\n' + rumor, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#cfe8ff',
       align: 'center', lineSpacing: 6, backgroundColor: '#0a0f1fee', padding: { x: 14, y: 8 },
       stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5).setDepth(1100).setAlpha(0);
+    // The rumor tail: italic-ish TEAL colony voice pinned to the bottom of the
+    // screen — slate card above it, gossip beneath it, both fading together.
+    const { height } = this.game.config;
+    const rumorLine = this.add.text(width / 2, height - 24, rumor, {
+      fontFamily: "'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px',
+      color: '#67e1cd', align: 'center',
+      backgroundColor: '#0a0f1fdd', padding: { x: 12, y: 4 },
+      stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(1100).setAlpha(0);
+    this.tweens.add({ targets: rumorLine, alpha: 1, duration: 500 });
+    this.tweens.add({ targets: rumorLine, alpha: 0, duration: 800, delay: 4300, onComplete: () => rumorLine.destroy() });
     this.tweens.add({ targets: card, alpha: 1, duration: 400 });
     this.tweens.add({ targets: card, alpha: 0, duration: 800, delay: 4200, onComplete: () => card.destroy() });
   }
@@ -1308,7 +1860,8 @@ rations, and your name on the manifest.
       this._ranchSellBusy = false;
       if (r && r.ok) {
         this.inventory[item] = (this.inventory[item] || 0) - (r.qty || 1);
-        if (this.audio) this.audio.sfx('star');
+        if (this.audio) this.audio.sfx('sell', { volume: 0.4 });   // SF25 coin ping
+        this._popReward(this.playerSpr.x, this.playerSpr.y - 40, `+${r.credits} CR`, '#f7d698');
         this.showToast(`Sold 1 ${item} for +${r.credits} CR.`);
       } else {
         this.showToast('Nothing sold — the ledger held tight.');
@@ -1468,7 +2021,7 @@ rations, and your name on the manifest.
     else if (d2 <= 3.5) spot = 'deep';
     if (!spot) {
       this._pingSpot(27, 22, 'STARDUST SHORE');
-      this.showToast('Cast at the stardust shore (or the deep drop) — a short walk east.');
+      this.showToast('No water here — fish from the lake shore (east).');
       return;
     }
     if (!net || !net.connected) { this.showToast('Offline — no fishing.'); return; }
@@ -1497,10 +2050,10 @@ rations, and your name on the manifest.
         if (window.SpaceFarmer?.music) window.SpaceFarmer.music.setActivity(null);
         if (!r) return;
         if (r.ok) {
-          if (this.audio) this.audio.sfx('space', { volume: 0.55 });
+          if (this.audio) this.audio.sfx('fish_catch', { volume: 0.45 });   // SF25 rising catch
           this._fishCatch(r.item, r.worth, `season ${this._seasonName()} night fish`);   // popup
         } else if (r.reason === 'nothing-biting') this.showToast('Nothing biting here at this time of year/day. Try a different spot, season, or come back at night.');
-        else if (r.reason === 'low-energy') this.showToast('Too tired to fish. Sleep to recover energy.');
+        else if (r.reason === 'low-energy') { if (this.audio) this.audio.sfx('tired', { volume: 0.45 }); this.showToast('Too tired to fish. Sleep to recover energy.'); }
       });
     });
   }
@@ -1536,6 +2089,8 @@ rations, and your name on the manifest.
     c.setScale(0.6);
     this.tweens.add({ targets: c, scale: 1, duration: 220, ease: 'Back.out' });
     this.time.delayedCall(2000, () => this.tweens.add({ targets: c, alpha: 0, y: height / 2 - 140, duration: 300, onComplete: () => c.destroy() }));
+    this._popReward(this.playerSpr.x, this.playerSpr.y - 40, `+1 ${label}`, '#6be7d0');
+    this._popReward(this.playerSpr.x + 14, this.playerSpr.y - 28, `+${worth} CR`, '#f7d698');
   }
   // per-frame: floating hint near EITHER fishing spot so it's discoverable
   _updateFishHint() {
@@ -1572,13 +2127,13 @@ rations, and your name on the manifest.
     const net = window.SpaceFarmer.net;
     if (d > 4) {
       this._pingSpot(this.mineX, this.mineY, 'ASTEROID VEIN');
-      this.showToast('Swing can only reach the vein — it sits at the farm\u2019s east edge.');
+      this.showToast('The ore vein is in the mine (south-west).');
       return;
     }
     if (!net || !net.connected) { this.showToast('Offline — no mining.'); return; }
     if (this.casting2) return;                    // one swing at a time (keep picking)
     this.casting2 = true;
-    if (this.audio) this.audio.sfx('space', { volume: 0.3 });
+    if (this.audio) this.audio.sfx('mine_hit', { volume: 0.45 });   // SF25 pick clack
     if (window.SpaceFarmer?.music) window.SpaceFarmer.music.setActivity('mining');
     const rx = this.mineX * T, ry = this.mineY * T;
     // a quick pickaxe swing flash on the rock
@@ -1590,11 +2145,13 @@ rations, and your name on the manifest.
       this.casting2 = false;
       if (r && r.broken && window.SpaceFarmer?.music) window.SpaceFarmer.music.setActivity(null);
       if (!r) return;
-      if (r.reason === 'low-energy') { this.showToast('Too tired to mine. Sleep to recover energy.'); return; }
+      if (r.reason === 'low-energy') { if (this.audio) this.audio.sfx('tired', { volume: 0.45 }); this.showToast('Too tired to mine. Sleep to recover energy.'); return; }
       if (r.broken) {
+        if (this.audio) this.audio.sfx('ore', { volume: 0.45 });   // SF25 vein collapse
         this._splash(rx, ry - 14, 0xd8a05a);         // rock collapses open
         this._showMineProgress(0, 0);
         if (r.item) this._oreCatch(r.item, r.worth, `broke through a ${r.max}-swing vein`);
+        this._popReward(rx, ry - 18, `+${r.worth} CR · ${String(r.item || 'ore').replace(/-/g, ' ')}`, '#f7d698');
       } else {
         this._showMineProgress(r.hp, r.max);        // chip + progress bar update
       }
@@ -1622,7 +2179,7 @@ rations, and your name on the manifest.
     const { width, height } = this.game.config;
     const label = item.replace(/-/g, ' ');
     const c = this.add.container(width / 2 - 90, height / 2 - 90).setDepth(999).setScrollFactor(0);
-    const panel = this.add.rectangle(0, 0, 340, 104, 0x101a26, 0.92).setStrokeStyle(2, 0xd8a05a);
+    const panel = this.add.rectangle(0, 0, 340, 104, 0x101a26, 0.92).setStrokeStyle(2, 0x67e1cd);
     const title = this.add.text(0, -32, 'MINED', { fontFamily: "system-ui,'Segoe UI'", fontSize: '13px', color: '#d8a05a' }).setOrigin(0.5);
     const oreTxt = this.add.text(0, -6, label, { fontFamily: "system-ui,'Segoe UI'", fontSize: '19px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
     const worthTxt = this.add.text(0, 20, `+${worth} CR ore to inventory`, { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#9ddd72' }).setOrigin(0.5);
@@ -1684,7 +2241,7 @@ rations, and your name on the manifest.
       const r = this.add.rectangle(x, 150, w, 26, 0x132432, 0.94)
         .setStrokeStyle(1, 0xd8a05a).setInteractive({ useHandCursor: true });
       const t = this.add.text(x, 150, label, {
-        fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#ffe9a0', stroke: '#000', strokeThickness: 2,
+        fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5);
       r.on('pointerdown', cb);
       this.recipePanel.add([r, t]);
@@ -1752,6 +2309,16 @@ rations, and your name on the manifest.
 
     // backdrop (full-viewport dim to mask the world behind)
     stage.add(this.add.rectangle(cx, cy, width, height, 0x000000, 0.82));
+    // QA 0904B.7: the room used to sit centred in a raw black void with stray
+    // asteroid sprites bleeding through the 82% dim. The interior now sits on
+    // a habitat hull: an opaque deck apron larger than the room (so black never
+    // touches the room edge), a teal hull ring stroke and an airlock collar at
+    // the door. Asteroid/world-only sprites are hidden on entry (enterInterior).
+    stage.add(this.add.rectangle(cx, cy, W + 140, H + 120, 0x0e1620, 1));      // dim deck apron
+    stage.add(this.add.rectangle(cx, cy, W + 140, H + 120)
+      .setStrokeStyle(2, 0x67e1cd, 0.55).setFillStyle(0x0e1620, 0.001));       // hull ring
+    stage.add(this.add.rectangle(cx + W / 2 - 30, cy + H / 2 - 24, 76, 54, 0x10161f, 1)
+      .setStrokeStyle(1, 0x6be7d0, 0.5));                                      // airlock collar
     // room shell — slate panelled wall (teal trim) + machined metal deck floor
     stage.add(this.add.image(cx, top + wallH / 2, tex('int.wall')).setScale(W / 96, wallH / 24));
     stage.add(this.add.image(cx, top + wallH + (H - wallH) / 2, tex('int.floor')).setScale(W / 96, (H - wallH) / 24));
@@ -1792,7 +2359,7 @@ rations, and your name on the manifest.
     room.door = { x: cx + W / 2 - 30, y: cy + H / 2 - 24 };
     room.points.push({ x: room.door.x, y: room.door.y, action: 'exit' });
     stage.add(this.add.text(cx + W / 2 - 30, cy + H / 2 - 58, 'DOOR', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', color: '#ffe9a0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5));
 
     // interior player (drawn inside the room)
@@ -1843,8 +2410,8 @@ rations, and your name on the manifest.
     const sign = (x, y, name) => {
       stage.add(this.add.image(x, y, 'int.signplate').setScale(1));
       stage.add(this.add.text(x - 2, y, name, {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', fontStyle: 'bold',
-        color: '#f2d9a2', stroke: '#061116', strokeThickness: 2,
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', fontStyle: 'bold',
+        color: '#f2d9a2', stroke: '#061116', strokeThickness: 3,
       }).setOrigin(0.5));
     };
     if (kind === 'home') {
@@ -1860,31 +2427,31 @@ rations, and your name on the manifest.
       putG(cx + 34, cy - H / 2 + 116, 'int.stool', 0.85);
       // stove (cook 2 crops → 1 cooked-food) — colony galley
       put(cx + W / 2 - 55, cy - H / 2 + 40, 'int.stove', 1, 'recipes');
-      label(cx + W / 2 - 55, cy - H / 2 + 6, 'STOVE (recipes)', '7px');
+      label(cx + W / 2 - 55, cy - H / 2 + 6, 'STOVE (recipes)', '10px');
       // chest (deposit/withdraw harvests) — colony cargo pod
       put(cx - W / 2 + 22, cy - 40, 'int.chest', 0.9, 'chest');
-      label(cx - W / 2 + 22, cy - 68, 'CHEST', '6px');
+      label(cx - W / 2 + 22, cy - 68, 'CHEST', '10px');
       // bed — your sleep spot (lower-left)
       put(cx - W / 2 + 65, cy + H / 2 - 55, 'int.bed', 1.1, 'sleep');
-      label(cx - W / 2 + 65, cy + H / 2 - 88, 'SLEEP (SPACE)', '8px');
+      label(cx - W / 2 + 65, cy + H / 2 - 88, 'SLEEP (SPACE)', '10px');
       // spouse: moves in when you marry (sits near the table)
       const spouse = this.add.image(cx + 95, cy + 42, 'player.front').setDepth(8);
       spouse.setVisible(false);
       stage.add(spouse);
       room.spouse = spouse; room.spouseBaseY = cy + 42;
       stage.add(this.add.text(cx + 95, cy + 14, '', {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#ffe9a0',
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe9a0',
       }).setOrigin(0.5));
       stage.add(this.add.text(cx, cy - H / 2 + 78, 'SLEEP IN YOUR BED (SPACE)', {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '8px', color: '#b8c0e0',
-        stroke: '#000', strokeThickness: 2,
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#b8c0e0',
+        stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5));
     } else if (kind === 'shop') {
       // GROCER layout: counter front-left, a stocked shelf WALL on the right,
       // produce crates fanning toward the door — reads as commerce, not storage.
       sign(cx - W / 2 + 55, cy - 82, 'SHOP');                 // lit sign over the counter
       put(cx - W / 2 + 55, cy - 40, 'int.counter', 1, 'shop');
-      label(cx - W / 2 + 55, cy - 68, 'COUNTER (BUY)', '6px');
+      label(cx - W / 2 + 55, cy - 68, 'COUNTER (BUY)', '10px');
       putG(cx + W / 2 - 46, cy - 52, 'int.shelf', 1.05);       // merchandise wall
       putG(cx + W / 2 - 58, cy + 26, 'int.chest', 0.85);       // overstock pod
       putG(cx - W / 2 + 24, cy + 30, 'int.chest', 0.8);        // produce crate
@@ -1895,7 +2462,7 @@ rations, and your name on the manifest.
       putG(cx - W / 2 + 118, cy - 74, 'int.barback', 1.0);      // bottle shelf behind the bar
       sign(cx - W / 2 + 118, cy - 108, 'TAVERN');               // lit sign over the bar
       put(cx - W / 2 + 118, cy - 40, 'int.counter', 1, 'talk_rhea'); // bar
-      label(cx - W / 2 + 118, cy - 96, 'BAR (RHEA)', '6px');
+      label(cx - W / 2 + 118, cy - 96, 'BAR (RHEA)', '10px');
       putG(cx - W / 2 + 86, cy - 14, 'int.stool', 0.9);
       putG(cx - W / 2 + 150, cy - 14, 'int.stool', 0.9);
       putG(cx - 52, cy + 38, 'int.table', 0.85);
@@ -1909,10 +2476,10 @@ rations, and your name on the manifest.
       // intake counter right — visibly distinct from the grocer's counter room.
       put(cx - W / 2 + 55, cy - 40, 'int.terminal', 1, 'exchange');
       sign(cx - W / 2 + 55, cy - 82, 'TRADE');               // lit sign over the terminal
-      label(cx - W / 2 + 55, cy - 68, 'TERMINAL (TRADE)', '6px');
+      label(cx - W / 2 + 55, cy - 68, 'TERMINAL (TRADE)', '10px');
       putG(cx + 10, cy - 6, 'int.holotable', 1.0);              // market board centrepiece
       put(cx + W / 2 - 55, cy - 44, 'int.counter', 0.95);       // intake counter
-      label(cx + W / 2 - 55, cy - 70, 'INTAKE', '6px');
+      label(cx + W / 2 - 55, cy - 70, 'INTAKE', '10px');
       putG(cx - W / 2 + 26, cy + 34, 'int.chest', 0.85);        // valuation crates
       putG(cx - W / 2 + 64, cy + 40, 'int.chest', 0.8);
     } else if (kind === 'ranch') {
@@ -1920,19 +2487,19 @@ rations, and your name on the manifest.
       // actual animals standing in them — the room cannot be mistaken for a shop.
       put(cx - W / 2 + 55, cy - 40, 'int.stall', 1, 'ranch');
       sign(cx - W / 2 + 55, cy - 82, 'RANCH');               // lit sign over the service stall
-      label(cx - W / 2 + 55, cy - 68, 'STALL (RANCH)', '6px');
+      label(cx - W / 2 + 55, cy - 68, 'STALL (RANCH)', '10px');
       putG(cx + W / 2 - 62, cy - 56, 'int.pen', 1.0);           // back pen
       putG(cx + W / 2 - 74, cy - 70, 'ranch.chicken', 0.8);     // pen occupant
       putG(cx + W / 2 - 34, cy - 66, 'ranch.sheep', 0.62);      // pen occupant
       putG(cx + 40, cy + 26, 'int.pen', 1.05);                  // front pen
       putG(cx + 40, cy + 8, 'ranch.cow', 0.8);                  // the cow
       putG(cx - W / 2 + 26, cy + 30, 'int.chest', 0.9);         // feed store
-      label(cx - W / 2 + 26, cy + 6, 'FEED', '6px');
+      label(cx - W / 2 + 26, cy + 6, 'FEED', '10px');
     } else if (kind === 'barracks') {
       // dormitory bunks — the villagers live here (rows of colony beds)
       sign(cx - W / 2 + 55, cy - 68, 'BUNKS');           // lit sign over the bunk row
       put(cx - W / 2 + 55, cy - 40, 'int.bed', 1);
-      label(cx - W / 2 + 55, cy - 68, 'BUNK', '6px');
+      label(cx - W / 2 + 55, cy - 68, 'BUNK', '10px');
       put(cx + W / 2 - 55, cy - 40, 'int.bed', 1);
       put(cx - W / 2 + 20, cy + 20, 'int.bed', 1);
       put(cx + W / 2 - 20, cy + 20, 'int.bed', 1);
@@ -1958,6 +2525,11 @@ rations, and your name on the manifest.
     this._intSpouseBaseY = room.spouseBaseY;
     this.intW = room.W; this.intH = room.H; this.intCx = room.cx; this.intCy = room.cy;
     this.world.setVisible(false);
+    // QA 0904B.7: world-only sprites (asteroid vein, deep drop rock) live
+    // outside the `world` container, so hiding the world doesn't hide them —
+    // they leaked into the interior void. Hide + restore on exit.
+    this._worldOnlySprites = [this.mineRock, this.deepDrop];
+    for (const s of this._worldOnlySprites) if (s) s.setVisible(false);
     room.stage.setVisible(true);
     // place player inside near the door
     this.intPlayer.setPosition(this.intDoor.x + 10, this.intDoor.y + 40);
@@ -1981,7 +2553,9 @@ rations, and your name on the manifest.
     if (!this.inInterior) return;
     this.inInterior = false;
     this.intStage.setVisible(false);
+    for (const s of (this._worldOnlySprites || [])) if (s) s.setVisible(true);
     this.world.setVisible(true);
+    if (this.audio) this.audio.sfx('door', { volume: 0.4 });   // SF25 door puff on the way out
     // back at the building door
     const act = this.intKind === 'home' ? 'sleep'
       : this.intKind === 'tavern' ? 'talk_rhea'
@@ -2061,7 +2635,7 @@ rations, and your name on the manifest.
       this.hub.confirm(this.hub.sel);
       return;
     }
-    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingBackpack || this.showingSmithy) {
+    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingBackpack || this.showingSmithy || this.showingCorridor) {
       this.closeAllPanels();
       return;
     }
@@ -2109,19 +2683,27 @@ rations, and your name on the manifest.
   //    rod never hijacks talking to an NPC. Field work (hoe/can/harvest) is
   //    handled inside handleTileAction; the shore tap refill lives in
   //    handleInteract. ──
+  // SF23: every dead-end now SAYS where to go instead of returning false
+  // silently (showToast rate-limits identical lines to once per 2s).
   _useEquippedTool() {
     const e = this.equipped;
-    if (!e) return false;
+    if (!e) return false;                       // hands do the interacting
     const px = this.playerSpr.x / T, py = this.playerSpr.y / T;
     if (e === 'rod') {
       const atShore = Math.hypot(px - 27, py - 22) <= 3.5 || Math.hypot(px - 38, py - 21) <= 3.5;
-      if (!atShore) return false;
+      if (!atShore) {
+        this.showToast('No water here — fish from the lake shore (east).');
+        return false;
+      }
       this._swingTool();
       this.fish();
       return true;
     }
     if (e === 'pickaxe') {
-      if (Math.hypot(px - this.mineX, py - this.mineY) > 4) return false;
+      if (Math.hypot(px - this.mineX, py - this.mineY) > 4) {
+        this.showToast('The ore vein is in the mine (south-west).');
+        return false;
+      }
       this._swingTool();
       this.mine();
       return true;
@@ -2131,6 +2713,17 @@ rations, and your name on the manifest.
 
   update(time) {
     const { width, height } = this.game.config;   // viewport in world coords (meteor/cloud spawn)
+    // ── SF30: living fields — every planted crop sways gently from its ROOT.
+    // Per-tile phase (position-hash) so neighbours never move in lockstep.
+    // SF49: reduced motion crops the sway amplitude to 0 — the field holds
+    // still; angle never changes.
+    if (this.farmTiles) {
+      const swayAmp = reducedMotion() ? 0 : 3;
+      for (const ft of this.farmTiles) {
+        if (!ft.cropSpr || !ft.cropSpr.active) continue;
+        ft.cropSpr.setAngle(Math.sin(time / 700 + (ft.x * 0.9 + ft.y * 1.7)) * swayAmp);
+      }
+    }
     // SF20: the context prompt chip (throttled ~8×/s) — shows what SPACE/A will
     // do at the resolved target, before the press lands.
     this._updateInteractPrompt(time);
@@ -2148,12 +2741,43 @@ rations, and your name on the manifest.
         this.playerRim.setAlpha(0.24 + 0.05 * Math.sin(time * 0.002));
       }
     }
+    // SF32 aurora undulation: each ribbon drifts on its own slow sine phase
+    // (y bounce + gentle scaleY breathing). Cheap transform-only animation.
+    // SF49: reduced motion pins both ribbons' transforms to their create-time
+    // values — no sine phase advances.
+    if (this.auroraOn && this.aurora && !reducedMotion()) {
+      const rt = time - (this.auroraTime || time);
+      this.aurora.forEach((g, gi) => {
+        g.setPosition(0, 6 + Math.sin(rt * 0.00035 + gi * 1.9) * 7);
+        g.setScale(1, 1 + 0.09 * Math.sin(rt * 0.00025 + gi * 2.6) + 0.09);
+      });
+    }
+    // SF35 stardust drift: every mote slides diagonally on its own velocity
+    // and wraps at the screen edges (dt from the frame clock; cheap alpha-only
+    // layer, no textures, so it never fights the HUD).
+    // SF49: reduced motion leaves every mote at its deterministic origin —
+    // positions are created from the LCG and then never move.
+    if (this.stardust && !reducedMotion()) {
+      const dtS = Math.min(time - (this._stardustLast || time), 50);
+      this._stardustLast = time;
+      for (const st of this.stardust) {
+        st.x += st._vx * dtS; st.y += st._vy * dtS;
+        if (st.x > width + 2) st.x = -2;
+        else if (st.x < -2) st.x = width + 2;
+        if (st.y > height + 2) st.y = -2;
+        else if (st.y < -2) st.y = height + 2;
+      }
+    }
     // parallax backdrop: locked to screen (single zoomed cam) + gentle drift
     {
       const cam = this.cam;
       const vw = this.bgW / ZOOM, vh = this.bgH / ZOOM;
       const cx = cam.scrollX + vw / 2, cy = cam.scrollY + vh / 2;
-      this.nebula.setPosition(cx + Math.sin(time * 0.00008) * 8, cy + Math.cos(time * 0.00006) * 6);
+      // SF49: reduced motion pins the nebula parallax drift to the exact
+      // camera-locked base position (the planets + sun/moon arc stay, so the
+      // day cycle keeps working — they are game-mechanic motion, not atmosphere).
+      this.nebula.setPosition(reducedMotion() ? cx : cx + Math.sin(time * 0.00008) * 8,
+        reducedMotion() ? cy : cy + Math.cos(time * 0.00006) * 6);
       this.planetSpr.setPosition(
         cx + (this.planetBase.x - this.bgW / 2) / ZOOM + Math.sin(time * 0.00015) * 4,
         cy + (this.planetBase.y - this.bgH / 2) / ZOOM
@@ -2237,9 +2861,13 @@ rations, and your name on the manifest.
       this.tickNpc(b, dt, time);
     }
     // ── Alien idle animation — bioluminescent envoys breathe and their aura
+    // SF22 — quest objective marker: chevron over the live target + edge arrow.
+    this._updateQuestMarkers(time);
+    // ── Alien idle animation — bioluminescent envoys breathe and their aura
     //    pulses on their own phase, so first contact reads as alive, not a sticker.
     if (this.alienSprites) {
       for (const a of this.alienSprites) {
+        if (a._arrival) continue;    // SF37 — an arrival tween owns alpha/scaleY right now
         const ph = (a.alienId || 'a').length * 1.7;
         a.y = (a._baseY || a.y) + Math.sin(time * 0.0012 + ph) * 2;
         if (a.setScale) a.setScale(0.9 + 0.02 * Math.sin(time * 0.0016 + ph));
@@ -2248,14 +2876,14 @@ rations, and your name on the manifest.
     }
     // ── Festival crowd idle sway — guests bob on their own phase (the singer
     //    keeps its dedicated tween), so the plaza reads as a living crowd.
-    if (this.festivalGuests && this._festActive()) {
+    if (this.festivalGuests && this._festActive() && !reducedMotion()) {
       for (const g of this.festivalGuests) {
         if (g.singing) continue;
         g.spr.y = g.baseY + Math.sin(time * 0.0016 + g.phase) * 2;
       }
     }
 
-    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack || this.showingSmithy) {
+    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor) {
       if (this.inAlienContact) {
         if (this._diaNPC && !this._diaDone) this.dialoguePortrait.setTexture("port." + this._diaNPC + "_" + (Math.floor(time / 70) % 3));
         if (this.contactPhase === "choice") {
@@ -2280,6 +2908,13 @@ rations, and your name on the manifest.
         this.updateNightOverlay();
         return;
       }
+      // SF51 'Companion Corridor': ESC/SPACE closes the live agent screen and
+      // tears down the SSE connection (es.close()) — the stream dies with the
+      // watcher, exactly like the server's res.on('close').
+      if (this.showingCorridor && (Phaser.Input.Keyboard.JustDown(this.escKey) || Phaser.Input.Keyboard.JustDown(this.spaceKey))) {
+        this.closeAllPanels();
+        this.updateHUD(); this.updateNightOverlay(); return;
+      }
       // propose / heart-event prompt keys while in normal NPC dialogue
       if (this.inDialogue) {
         if (Phaser.Input.Keyboard.JustDown(this.gKey)) this.handleGift(this.selectedNPC);
@@ -2288,7 +2923,7 @@ rations, and your name on the manifest.
         // EarthBound "blab" — the portrait's mouth opens/closes while the line
         // types out, and it gently bobs even when idle (never sits still)
         if (this._diaNPC) {
-          if (!this._diaDone) this.dialoguePortrait.setTexture(`port.${this._diaNPC}_${Math.floor(time / 55) % 3}`);
+          if (!this._diaDone && !this._diaFace) this.dialoguePortrait.setTexture(`port.${this._diaNPC}_${Math.floor(time / 55) % 3}`);
           this.dialoguePortrait.y = this._portraitBaseY + Math.sin(time / 280) * 2.5;
         }
         // space/a/e: finish the typewriter first, then close the box
@@ -2411,10 +3046,10 @@ rations, and your name on the manifest.
       if (this.intWindowGlow) {
         this.intWindowGlow.setAlpha(0.07 + 0.07 * Math.sin(time * 0.0016));
       }
-      if (this.intPlant && this._intPlantBaseY != null) {
+      if (this.intPlant && this._intPlantBaseY != null && !reducedMotion()) {
         this.intPlant.y = this._intPlantBaseY + Math.sin(time * 0.0024) * 1.6;
       }
-      if (this.intSpouse && this.intSpouse.visible && this._intSpouseBaseY != null) {
+      if (this.intSpouse && this.intSpouse.visible && this._intSpouseBaseY != null && !reducedMotion()) {
         this.intSpouse.y = this._intSpouseBaseY + Math.sin(time * 0.003) * 1.4;
       }
 
@@ -2449,6 +3084,14 @@ rations, and your name on the manifest.
     // MENU). The Grand Exchange is now a PLACE: walk to its building (or pick
     // the row in the hub) rather than a global hotkey.
     if (Phaser.Input.Keyboard.JustDown(this.mKey)) this.toggleHub();
+    // SF49: F9 flips reduced motion for this run (reads the two Motion sources:
+    // local key first, then prefers-reduced-motion). The scene reads the flag
+    // live at every motion site, so the flip takes effect on the next frame.
+    if (Phaser.Input.Keyboard.JustDown(this.rmKey)) {
+      const next = !reducedMotion();
+      setReducedMotion(next);
+      this.showToast(`Reduced motion ${next ? 'ON' : 'OFF'}`);
+    }
     if (Phaser.Input.Keyboard.JustDown(this.iKey)) this.openShop();
     if (Phaser.Input.Keyboard.JustDown(this.uKey)) this.openSmithy();
     if (Phaser.Input.Keyboard.JustDown(this.vKey)) this.claimFestival();
@@ -2609,7 +3252,11 @@ rations, and your name on the manifest.
       return;
     }
     const step = 2.7 * (dt / 16.67); // px this frame
-    const cur = b.path[0];
+    const cur = b.path && b.path[0];
+    if (!cur) { // walk state with no path left (dialogue/teleport cleared it) → idle, never crash update()
+      b.path = []; b.state = 'idle'; b.timer = 600 + Math.random() * 1200;
+      return;
+    }
     const dx = cur.x - b.x, dy = cur.y - b.y;
     const d = Math.hypot(dx, dy);
     if (d < step) {
@@ -2651,12 +3298,14 @@ rations, and your name on the manifest.
     if (spr._label) spr._label.setPosition(b.x, b.y - 16);
   }
 
-  // night overlay covers exactly the camera's current view (world coords)
+  // night overlay is screen-anchored (scrollFactor 0): keep it sized to the
+  // camera's current view (zoom can change) so it always covers the screen
   updateNightOverlay() {
-    if (!this.isNight) return;
+    if (!this.isNight || !this.nightOverlay?.active) return;
     const cam = this.cam;
-    this.nightOverlay.setPosition(cam.scrollX, cam.scrollY);
+    this.nightOverlay.setPosition(0, 0);
     this.nightOverlay.setSize(cam.width / cam.zoom, cam.height / cam.zoom);
+    this.nightOverlay.setVisible(true);
   }
 
   // ── Seasonal weather pass: tint the world + spawn particles ──
@@ -2712,8 +3361,8 @@ rations, and your name on the manifest.
         this.world.add(spr);
         const label = this.add.text(p.x, p.y - 40, p.name || 'Farmer', {
           fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
-          fontSize: '7px', color: '#ffd6f0',
-          stroke: '#000000', strokeThickness: 2,
+          fontSize: '11px', color: '#ffd6f0',
+          stroke: '#000000', strokeThickness: 3,
         }).setOrigin(0.5).setDepth(p.y + 2).setAlpha(0.9);
         this.world.add(label);
         rs = { spr, shadow, label };
@@ -2766,7 +3415,30 @@ rations, and your name on the manifest.
         if (typeof ps.waterLevel === 'number') this.waterLevel = ps.waterLevel;
         this.toolTiers = this.toolTiers || {};
         for (const [k, v] of schemaEntries(ps.tools)) this.toolTiers[k] = v;
-        this.contactChoices = Object.fromEntries(schemaEntries(ps.contactChoices));
+        // SF33: server-authoritative contact history. Drop stale local keys
+        // (they were never chosen by the colony) and re-apply the aftermath for
+        // any envoy whose doctrine changed — including choices recorded by
+        // ANOTHER player/agent, so they appear beside the envoy live.
+        const prevContacts = this.contactChoices || {};
+        const serverContacts = Object.fromEntries(schemaEntries(ps.contactChoices));
+        this.contactChoices = serverContacts;
+        for (const alien of ALIEN_DATA) {
+          const prev = prevContacts[alien.scenarioId];
+          const now = serverContacts[alien.scenarioId];
+          if (prev !== now) {
+            if (now !== undefined) {
+              this._applyContactAftermath(alien, false);
+            } else if (prev !== undefined) {
+              // stale/revoked choice: restore the default FIRST CONTACT marker
+              const sprite = this.alienSprites && this.alienSprites.find((item) => item.alienId === alien.id);
+              if (sprite) {
+                sprite._marker.setText("FIRST CONTACT").setColor("#f3d99b");
+                sprite._aura.setTint(0xffffff).setAlpha(0.3);
+                sprite._label.setText(alien.name);
+              }
+            }
+          }
+        }
         if (this.toolTiers.hoe) this.tool = this.toolTiers.hoe;   // keep the legacy alias honest
         // The browser is a camera: reconcile each farm tile from the server's
         // authoritative grid so rejected moves (e.g. low-energy till) and
@@ -2782,9 +3454,21 @@ rations, and your name on the manifest.
           // a REJOIN (mid-festival or during afterglow) shows the plaza/decor
           // immediately, not only after the next live transition message.
           // setFestivalPhase is a no-op when the phase hasn't changed.
-          if (net.room.state.festivalPhase) this.setFestivalPhase(net.room.state.festivalPhase);
+          // [_festHold] QA hook: screenshots + playtests can hold the room sync
+          // off while they drive festival phases themselves (mirrors _nightOverride).
+          if (!this._festHold && net.room.state.festivalPhase) this.setFestivalPhase(net.room.state.festivalPhase);
           if (net.room.state.season !== undefined) {
-            this.season = net.room.state.season;
+            const season = net.room.state.season;
+            // [SF28] the year turn is a felt event: the first sync lands silently
+            // (this._shownSeason starts undefined in create), but any later
+            // change of the server-authoritative season raises the banner.
+            if (this._shownSeason !== undefined && season !== this._shownSeason) {
+              this._seasonBanner(season);
+            }
+            this._shownSeason = season;
+            this.season = season;
+            // [SF42] _seasonHold: QA contact sheets drive the grade themselves
+            if (!this._seasonHold) this.applySeasonGrade(season);   // [SF29] re-grade ground + flora
             if (window.SpaceFarmer && window.SpaceFarmer.music) {
               window.SpaceFarmer.music.setSeason(this.season);  // seasonal soundtrack
             }
@@ -2812,7 +3496,7 @@ rations, and your name on the manifest.
     const equipLabel = this.equipped
       ? `${TOOL_TIER_NAME[this.toolTiers[this.equipped] || 'base']} ${(CLIENT_TOOLS[this.equipped] || {}).label || this.equipped}`
       : 'HANDS';
-    const tankPart = this.equipped === 'watering' ? `   💧 ${this.waterLevel}/${WATER_TANK_MAX}` : '';
+    const tankPart = this.equipped === 'watering' ? `   💧 ${this.waterLevel}/${this._tankMaxFor()}` : '';
     const crPart = typeof this.credits === 'number' ? `${this.credits} CR` : '— CR';
     this.hudText.setText(`${crPart}   ·   ${this.energy}/${this.staminaMax || 100} STAMINA   ·   ${seeds} SEEDS   ·   ${equipLabel}${tankPart}   ·   ${sName}${hudFest}`);
     if (this.energyFill) {
@@ -2854,6 +3538,95 @@ rations, and your name on the manifest.
     }
   }
 
+  // ── SF22 — quest objective marker ──
+  // Map the active quest's first unmet objective to ONE concrete in-world
+  // target: npc → the NPC's live errand-brain position; building/zone → its
+  // door tile or known spot; farm actions → the field centre. Any objective
+  // kind we can't place returns null explicitly so the marker hides instead
+  // of pointing somewhere wrong.
+  _questTarget() {
+    const net = window.SpaceFarmer.net;
+    const ps = net && net.connected ? (net.getPlayerState && net.getPlayerState()) : null;
+    if (!ps) return null;
+    let view = questView(ps, ps);
+    // Same fallback the quest chip uses: a fresh farmer whose server state
+    // hasn't stamped a current quest yet still gets the first chapter target.
+    if (!view.quest && !view.arcDone) {
+      view = questView({ current: QUEST_ORDER[0], completed: [], progress: {}, arcDone: false }, ps);
+    }
+    if (!view.quest) return null;
+    const qd = QUESTS[view.quest.id];
+    if (!qd || !qd.objectives || !qd.objectives.length) return null;
+    let obj = null;
+    for (let i = 0; i < qd.objectives.length; i++) {
+      const v = view.quest.objectives[i];
+      if (v && !v.met) { obj = qd.objectives[i]; break; }
+    }
+    if (!obj) return null;      // every objective met — nothing left to point at
+    const kind = obj.type || '';
+    if (kind === 'talk' && obj.npc) {
+      const b = this.npcBrains && this.npcBrains[obj.npc];
+      if (b) return { x: b.x, y: b.y, hint: `TALK TO ${(b.name || obj.npc).toUpperCase()}` };
+      return null;              // npc not on the planet — hide, don't guess
+    }
+    if (kind === 'plant' || kind === 'harvest') {
+      const tiles = this.farmTiles || [];
+      if (!tiles.length) return null;
+      let sx = 0, sy = 0;
+      for (const ft of tiles) { sx += ft.x * T + T / 2; sy += ft.y * T + T / 2; }
+      const n = tiles.length;
+      return { x: sx / n, y: sy / n, hint: kind === 'plant' ? 'PLANT IN THE FIELD' : 'HARVEST THE FIELD' };
+    }
+    const z = QUEST_ZONES[kind];
+    if (!z || typeof z.x !== 'number' || typeof z.y !== 'number') return null;
+    return { x: z.x * T + T / 2, y: z.y * T + T / 2, hint: (z.hint || '').toUpperCase() };
+  }
+
+  _updateQuestMarkers(time) {
+    if (!this.questMarker || !this.questEdgeArrow) return;
+    // hide while a dialogue/panel/interior is handled elsewhere (SF20 rule)
+    const hidden = !!(this.inAlienContact || this.eventQueue || this.inDialogue || this.showingGE ||
+      this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes ||
+      this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.inInterior);
+    const t = hidden ? null : this._questTarget();
+    if (!t) {
+      this.questMarker.setVisible(false);
+      this.questEdgeArrow.setVisible(false);
+      return;
+    }
+    // bob the chevron above the target — the SpaceshipScene GO-HERE rhythm
+    const bob = Math.sin(time * 0.005) * 5;
+    this.questMarker.setPosition(t.x + this.worldX, t.y + this.worldY - 22 + bob);
+    const label = this.questMarker.list[1];
+    if (label && label.text !== t.hint) label.setText(t.hint);
+    if (!this.questMarker.visible) this.questMarker.setVisible(true);
+    // edge compass arrow when the target sits outside the camera view
+    const wv = this.cam.worldView;
+    const sx = (t.x + this.worldX) - wv.x, sy = (t.y + this.worldY) - wv.y;
+    const onScreen = sx > -10 && sx < wv.width + 10 && sy > -10 && sy < wv.height + 10;
+    this.questEdgeArrow.setVisible(!onScreen);
+    if (!onScreen) this._drawQuestEdgeArrow(sx, sy, wv.width, wv.height);
+  }
+
+  // a fixed-on-screen triangle at the viewport edge pointing toward the
+  // objective — the same shape/geometry as SpaceshipScene's compass arrow,
+  // in amber so it reads as guidance, not decor
+  _drawQuestEdgeArrow(sx, sy, vw, vh) {
+    const g = this.questEdgeArrow;
+    g.clear();
+    const cx = vw / 2, cy = vh / 2;
+    const dx = sx - cx, dy = sy - cy;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) return;
+    const ang = Math.atan2(dy, dx);
+    const halfW = vw / 2 - 28, halfH = vh / 2 - 32;
+    const k = Math.min(Math.abs(halfW / dx), Math.abs(halfH / dy));
+    const px = cx + dx * k, py = cy + dy * k;
+    const L = 22, a1 = ang - 0.45, a2 = ang + 0.45;
+    g.fillStyle(0xf7d698, 1);
+    g.fillTriangle(px, py, px - L * Math.cos(a1), py - L * Math.sin(a1), px - L * Math.cos(a2), py - L * Math.sin(a2));
+  }
+
   // ── Authoritative tile sync: the browser is a camera. Any drift between the
   // optimistic local farm and the server's grid (a rejected till, another
   // farmer's action, a rejoin mid-season) is corrected here on every HUD tick.
@@ -2875,8 +3648,38 @@ rations, and your name on the manifest.
         local.state.crop = tile.crop || '';
         local.state.watered = watered;
         local.state.growth = tile.growthDay || 0;
-        local.img.setTexture((TILE_FOR_STATE[type] || (() => local.baseKey))() || local.baseKey || tex('farm.empty'));
+        const isCropStage = type === 'seeded' || type === 'growing' || type === 'mature';
+        local.img.setTexture(isCropStage ? (local.baseKey || tex('farm.empty'))
+          : (TILE_FOR_STATE[type] || (() => local.baseKey))(local.x, local.y)
+          || local.baseKey || tex('farm.empty'));
+        this._setCropSprite(local);
       }
+    }
+  }
+
+  // ── SF30: crop sprite — a planted crop is its own sprite layered ABOVE the
+  // plain soil tile, origin bottom-center (0.5, 1) so it sways from the ROOT
+  // rather than spinning around the tile centre. The tile image keeps its
+  // untilled/ridge base key; every state change (plant / grow / mature /
+  // harvest / server sync) refreshes the crop sprite, bare tiles destroy it.
+  _setCropSprite(ft) {
+    const s = ft.state;
+    const px = ft.x * T + T / 2, py = ft.y * T + T / 2;
+    const hasCrop = !!s.crop &&
+      (s.type === 'seeded' || s.type === 'growing' || s.type === 'mature');
+    if (!hasCrop) {
+      if (ft.cropSpr) { ft.cropSpr.destroy(); ft.cropSpr = null; }
+      return;
+    }
+    const key = tex('farm.' + s.type);
+    if (!ft.cropSpr || !ft.cropSpr.active) {
+      ft.cropSpr = this.add.image(px, py, key).setOrigin(0.5, 1);
+      ft.cropSpr.setDepth(Math.floor(py / T) + 0.06);
+      this.world.add(ft.cropSpr);
+      ft.cropSpr.y = py + ft.cropSpr.displayHeight / 2;   // no origin jump
+    } else if (ft.cropSpr.texture.key !== key) {
+      ft.cropSpr.setTexture(key);
+      ft.cropSpr.y = py + ft.cropSpr.displayHeight / 2;
     }
   }
 
@@ -2900,6 +3703,8 @@ rations, and your name on the manifest.
   }
 
   buildingAction(b) {
+    const _roomActs = { shop: 1, exchange: 1, ranch: 1, sleep: 1, talk_rhea: 1, barracks: 1 };
+    if (_roomActs[b.action] && this.audio) this.audio.sfx('door', { volume: 0.45 });   // SF25 airlock puff
     switch (b.action) {
       case 'shop': this.enterInterior('shop'); break;
       case 'exchange': this.enterInterior('exchange'); break;
@@ -2971,9 +3776,11 @@ rations, and your name on the manifest.
     if (net && net.connected) {
       const p = net.getPlayerState();
       if (p) this.energy = p.energy;
+      if (this.energy === 0) { if (this.audio) this.audio.sfx('tired', { volume: 0.45 }); }   // SF25 low-energy cue
       return;
     }
     this.energy = Math.max(0, this.energy - cost);
+    if (this.energy === 0) { if (this.audio) this.audio.sfx('tired', { volume: 0.45 }); }   // SF25 low-energy cue
   }
 
   // ── Interaction feedback: every hoe/thirst/seed/blade press leaves a visible
@@ -3005,6 +3812,25 @@ rations, and your name on the manifest.
         targets: m, y: py - 8 - Math.random() * 6, alpha: 0,
         duration: 420 + Math.random() * 160, ease: 'Sine.easeOut',
         onComplete: () => m.destroy(),
+      });
+    }
+  }
+
+  // ── SF30: watering feedback — three cyan dew motes rise off the tile and
+  // fade (add-blended, 500ms) then destroy. Called by the water action and the
+  // window.SpaceFarmer.waterGlint hook.
+  _waterGlint(tx, ty) {
+    const px = tx * T + T / 2, py = ty * T + T / 2;
+    if (!this.world) return;
+    const d = Math.floor(py / T) + 0.36;
+    for (let i = 0; i < 3; i++) {
+      const g = this.add.circle(px + (i - 1) * 4 + (Math.random() - 0.5) * 4,
+        py + (Math.random() - 0.5) * 5, 1.6 + Math.random() * 0.8, 0x8fe9ff, 0.95)
+        .setBlendMode(Phaser.BlendModes.ADD).setDepth(d);
+      this.world.add(g);
+      this.tweens.add({
+        targets: g, y: g.y - 10, alpha: 0, duration: 500, ease: 'Sine.easeOut',
+        onComplete: () => { g.destroy(); },
       });
     }
   }
@@ -3054,6 +3880,29 @@ rations, and your name on the manifest.
         return { kind: 'contact', label: `Meet ${alien.name}`, x: alien.x * T + T / 2, y: alien.y * T - 18, run: () => this.startAlienContact(alien) };
       }
     }
+    // SF51 'Companion Corridor': SPACE/A beside the terminal opens the live
+    // agent day screen (SF50's /api/spectate/stub route). Placed ahead of the
+    // bell lore so the tower prompt never hijacks it — its tile (36,42) is 2.2
+    // tiles from the tower anchor anyway.
+    const corridorDecor = (this.decorSprites || []).find(s => s.d && s.d.tex === 'bld.corridor_terminal');
+    if (corridorDecor && Math.hypot(corridorDecor.d.x - ptx, corridorDecor.d.y - pty) < 1.6) {
+      return {
+        kind: 'corridor', label: 'Watch the agent work',
+        x: corridorDecor.d.x * T + T / 2, y: corridorDecor.d.y * T - 30,
+        run: () => this.openCorridorPanel(),
+      };
+    }
+    // ROADMAP A1 'The first bell': SPACE near the old mission tower reads ONE
+    // lore line — placed ahead of building doors so the tower never hijacks a
+    // door prompt (its plaza tile is clear of every door anyway).
+    const bellDecor = (this.decorSprites || []).find(s => s.d && s.d.tex === 'bld.bell_tower');
+    if (bellDecor && Math.hypot(bellDecor.d.x - ptx, bellDecor.d.y - pty) < 1.6) {
+      return {
+        kind: 'lore', label: 'Read the bell tower',
+        x: bellDecor.d.x * T + T / 2, y: bellDecor.d.y * T - 28,
+        run: () => this._showBellLore(),
+      };
+    }
     // building doors — first within 2 tiles
     for (const b of BUILDINGS) {
       if (Math.hypot(b.door.x - ptx, b.door.y - pty) < 2) {
@@ -3091,7 +3940,7 @@ rations, and your name on the manifest.
     const s = ft.state;
     switch (s.type) {
       case 'empty':
-        if (this.equipped !== 'hoe') { this.showToast('Equip the HOE (backpack) to till the soil.'); break; }
+        if (this.equipped !== 'hoe') { this.showToast('Equip the HOE to till (M → Backpack).'); break; }
         const tillCost = this._energyCost('till', 5);   // hoe tier scales the till
         s.type = 'tilled';
         this._burnEnergy(tillCost);
@@ -3100,24 +3949,24 @@ rations, and your name on the manifest.
         if (netTill && netTill.connected) netTill.send('till', { tileX: s.x, tileY: s.y });
         this._swingTool();                            // the hoe swings as it tills
         this._tileFX(s.x, s.y, 'till');               // dust rings off the hoe
-        if (this.audio) this.audio.sfx('bounce');
+        if (this.audio) this.audio.sfx('till', { volume: 0.45 });   // SF25 soft till thunk
         this.showToast('Tilled the cosmic soil');
         break;
       case 'tilled':
         if (this.inventory.seeds > 0) {
           this._cropMenu(ft);          // pick which crop — shows seasons + regrow (accessibility)
         } else {
-          this.showToast('No seeds! Visit the Supply Depot');
+          this.showToast('Out of seeds — Supply Depot sells more.');
         }
         break;
       case 'seeded':
       case 'growing':
         if (this.equipped !== 'watering') {
-          this.showToast('Equip the WATERING CAN (backpack) to water crops.');
+          this.showToast('Equip the WATERING CAN to water (M → Backpack).');
           break;
         }
         if (this.waterLevel < WATER_USE_COST) {
-          this.showToast('The can is low — fill it at the shore tap.');
+          this.showToast('Can is empty — refill at the shore (east).');
           break;
         }
         if (!s.watered) {
@@ -3128,6 +3977,7 @@ rations, and your name on the manifest.
           if (net2 && net2.connected) net2.send('water', { tileX: s.x, tileY: s.y });
           this._swingTool();                          // the can tips as it waters
           this._tileFX(s.x, s.y, 'water');            // a dew-ring on the shoot
+          this._waterGlint(s.x, s.y);                 // SF30 dew motes rise + fade
           if (this.audio) this.audio.sfx('glow');
           this.showToast('Watered with stardust dew');
         } else {
@@ -3135,10 +3985,7 @@ rations, and your name on the manifest.
         }
         break;
       case 'mature': {
-        if (this.equipped !== '') {
-          this.showToast('Empty your hands (backpack) to harvest.');
-          break;
-        }
+        if (this.equipped !== '') { this.showToast('Wrong tool — empty your hands (backpack) to harvest.'); break; }
         const info = CROPS[s.crop] || { sellPrice: 20, label: 'crop' };
         const cs = CROP_SEASONS[s.crop] || { regrow: false };
         this.credits = (this.credits || 0) + info.sellPrice;
@@ -3146,18 +3993,21 @@ rations, and your name on the manifest.
         if (cs.regrow) {
           // continuous crop stays planted & regrows (needs watering again)
           s.type = 'growing'; s.growth = 0; s.watered = false; s.crop = s.crop;
-          ft.img.setTexture(tex('farm.growing'));
+          this._setCropSprite(ft);
           const tag = 'it will regrow';
           const net3 = window.SpaceFarmer.net;
           if (net3 && net3.connected) net3.send('harvest', { tileX: s.x, tileY: s.y });
           if (this.audio) this.audio.sfx('harvest', { volume: 0.4 });
+          this._popReward(s.x * T + T / 2, s.y * T - 6, `+${info.sellPrice} CR`, '#f7d698');
           this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR — ${tag}`);
         } else {
           s.type = 'empty'; s.crop = ''; s.growth = 0; s.watered = false;
           ft.img.setTexture(ft.baseKey || tex('farm.empty'));
+          this._setCropSprite(ft);   // SF30 the bare tile loses its crop sprite
           const net4 = window.SpaceFarmer.net;
           if (net4 && net4.connected) net4.send('harvest', { tileX: s.x, tileY: s.y });
           if (this.audio) this.audio.sfx('harvest', { volume: 0.4 });
+          this._popReward(s.x * T + T / 2, s.y * T - 6, `+${info.sellPrice} CR`, '#f7d698');
           this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR (one-time)`);
         }
         break;
@@ -3172,11 +4022,11 @@ rations, and your name on the manifest.
     s.crop = key; s.type = 'seeded';
     this.inventory.seeds--;
     this._burnEnergy(this._energyCost('plant', 5));        // planting is bare-handed
-    ft.img.setTexture(tex('farm.seeded'));
+    this._setCropSprite(ft);                               // SF30 crop sprite (sways)
     this._tileFX(s.x, s.y, 'plant');                   // a gold glint in the soil
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('plant', { tileX: s.x, tileY: s.y, crop: key });
-    if (this.audio) this.audio.sfx('confirm');
+    if (this.audio) this.audio.sfx('plant', { volume: 0.45 });   // SF25 soft seed tick
     this.showToast(`Planted ${c.label || key}`);
   }
 
@@ -3204,7 +4054,7 @@ rations, and your name on the manifest.
       const seasonTxt = this.add.text(panelW / 2 - 74, y - 6, cs.seasons.map(si => SEASON_NAMES[si][0]).join(' '),
         { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff' }).setOrigin(1, 0.5);
       const regrowTxt = this.add.text(panelW / 2 - 74, y + 10, cs.regrow ? '↻ regrows' : '① one harvest',
-        { fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: cs.regrow ? '#9ddd72' : '#ffdd44' }).setOrigin(1, 0.5);
+        { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: cs.regrow ? '#9ddd72' : '#ffdd44' }).setOrigin(1, 0.5);
       c.add([rowBg, label, seasonTxt, regrowTxt]);
       rowBg.on('pointerdown', () => { this._plantCrop(ft, key); c.destroy(); this.cropMenu = null; });
     });
@@ -3218,18 +4068,18 @@ rations, and your name on the manifest.
   advanceDay() {
     this.dayCount++;
     const growTo = this.greenhouseActive ? 2 : 3;
-    for (const ft of this.farmTiles) {
-      const s = ft.state;
-      if (s.type === 'seeded' && s.watered) {
-        s.growth++;
-        s.type = 'growing';
-        ft.img.setTexture(tex('farm.growing'));
-      } else if (s.type === 'growing' && s.watered) {
-        s.growth++;
-      }
-      if (s.growth >= growTo && s.crop) {
-        s.type = 'mature';
-        ft.img.setTexture(tex('farm.mature'));
+      for (const ft of this.farmTiles) {
+        const s = ft.state;
+        if (s.type === 'seeded' && s.watered) {
+          s.growth++;
+          s.type = 'growing';
+          this._setCropSprite(ft);
+        } else if (s.type === 'growing' && s.watered) {
+          s.growth++;
+        }
+        if (s.growth >= growTo && s.crop) {
+          s.type = 'mature';
+          this._setCropSprite(ft);
       }
       s.watered = false;
     }
@@ -3260,7 +4110,7 @@ rations, and your name on the manifest.
         this._codexGroup.add(this.add.text(-280, y, h.toUpperCase(), { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#ffd98a', fontStyle: 'bold' }));
         this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#c8d6ff', wordWrap: { enable: true, width: 560 }, lineSpacing: 4 }));
       });
-      this._codexGroup.add(this.add.text(0, H / 2 - 22, story.codex.closeHint, { fontFamily: 'system-ui, sans-serif', fontSize: '10px', color: '#8a90b0' }).setOrigin(0.5));
+      this._codexGroup.add(this.add.text(0, H / 2 - 22, story.codex.closeHint, { fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#f7d698' }).setOrigin(0.5));
     }
     this._codexGroup.setVisible(true);
   }
@@ -3306,6 +4156,21 @@ rations, and your name on the manifest.
   }
 
   // ── First contact: cinematic arrival, ambiguous council, persistent aftermath ──
+  // SF33: contact history lives on the server while connected (FarmRoom
+  // persists player.contactChoices). localStorage is read ONLY as an offline
+  // fallback, in one place, so a stale browser can never resurrect a doctrine
+  // the colony never chose and two browsers never disagree.
+  _loadOfflineContacts() {
+    const net = window.SpaceFarmer.net;
+    if (net && net.connected) return;   // server is authoritative when connected
+    this.contactChoices = {};
+    try {
+      const raw = localStorage.getItem('spacefarmer.firstContact');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) this.contactChoices = parsed;
+    } catch { this.contactChoices = {}; }
+  }
+
   startAlienContact(alien) {
     this.closeAllPanels();
     this.selectedAlien = alien; this.inAlienContact = true;
@@ -3345,17 +4210,21 @@ rations, and your name on the manifest.
     const alien = this.selectedAlien;
     const apply = () => {
       this.contactChoices[alien.scenarioId] = id;
-      // Offline fallback only; connected play is persisted by FarmRoom.
-      try { localStorage.setItem("spacefarmer.firstContact", JSON.stringify(this.contactChoices)); } catch {}
       this._applyContactAftermath(alien, true); this.contactPanel.setVisible(false); this.contactPhase = "aftermath";
     };
     const net = window.SpaceFarmer.net;
     if (net && net.connected) {
+      // SF33: connected play is persisted by FarmRoom — never write localStorage
+      // here, or a stale browser would resurrect a doctrine the colony revoked.
       net.request('contact', { alien: alien.id, doctrine: id }).then((result) => {
         if (result && result.ok) apply();
         else this.showToast('The council could not record that doctrine.');
       });
-    } else apply();
+    } else {
+      // Offline fallback only.
+      apply();
+      try { localStorage.setItem("spacefarmer.firstContact", JSON.stringify(this.contactChoices)); } catch {}
+    }
     const consequence = {
       cooperate: "A shared habitat is founded. Neither council has a final veto over what it becomes.",
       trade: "A customs exchange opens. Every promise now has a price, a deadline, and an interpreter.",
@@ -3373,13 +4242,94 @@ rations, and your name on the manifest.
     if (!doctrine || !sprite) return;
     sprite._marker.setText(doctrine.aftermath).setColor("#" + doctrine.color.toString(16).padStart(6, "0"));
     sprite._aura.setTint(doctrine.color).setAlpha(id === "colonize" ? 0.55 : 0.38);
+    sprite._auraBase = sprite._aura.alpha;   // SF37 — arrival fade-in target follows doctrine
     sprite._label.setText(alien.name + " · " + doctrine.label);
     if (announce) this.showToast(alien.name + ": " + doctrine.aftermath + " established");
+  }
+
+  // ── SF37 — envoy arrival flash ──
+  // Envoys landing LIVE (created after create()) pop in gently instead of
+  // hard-cutting into existence: the sprite fades in from alpha 0 / scaleY 0.2
+  // over 500ms (Back.Out), a teal ADD ring ripples outward from radius 4 → 40
+  // and fades over 700ms then destroys itself, and the aura fades in from 0 to
+  // its normal alpha. Envoys created during create() skip all of it — the
+  // scene opens calm (see this._createDone).
+  _envoyArrival(spr) {
+    if (!spr || !spr._aura || !this._createDone) return;   // skip initial-load envoys
+    const aura = spr._aura;
+    const auraBase = spr._auraBase !== undefined ? spr._auraBase : aura.alpha;
+    const fullScaleY = spr._baseScale !== undefined ? spr._baseScale : spr.scaleX;
+    spr._arrival = true;               // idle breathing hands alpha/scale to the tween
+    spr.setAlpha(0).setScale(spr.scaleX, 0.2);
+    this.tweens.add({
+      targets: spr,
+      scaleY: fullScaleY,
+      alpha: 1,
+      duration: 500,
+      ease: 'Back.Out',
+      onComplete: () => {
+        spr._arrival = false;          // idle breathing resumes
+        spr.setAlpha(1).setScale(spr.scaleX, fullScaleY);
+      },
+    });
+    aura.setAlpha(0);
+    this.tweens.add({
+      targets: aura,
+      alpha: auraBase,
+      duration: 700,
+      ease: 'Sine.Out',
+    });
+    const ring = this.add.circle(spr.x, spr.y, 4, 0x67e1cd, 0)
+      .setStrokeStyle(2, 0x67e1cd, 0.9)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(spr.depth + 0.1);
+    this.world.add(ring);
+    this.tweens.add({
+      targets: ring,
+      radius: 40,
+      alpha: 0,
+      duration: 700,
+      ease: 'Sine.Out',
+      onComplete: () => ring.destroy(),
+    });
   }
 
   // ── NPC dialogue & story events ──
   // Friendship is server-authoritative (see FarmRoom). Client calls the server
   // for talk/gift/propose, then renders responses + per-NPC heart-event cutscenes.
+
+  // [SF38] Mood tint for the dialogue portrait plate — the same plate no longer
+  // reads identical for a stranger and a soulmate: its stroke picks the MOOD_TIERS
+  // colour for this NPC's heart level (a faint wash of that colour fills the plate
+  // behind the portrait), and a tiny '♥ n' badge sits just under the plate.
+  _applyPortraitMood(h) {
+    const plate = this.dialog && this.dialog.portraitPlate;
+    if (!plate) return;
+    const tier = moodTierFor(h);
+    plate.setStrokeStyle(2, tier.color).setFillStyle(tier.color, 0.18);
+    // tiny amber heart-count badge under the portrait
+    if (!this._moodHeartText) {
+      this._moodHeartText = this.add.text(plate.x, plate.y + 32, '', {
+        fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#f7d698',
+        stroke: '#061015', strokeThickness: 2,
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
+    }
+    const t = this._moodHeartText;
+    t.setText(`♥ ${h}`).setVisible(true);
+    // keep it screen-fixed and above the portrait even if the panel rebuilt
+    if (t.scrollFactorX !== 0) t.setScrollFactor(0);
+  }
+
+  // [SF38] clear the heart badge and reset the plate to its neutral colony look
+  // when dialogue closes (called from closeAllPanels alongside dialog.hide()).
+  _clearPortraitMood() {
+    const plate = this.dialog && this.dialog.portraitPlate;
+    if (plate) plate.setStrokeStyle(2, 0x39c5bb).setFillStyle(0x141426, 1);
+    if (this._moodHeartText) {
+      this._moodHeartText.setText('').setVisible(false).setAlpha(1);
+    }
+    this._moodHeartText = null;
+  }
+
 
   heartbeat(npc) {
     // pull the latest authoritative friendship/marriage for this NPC
@@ -3413,6 +4363,8 @@ rations, and your name on the manifest.
     const { fp } = this.heartbeat(npc);
     const hearts = fp < 20 ? 1 : fp < 40 ? 2 : fp < 60 ? 3 : fp < 80 ? 4 : 5;
     const heartStr = '·'.repeat(5 - hearts) + '#'.repeat(hearts);
+    // [SF38] portrait plate mood: heart level decides plate tint + '♥ n' badge.
+    this._applyPortraitMood(moodHeartsFor(fp));
 
     // HATE band — deliberately gifting hated items or being cold doesn't drop
     // below 0, but very low friendship reads as "they're not sure about you".
@@ -3456,11 +4408,14 @@ rations, and your name on the manifest.
     this._speak(line, npc.id, { title, footer });
   }
 
-  // Harvest Moon-style heart event. Replays the NPC's `heart` cutscene lines in
-  // sequence — the emotional payoff at each friendship threshold (20/40/60/80/100).
+  // Harvest Moon-style heart event. Plays the NPC's per-threshold cutscene
+  // (dialogue.heartByThreshold[T]) when authored, else falls back to the single
+  // `heart` cutscene. Threshold 100 reads as a culmination; 20 the first crack.
   showHeartEvent(npc, threshold) {
     const data = npc.data || NPC_DATA[npc.id] || {};
-    const heartLines = data.dialogue?.heart || [
+    const heartLines =
+      data.dialogue?.heartByThreshold?.[threshold] ||
+      data.dialogue?.heart || [
       `[A quiet moment with ${npc.name}.]`,
       `[Your bond deepens.]`,
     ];
@@ -3529,7 +4484,7 @@ rations, and your name on the manifest.
           neutral: data.giftResponse || 'Oh, thank you.',
         };
         const arrows = { loved: '+15', liked: '+5', hated: '-8', neutral: '+2' };
-        this.showDialogueResponse(`${npc.name}: ${reactions[res.tier]}\n[${res.tier.toUpperCase()}] ${arrows[res.tier]} friendship → (${res.value}/100)`);
+        this.showDialogueResponse(`${npc.name}: ${reactions[res.tier]}\n[${res.tier.toUpperCase()}] ${arrows[res.tier]} friendship → (${res.value}/100)`, GIFT_FACE[res.tier] || 0);
         if (res.event) this.showHeartEvent(npc, res.event);
       });
     } else {
@@ -3543,7 +4498,7 @@ rations, and your name on the manifest.
         hated: data.hatedGiftResponse || "...this isn't really my thing.",
         neutral: data.giftResponse || 'Oh, thank you.',
       };
-      this.showDialogueResponse(`${npc.name}: ${reactions[tier]}\n[${tier.toUpperCase()}] → (${this.friendships[npc.id]}/100)`);
+      this.showDialogueResponse(`${npc.name}: ${reactions[tier]}\n[${tier.toUpperCase()}] → (${this.friendships[npc.id]}/100)`, GIFT_FACE[tier] || 0);
     }
   }
 
@@ -3568,15 +4523,16 @@ rations, and your name on the manifest.
     }
   }
 
-  showDialogueResponse(text) {
-    this._speak(text, this.selectedNPC && this.selectedNPC.id, { footer: '[SPACE to continue]' });
+  showDialogueResponse(text, face = 0) {
+    this._speak(text, this.selectedNPC && this.selectedNPC.id, { footer: '[SPACE to continue]', face });
     this.dialogueBox.setVisible(true);
     this.dialogueText.setVisible(true);
   }
 
   // ── panels ──
   closeAllPanels() {
-    if (this.dialog) this.dialog.hide();   // hides + resets dialogue box/scroll/collapse
+    if (this.dialog) { this.dialog.hide(); this._clearPortraitMood(); }
+    this._diaFace = 0;   // [SF46] reaction face ends with the line   // hides + resets dialogue box/scroll/collapse
     this._diaDone = true;
     this.gePanel.setVisible(false);
     if (this.contactPanel) this.contactPanel.setVisible(false);
@@ -3605,6 +4561,99 @@ rations, and your name on the manifest.
     this.selectedNPC = null;
     // resume any NPC brain paused for dialogue so errands continue
     for (const b of Object.values(this.npcBrains || {})) b.talking = false;
+    // SF51 'Companion Corridor': closing the screen tears down the SSE stream —
+    // the server stops pacing events when the watcher leaves (res.on('close')).
+    if (this.corridorEs && this.corridorEs.readyState !== 2) {
+      try { this.corridorEs.close(); } catch (err) { /* already dead */ }
+    }
+    if (this.corridorPanel) this.corridorPanel.setVisible(false);
+    this.showingCorridor = false;
+  }
+
+  // ── SF51 'Companion Corridor' — watch the stub agent's day live ──
+  // The screen-anchored panel streams SF50's /api/spectate/stub route through
+  // EventSource and keeps the last 12 lines, scrolling up: briefing cream,
+  // tool calls teal '▸ name(args)', results light slate, journal amber italic.
+  _buildCorridorPanel() {
+    const { width, height } = this.game.config;
+    // screen-anchored (scrollFactor 0, depth 1500): the feed is viewport
+    // furniture like every other panel — it never drifts with the camera.
+    this.corridorPanel = this.add.container(width / 2, height / 2).setScrollFactor(0).setDepth(1500).setVisible(false);
+    const plate = this.add.rectangle(0, 0, 500, 320, 0x0c1019, 0.92)
+      .setStrokeStyle(1, 0x67e1cd, 0.9).setScrollFactor(0);
+    const head = this.add.text(-240, -148, 'COMPANION CORRIDOR · live agent day', {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '13px', color: '#f6ecd4',
+    }).setOrigin(0, 0).setScrollFactor(0);
+    const foot = this.add.text(-240, 132, '[CLOSE: ESC]', {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#f7d698',
+    }).setOrigin(0, 0).setScrollFactor(0);
+    const empty = this.add.text(-240, -122, '(awaiting the stream…)', {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#7c95a6',
+    }).setOrigin(0, 0).setScrollFactor(0);
+    this.corridorPanel.add([plate, head, foot, empty]);
+    this.corridorHead = head; this.corridorFoot = foot; this.corridorEmpty = empty;
+    this.corridorLines = [];
+  }
+
+  _corridorAppend(kind, text) {
+    if (!this.corridorLines) return;
+    const styleBy = {
+      briefing: { color: '#f6ecd4', fontStyle: 'normal' },   // briefing cream
+      tool: { color: '#67e1cd', fontStyle: 'normal' },       // tool calls teal
+      result: { color: '#cfe6df', fontStyle: 'normal' },     // results light slate
+      journal: { color: '#f7d698', fontStyle: 'italic' },    // journal amber italic-ish
+    };
+    const st = styleBy[kind] || styleBy.result;
+    if (this.corridorEmpty && this.corridorEmpty.visible) this.corridorEmpty.setVisible(false);
+    const line = this.add.text(-240, 0, String(text || ''), {
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '10px',
+      color: st.color, fontStyle: st.fontStyle || 'normal',
+      wordWrap: { enable: true, width: 470 }, stroke: '#061015', strokeThickness: 2,
+    }).setOrigin(0, 0).setScrollFactor(0).setDepth(1501);
+    this.corridorLines.push(line);
+    if (this.corridorLines.length > 12) {
+      const old = this.corridorLines.shift();
+      if (old && old.destroy) old.destroy();
+    }
+    // scroll up: reposition the kept lines from the top of the feed downward
+    let y = -122;
+    for (const kept of this.corridorLines) { kept.setY(y); y += kept.height + 2; }
+  }
+
+  openCorridorPanel() {
+    if (this.showingCorridor) { this.closeAllPanels(); return; }
+    this.showingCorridor = true;
+    if (!this.corridorPanel) this._buildCorridorPanel();
+    this.corridorPanel.setVisible(true);
+    this._corridorAppend('briefing', 'COMPANION CORRIDOR — watching the agent season on B-612…');
+    try {
+      if (this.corridorEs && this.corridorEs.readyState !== 2) this.corridorEs.close();
+      this.corridorEs = new EventSource('/api/spectate/stub?days=1');
+      this.corridorEs.addEventListener('briefing', (e) => {
+        let d = {}; try { d = JSON.parse(e.data || '{}'); } catch {}
+        this._corridorAppend('briefing', `DAY ${d.day !== undefined ? d.day : '—'} — ${d.text || ''}`);
+      });
+      this.corridorEs.addEventListener('tool', (e) => {
+        let d = {}; try { d = JSON.parse(e.data || '{}'); } catch {}
+        const args = Object.keys(d.args || {}).map(k => d.args[k]).join(', ');
+        this._corridorAppend('tool', `▸ ${d.name || 'tool'}(${args})`);
+      });
+      this.corridorEs.addEventListener('result', (e) => {
+        let d = {}; try { d = JSON.parse(e.data || '{}'); } catch {}
+        this._corridorAppend('result', `${d.ok ? '✓' : '✗'} ${d.prose || ''}`);
+      });
+      this.corridorEs.addEventListener('journal', (e) => {
+        let d = {}; try { d = JSON.parse(e.data || '{}'); } catch {}
+        this._corridorAppend('journal', d.text || '');
+      });
+      this.corridorEs.addEventListener('done', (e) => {
+        let d = {}; try { d = JSON.parse(e.data || '{}'); } catch {}
+        this._corridorAppend('briefing', `season closed at day ${d.day !== undefined ? d.day : '—'}`);
+      });
+      this.corridorEs.onerror = () => { /* the stream dropped — the watcher left */ };
+    } catch (err) {
+      this._corridorAppend('result', `stream error: ${err.message}`);
+    }
   }
 
   openGrandExchange() {
@@ -3685,7 +4734,7 @@ rations, and your name on the manifest.
         ...f, fontSize: '11px', fontStyle: 'bold', color: '#e8ecff',
       }).setOrigin(0, 0.5);
       const sub = this.add.text(width / 2 - 18, y, d.sub || '', {
-        ...f, fontSize: '10px', color: '#8fb8ae',
+        ...f, fontSize: '11px', color: '#a9d9d0',
       }).setOrigin(1, 0.5);
       panel.add([rect, label, sub]);
       this[store].push(rect, label, sub);
@@ -3711,7 +4760,8 @@ rations, and your name on the manifest.
       this.geBusy = false;
       if (r && r.ok) {
         this.inventory[item] = (this.inventory[item] || 0) - (r.qty || 1);
-        if (this.audio) this.audio.sfx('star');
+        if (this.audio) this.audio.sfx('sell', { volume: 0.4 });   // SF25 coin ping
+        this._popReward(this.playerSpr.x, this.playerSpr.y - 40, `+${r.credits} CR`, '#f7d698');
         this.showToast(`Sold 1 ${item.replace(/-/g, ' ')} for +${r.credits} CR.`);
       } else if (r && r.reason === 'need-item') {
         this.showToast(`You no longer hold ${item}.`);
@@ -3761,6 +4811,12 @@ rations, and your name on the manifest.
     return `${TOOL_TIER_NAME[tier] || tier} ${(CLIENT_TOOLS[toolId] || {}).label || toolId}`;
   }
 
+  // tank capacity for the can the player owns (mirror of server tankMaxFor)
+  _tankMaxFor() {
+    const tier = (this.toolTiers && this.toolTiers.watering) || 'base';
+    return TANK_MAX_FOR[tier] || WATER_TANK_MAX;
+  }
+
   _openBackpackPanel() {
     this.showingBackpack = true;
     this.backpackPanel.setVisible(true);
@@ -3776,6 +4832,7 @@ rations, and your name on the manifest.
     const net = window.SpaceFarmer.net;
     if (!net || !net.connected) {
       this.equipped = tool;
+      if (this.audio) this.audio.sfx('equip', { volume: 0.45 });   // SF25 tool clack (offline)
       this.showToast(tool ? `Equipped ${CLIENT_TOOLS[tool].label}.` : 'Hands free — harvest & talk.');
       if (this.showingBackpack) this._renderBackpack();
       this.updateHUD();
@@ -3784,7 +4841,7 @@ rations, and your name on the manifest.
     net.request('equip', { tool }).then(r => {
       if (r && r.ok) {
         this.equipped = r.equipped || '';
-        if (this.audio) this.audio.sfx('confirm');
+        if (this.audio) this.audio.sfx('equip', { volume: 0.45 });   // SF25 tool clack
         this.showToast(this.equipped
           ? `Equipped ${(CLIENT_TOOLS[this.equipped] || {}).label}.`
           : 'Hands free — harvest & talk.');
@@ -3805,7 +4862,8 @@ rations, and your name on the manifest.
     if (this._fillBusy) return;
     const net = window.SpaceFarmer.net;
     if (!net || !net.connected) {
-      this.waterLevel = WATER_TANK_MAX;
+      this.waterLevel = this._tankMaxFor();
+      if (this.audio) this.audio.sfx('refill', { volume: 0.45 });   // SF25 glug (offline)
       this.showToast('The can glugs full of stardust dew.');
       if (this.showingBackpack) this._renderBackpack();
       this.updateHUD();
@@ -3815,13 +4873,13 @@ rations, and your name on the manifest.
     net.request('fillWater', {}).then(r => {
       this._fillBusy = false;
       if (r && r.ok) {
-        this.waterLevel = r.waterLevel ?? WATER_TANK_MAX;
-        if (this.audio) this.audio.sfx('water', { volume: 0.4 });
+        this.waterLevel = Math.min(r.waterLevel ?? this._tankMaxFor(), this._tankMaxFor());
+        if (this.audio) this.audio.sfx('refill', { volume: 0.45 });   // SF25 glug
         this.showToast('The can glugs full of stardust dew.');
       } else if (r && r.reason === 'already-full') {
         this.showToast('The can is already full.');
       } else {
-        this.showToast('No tap here.');
+        this.showToast('No tap here — the tap sits at the lake shore (east).');
       }
       if (this.showingBackpack) this._renderBackpack();
       this.updateHUD();
@@ -3839,7 +4897,7 @@ rations, and your name on the manifest.
     const defs = [
       { id: '',      label: 'HANDS',       sub: 'harvest ripe crops · talk to townsfolk' },
       { id: 'hoe',     label: 'HOE',            sub: 'till soil · ' + this._tierName('hoe') },
-      { id: 'watering',label: 'WATERING CAN',    sub: `water crops · ${this._tierName('watering')} · tank 💧 ${this.waterLevel}/${WATER_TANK_MAX}` },
+      { id: 'watering',label: 'WATERING CAN',    sub: `water crops · ${this._tierName('watering')} · tank 💧 ${this.waterLevel}/${this._tankMaxFor()}` },
       { id: 'pickaxe', label: 'PICKAXE',         sub: 'mine the asteroid vein · ' + this._tierName('pickaxe') },
       { id: 'rod',     label: 'FISHING ROD',     sub: 'cast the stardust shore · ' + this._tierName('rod') },
     ];
@@ -3855,7 +4913,7 @@ rations, and your name on the manifest.
         ...f, fontSize: '13px', color: cur ? '#9dffec' : '#e8ecff', fontStyle: 'bold',
       }).setOrigin(0, 0.5);
       const hint = this.add.text(-206, y + 12, d.sub, {
-        ...f, fontSize: '10px', color: '#8fb8ae',
+        ...f, fontSize: '11px', color: '#a9d9d0',
       }).setOrigin(0, 0.5);
       this.backpackPanel.add([rect, name, hint]);
       this._backpackDynamic.push(rect, name, hint);
@@ -3873,7 +4931,7 @@ rations, and your name on the manifest.
     };
     const parts = Object.keys(inv).filter(k => (inv[k] || 0) > 0).map(k => `${ITEM_LABEL[k] || k} ×${inv[k]}`);
     const cargo = this.add.text(0, 152, 'CARGO  ·  ' + (parts.length ? parts.join('   ') : 'empty — plant a field!'), {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#a9d9d0',
       align: 'center', wordWrap: { enable: true, width: 440 },
     }).setOrigin(0.5, 0);
     this.backpackPanel.add(cargo);
@@ -3916,12 +4974,12 @@ rations, and your name on the manifest.
         ...f, fontSize: '13px', color: '#ffe9a0', fontStyle: 'bold',
       }).setOrigin(0, 0.5);
       const hint = this.add.text(-206, y + 12,
-        next ? `${TOOL_TIER_NAME[cur]} → ${TOOL_TIER_NAME[next]}   ·   ${cost} CR` : `${TOOL_TIER_NAME[cur]} — the finest in the colony`,
+        next ? `${TOOL_TIER_NAME[cur]} → ${TOOL_TIER_NAME[next]}   ·   ${cost} CR${id === 'watering' ? `   ·   tank 💧 ${TANK_MAX_FOR[next]}` : ''}` : `${TOOL_TIER_NAME[cur]} — the finest in the colony${id === 'watering' ? `   ·   tank 💧 ${TANK_MAX_FOR[cur]}` : ''}`,
         { ...f, fontSize: '10px', color: next ? '#8fb8ae' : '#d8a05a' }).setOrigin(0, 0.5);
       this.smithyPanel.add([rect, name, hint]);
       this._smithyDynamic.push(rect, name, hint);
     });
-    const foot = this.add.text(0, 152, `${this.credits ?? '—'} CR on hand   ·   higher tiers cut energy costs`, {
+    const foot = this.add.text(0, 152, `${this.credits ?? '—'} CR on hand   ·   higher tiers cut energy costs and hold more water`, {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', color: '#ffe9a0',
       align: 'center',
     }).setOrigin(0.5);
@@ -3954,6 +5012,11 @@ rations, and your name on the manifest.
   }
 
   showToast(msg) {
+    // SF23: identical toasts rate-limit to once per 2s, so spamming the same
+    // dead-end press can't stack a wall of the same line.
+    const now = this.time.now;
+    if (this._toastKey === msg && now - (this._toastStamp || 0) < 2000) return;
+    this._toastKey = msg; this._toastStamp = now;
     const { width } = this.game.config;
     const toast = this.add.text(width / 2, 44, msg, {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#b8ffcf',
@@ -3966,21 +5029,102 @@ rations, and your name on the manifest.
     });
   }
 
+  // SF24: reward pops AT the spot of the action — bold 12px text rises ~24px
+  // and fades over ~900ms, with a small sparkle of fx.shadow glints (amber
+  // for credits, teal for items). Skipped when the tab is hidden; the text
+  // and the emitter are both destroyed on complete so repeated pops leak
+  // nothing (self-cleaning, like the splash pattern).
+  _popReward(x, y, text, color) {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const col = color || '#f7d698';
+    const txt = this.add.text(x, y, text, {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '12px', color: col, fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(1100);
+    const spark = this.add.particles(x, y, 'fx.shadow', {
+      speed: { min: 26, max: 58 },
+      lifespan: 520, quantity: 8, scale: { min: 0.16, max: 0.42 },
+      alpha: { start: 0.9, end: 0 }, angle: { min: 200, max: 340 },
+      gravityY: 42, blendMode: Phaser.BlendModes.ADD,
+      emitting: true, stopAfter: 8,
+    }).setDepth(1100);
+    this.tweens.add({
+      targets: txt, alpha: 0, y: y - 24, duration: 900, ease: 'Quad.out',
+      onComplete: () => { if (spark.active) spark.destroy(); txt.destroy(); },
+    });
+    this.time.delayedCall(1500, () => { if (spark.active) spark.destroy(); });
+  }
+
   // ── day/night visuals ──
   updateNightVisuals() {
     // Task 4: night goes properly dark (0.27 read as "dimmed day"), and the
     // additive light pools + window glows are what earns visibility back —
     // light becomes a game mechanic of the scene, not a tint.
-    this.nightOverlay.setAlpha(this.isNight ? 0.46 : 0);
+    // SF08: a deep-blue dusk that actually reads as night — 0.62 alpha over the
+    // darker 0x0e1838 tint pushes the planet past "dimmed day"; the additive
+    // lamp pools + window glows below earn visibility back as game mechanics.
+    // SF32 dusk/dawn: night eases IN and OUT over a 2500ms tween instead of a
+    // hard flip (final alpha identical to the old values: 0.62 night / 0 day),
+    // and a warm amber dusk wash breathes in mid-transition, then fades out.
+    // SF49: reduced motion shortens the flip to a 400ms ease so the sky change
+    // reads as a quick brightness shift, not a slow animated wash.
+    this.tweens.killTweensOf(this.nightOverlay);
+    this.tweens.killTweensOf(this.duskWash);
+    // SF52: on the CANVAS renderer Phaser draws Shape fill with `fillAlpha`,
+    // NOT GameObject.alpha — the old tween only moved `alpha`, so the fillAlpha
+    // stayed at its creation value (0) and night rendered as bright as day.
+    // Reset BOTH alphas and tween BOTH together so the wash darkens on WebGL
+    // and Canvas alike (final effective opacity 0.62 night / 0 day).
+    // effective opacity = alpha × fillAlpha, so fillAlpha goes to 1 (not 0.62)
+    // — tweening both to 0.62 rendered night at 0.38 and it read as day
+    const flipMs = reducedMotion() ? 400 : 2500;
+    const toNight = this.isNight ? 0.62 : 0;
+    this.nightOverlay.setAlpha(0);
+    this.nightOverlay.setFillStyle(0x0e1838, 0);
+    this.duskWash.setAlpha(0);
+    this.duskWash.setFillStyle(0xff9a5a, 0);
+    this.tweens.add({
+      targets: this.nightOverlay, alpha: toNight, fillAlpha: this.isNight ? 1 : 0,
+      duration: flipMs, ease: 'Sine.inOut',
+    });
+    // dusk wash: rise to the peak during the first half of the flip, fall away
+    // through the second half (both dawn and dusk read as a horizon glow)
+    this.duskWash.setVisible(true);
+    this.tweens.add({
+      targets: this.duskWash, alpha: { from: 0, to: 0.12 }, fillAlpha: { from: 0, to: 0.12 },
+      duration: flipMs / 2, ease: 'Sine.inOut',
+      onComplete: () => {
+        this.tweens.add({
+          targets: this.duskWash, alpha: { from: 0.12, to: 0 }, fillAlpha: { from: 0.12, to: 0 },
+          duration: flipMs / 2, ease: 'Sine.inOut',
+          onComplete: () => { this.duskWash.setVisible(false); this.duskWash.setAlpha(0); this.duskWash.setFillStyle(0xff9a5a, 0); },
+        });
+      },
+    });
     if (this.nightAmbient) this.nightAmbient.setVisible(this.isNight);
     if (this.vignette) this.vignette.setAlpha(this.isNight ? 0.34 : 0.8); // no double-dark corners
+    // SF32 aurora sky event: only at night, only on every third colony day.
+    // Deterministic on dayCount so playtests reproduce it exactly.
+    const auroraOn = this.isNight && (this.dayCount % 3) === 0;
+    if (this.aurora) {
+      this.auroraOn = auroraOn;
+      this.auroraTime = this.time.now;
+      for (const g of this.aurora) g.setVisible(auroraOn);
+    }
     // QA 0904 2.5: glows split by the learnable window-light rule — commercial
     // facades ('day' = open for business) glow through daylight, residential
     // ones ('night' = someone home) only after dark. Character rim-lights stay
     // night-only (they live in glowRegistry without a litWhen tag).
     for (const g of this.glowRegistry) g.setVisible(this.isNight ? g.litWhen !== 'day' : g.litWhen === 'day');
     for (const l of this.lampGlows) l.setVisible(this.isNight);
-    for (const l of this.lampGlows) l.setScale(this.isNight ? 1.7 : 1.0); // lamps bloom bigger at night
+    // SF08: lamps bloom bigger at night (1.7x vs day 1.0x) — SF36 keeps that
+    // factor relative to each glow's stored base scale so the festival bloom
+    // can pulse lamps without ever shrinking the night look below 1.7x.
+    for (const l of this.lampGlows) l.setScale(l._baseScale !== undefined ? l._baseScale * (this.isNight ? 1.7 : 1.0) : (this.isNight ? 1.7 : 1.0));
+    // SF36: a day/night flip mid-festival kills the bloom tweens' scale frames
+    // — restart the bloom at the new cycle scale instead of leaving it dead.
+    if (this._festActive && this._festActive()) { this._stopLampBloom(); this._startLampBloom(); }
     // Task 4: ground light pools switch with the day cycle; their flicker
     // animates in update() (alpha wobble) so lamps feel like real lamps.
     for (const p of this.lightPools) {
