@@ -373,6 +373,58 @@ function buildSmoothGround() {
 // Cool slate-grey metal plating with teal panel seams, warm underglow, and
 // subtle vent slots. Reads unmistakably as "built space" so the town separates
 // from the grassy farm — the Harvest-Moon "walk into town" moment.
+// ART-03: COLONY DECK — the plaza is laid as big 64px plates on a 128px
+// (4×4 tile) macro pattern, sliced into 16 tile variants picked by (x%4, y%4).
+// The old single tile carried a 16px seam grid + 4 rivets per tile, which
+// repeated across downtown as graph paper. Plates here are 2×2 tiles, seams
+// are rare, wear is hashed so no two plates read identical.
+const PLAZA_DECK = (() => {
+  const M = 128, PL = 64;
+  const P = { lit: [104, 113, 130], deep: [56, 64, 80] };
+  const h = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const macro = new Uint8ClampedArray(M * M * 4);
+  for (let y = 0; y < M; y++) for (let x = 0; x < M; x++) {
+    const plx = Math.floor(x / PL), ply = Math.floor(y / PL), lx = x % PL, ly = y % PL;
+    // each plate has its own tone + a soft brushed direction
+    const tone = 0.42 + (h(plx, ply) - 0.5) * 0.10;
+    const brushed = Math.sin((((plx + ply) & 1) ? lx : ly) * 0.9 + h(ply, plx) * 6) * 0.012;
+    const grain = Math.sin(x * 13.3 + y * 7.1) * Math.sin(x * 5.9 - y * 11.3) * 0.03;
+    // gentle bevel: plate edges catch light top-left, fall off bottom-right
+    const bev = (lx < 2 || ly < 2) ? -0.10 : (lx > PL - 3 || ly > PL - 3) ? 0.10 : 0;
+    let t = Math.max(0, Math.min(1, tone + brushed + grain + bev));
+    let r = P.lit[0] + (P.deep[0] - P.lit[0]) * t;
+    let g = P.lit[1] + (P.deep[1] - P.lit[1]) * t;
+    let b = P.lit[2] + (P.deep[2] - P.lit[2]) * t;
+    // groove between plates: dark with a 1px teal (0x67e1cd) catch-light
+    if (lx === 0 || ly === 0) { r = r * 0.45 + 8; g = g * 0.45 + 22; b = b * 0.45 + 34; }
+    if ((lx === 1 && ly > 0) || (ly === 1 && lx > 0)) { r = r * 0.8 + 103 * 0.2; g = g * 0.8 + 225 * 0.2; b = b * 0.8 + 205 * 0.2; }
+    // one bolt per plate corner, inset
+    const bx = (lx === 5 || lx === PL - 6), by = (ly === 5 || ly === PL - 6);
+    if (bx && by) { r = 150; g = 160; b = 172; }
+    // hashed wear: scuffs + boot-polish streaks, sparse
+    const w = h(x * 0.37 | 0, y * 0.37 | 0);
+    if (w > 0.985) { r *= 0.82; g *= 0.82; b *= 0.84; }
+    else if (w < 0.006) { r = Math.min(255, r + 18); g = Math.min(255, g + 18); b = Math.min(255, b + 20); }
+    // a cream service-lane inlay crosses the macro once (wayfinding stripe)
+    if (y >= 61 && y <= 62 && lx > 1) { r = r * 0.55 + 240 * 0.45; g = g * 0.55 + 228 * 0.45; b = b * 0.55 + 196 * 0.45; }
+    const i = (y * M + x) * 4;
+    macro[i] = r; macro[i + 1] = g; macro[i + 2] = b; macro[i + 3] = 255;
+  }
+  const tiles = [];
+  for (let ty = 0; ty < 4; ty++) for (let tx = 0; tx < 4; tx++) {
+    tiles.push(createSurface(32, 32, (s) => {
+      const ctx = s.canvas.getContext('2d');
+      const img = ctx.createImageData(32, 32);
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        const o = ((ty * 32 + y) * M + tx * 32 + x) * 4, i = (y * 32 + x) * 4;
+        img.data[i] = macro[o]; img.data[i + 1] = macro[o + 1]; img.data[i + 2] = macro[o + 2]; img.data[i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }));
+  }
+  return tiles;
+})();
+
 const COLONY_PLAZA = (() => {
   const S = 32, TAU = Math.PI * 2;
   const P = { lit: [108, 116, 132], base: [74, 82, 100], deep: [48, 56, 72] };
@@ -799,8 +851,9 @@ function scale2x(cv) {
   return createSurface(cv.width * 2, cv.height * 2, (s) => {
     const ctx = s.canvas.getContext('2d');
     if (typeof ctx.drawImage === 'function') {
-      // browser: smooth bilinear 2×
-      ctx.imageSmoothingEnabled = true;
+      // browser: nearest-neighbour 2× — bilinear here (then upscale2x again)
+      // smeared every 32px building into a blurry dark box at 128px.
+      ctx.imageSmoothingEnabled = false;
       ctx.drawImage(cv, 0, 0, cv.width, cv.height, 0, 0, cv.width * 2, cv.height * 2);
     } else {
       // headless stub (tests): nearest-neighbour pixel scale, preserving alpha
@@ -1214,6 +1267,21 @@ const blobs = [
     { x: 120, y: 170, r: 55, c: [120, 160, 170] },  // aqua underglow
     { x: 90, y: 130, r: 40, c: [160, 135, 180] },   // core lavender bump
   ];
+  // ART-02 — the base was NOT periodic in y (r = 14 + y*0.03), so the top/bottom
+  // seam of the tiled backdrop jumped by ~8 luminance on the first screen a
+  // player sees. The base is now a constant deep-space bed plus a sinusoidal
+  // ripple whose period (size/2) divides `size` exactly — periodic in y and
+  // constant in x, so tiling stays seamless on both axes.
+  const ripple = (y) => Math.sin((y / size) * Math.PI * 4) * 2;
+  // Wrapped dust lanes — faint sinusoidal wisps whose periods divide `size` and
+  // whose thickness fades toroidally, so lanes bend through BOTH edges instead
+  // of clipping into a visible seam row/column.
+  const lanes = [
+    { cy: 60, amp: 22, per: 128, th: 26, a: 0.10, c: [120, 150, 165] },  // teal-slate wisp
+    { cy: 158, amp: 18, per: 64, th: 22, a: 0.08, c: [150, 122, 152] },  // lavender dust
+    { cy: 210, amp: 26, per: 128, th: 18, a: 0.09, c: [196, 158, 122] }, // warm ember dust
+  ];
+  const wrap = (v) => Math.min(Math.abs(v), size - Math.abs(v));
   // deterministic star field (seeded — identical in browser/headless)
   let seed = 987654321;
   const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
@@ -1222,15 +1290,33 @@ const blobs = [
     const bright = rnd() < 0.18;
     stars.push({ x: Math.floor(rnd() * size), y: Math.floor(rnd() * size), b: bright });
   }
+  // ART-02 extra field: ~60 wrapped 1px colony star points in cream/teal so the
+  // backdrop reads as a lived-in sky. Coordinates are stored wrapped (mod size);
+  // each point writes exactly one pixel, so tiling never clips a star.
+  let seed2 = 424242101;
+  const rnd2 = () => (seed2 = (seed2 * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const dustStars = [];
+  for (let i = 0; i < 60; i++) {
+    const cream = rnd2() < 0.45;
+    dustStars.push({
+      x: Math.floor(rnd2() * size) % size, y: Math.floor(rnd2() * size) % size,
+      c: cream ? [247, 214, 152] : [103, 231, 205], a: cream ? 120 : 90,
+    });
+  }
   const fill = (x, y) => {
-    let r = 14 + y * 0.03, g = 12 + y * 0.025, b = 26 + y * 0.04;
+    let r = 16 + ripple(y), g = 14 + ripple(y) * 0.8, b = 28 + ripple(y) * 1.4;
     for (const bl of blobs) {
       // toroidal distance so the texture wraps seamlessly on BOTH axes when
       // tiled 3×3 — the blobs bend through the edges instead of clipping
-      const dx = Math.min(Math.abs(x - bl.x), size - Math.abs(x - bl.x));
-      const dy = Math.min(Math.abs(y - bl.y), size - Math.abs(y - bl.y));
+      const dx = wrap(x - bl.x), dy = wrap(y - bl.y);
       const d = Math.hypot(dx, dy);
       if (d < bl.r) { const t = Math.pow(1 - d / bl.r, 1.35) * 0.55; r += bl.c[0] * t; g += bl.c[1] * t; b += bl.c[2] * t; }
+    }
+    for (const ln of lanes) {
+      const py = ln.cy + ln.amp * Math.sin((x / ln.per) * Math.PI * 2);
+      const dy = wrap(y - py);
+      const t = Math.max(0, 1 - dy / ln.th) * ln.a;
+      if (t > 0) { r += ln.c[0] * t; g += ln.c[1] * t; b += ln.c[2] * t; }
     }
     return [r, g, b];
   };
@@ -1243,22 +1329,30 @@ const blobs = [
       const i = (y * size + x) * 4;
       img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
     }
-    // star specks (additive)
+    // star specks (additive, toroidally wrapped so tiles never clip a star)
+    const addStar = (idx, dr, dg, db) => {
+      const j = idx * 4;
+      img.data[j] = Math.min(255, img.data[j] + dr);
+      img.data[j + 1] = Math.min(255, img.data[j + 1] + dg);
+      img.data[j + 2] = Math.min(255, img.data[j + 2] + db);
+    };
     for (const st of stars) {
       const base = st.b ? 235 : 150;
-      const i = (st.y * size + st.x) * 4;
-      img.data[i] = Math.min(255, img.data[i] + base);
-      img.data[i + 1] = Math.min(255, img.data[i + 1] + base);
-      img.data[i + 2] = Math.min(255, img.data[i + 2] + base + 30);
+      addStar(st.y * size + st.x, base, base, base + 30);
       if (st.b) { // bright stars get a soft cross
-        const jx = (st.y * size + st.x + 1) * 4, jx2 = (st.y * size + st.x - 1) * 4;
-        const jy = (((st.y + 1) % size) * size + st.x) * 4, jy2 = (((st.y - 1 + size) % size) * size + st.x) * 4;
-        for (const j of [jx, jx2, jy, jy2]) {
-          img.data[j] = Math.min(255, img.data[j] + 70);
-          img.data[j + 1] = Math.min(255, img.data[j + 1] + 70);
-          img.data[j + 2] = Math.min(255, img.data[j + 2] + 90);
-        }
+        const jx = st.y * size + (st.x + 1) % size, jx2 = st.y * size + (st.x + size - 1) % size;
+        const jy = ((st.y + 1) % size) * size + st.x, jy2 = ((st.y + size - 1) % size) * size + st.x;
+        for (const j of [jx, jx2, jy, jy2]) addStar(j, 70, 70, 90);
       }
+    }
+    // ART-02 colony dust-stars: cream/teal 1px points, blended by alpha so they
+    // sit behind the bright seeded field
+    for (const ds of dustStars) {
+      const j = (ds.y * size + ds.x) * 4;
+      const da = ds.a / 255, oa = da + 1 * (1 - da);
+      img.data[j] = (ds.c[0] * da + img.data[j] * 1 * (1 - da)) / oa | 0;
+      img.data[j + 1] = (ds.c[1] * da + img.data[j + 1] * 1 * (1 - da)) / oa | 0;
+      img.data[j + 2] = (ds.c[2] * da + img.data[j + 2] * 1 * (1 - da)) / oa | 0;
     }
     if (isBrowser) ctx.putImageData(img, 0, 0);
     else ctx.putImageData(img, 0, 0); // TestCtx stores data either way
@@ -2300,6 +2394,32 @@ const BLD_BELL_TOWER = scale2x(makePaint32((P) => {
 // slate console shell with a live teal screen, amber feed accent and an
 // antenna stub, drawn on the same 32px paint surface as the bell tower so it
 // reads as colony hardware, not a fantasy prop.
+// ART-04: night window glows for the "someone is home" buildings that had none.
+// Derived from the sprite's OWN lit pixels (windows, sign, door strip), so the
+// glow always sits exactly on the art — never a floating blob.
+function windowGlowFrom(base, minLum = 150) {
+  return createSurface(base.width, base.height, (s) => {
+    const ctx = s.canvas.getContext('2d');
+    const img = ctx.createImageData(base.width, base.height), d = img.data;
+    for (let y = 0; y < base.height; y++) for (let x = 0; x < base.width; x++) {
+      const p = px(base, x, y);
+      if (p[3] < 200) continue;
+      const L = 0.3 * p[0] + 0.59 * p[1] + 0.11 * p[2];
+      if (L < minLum) continue;
+      const k = Math.min(1, (L - minLum) / 70 + 0.35), i = (y * base.width + x) * 4;
+      // warm the core toward colony amber #f7d698, keep teal accents teal
+      const teal = p[1] > p[0] + 30;
+      d[i] = teal ? p[0] : Math.min(255, (p[0] + 247) / 2);
+      d[i + 1] = teal ? Math.min(255, p[1] + 20) : Math.min(255, (p[1] + 214) / 2);
+      d[i + 2] = teal ? Math.min(255, p[2] + 20) : Math.min(255, (p[2] + 152) / 2);
+      d[i + 3] = (255 * k) | 0;
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+}
+const BLD_BARN_GLOW = windowGlowFrom(BLD_BARN, 140);
+const BLD_BARRACKS_GLOW = windowGlowFrom(BLD_BARRACKS, 165);
+
 const BLD_CORRIDOR_TERMINAL = scale2x(makePaint32((P) => {
   P.ell(16, 30, 8, 2.0, [30, 40, 56], [22, 30, 44]);              // ground shadow
   P.box(8, 8, 26, 22, 3, [44, 56, 74], [26, 34, 50]);             // slate console hull
@@ -2646,27 +2766,18 @@ for (const [id, col] of Object.entries(NPC_COLORS)) {
 // world renders as rich high-res art (no 2px chunkiness), matching the modern
 // painterly direction. Screen-space fx/portraits are left untouched.
 function upscale2x(src) {
-  // SMOOTH 2x UPSCALE (bilinear): samples each output pixel's color from its
-  // 2x2 source neighborhood with fractional weights, so edges stay soft and
-  // painterly instead of hard 2px blocks. Kills the CRT/grid look; preserves
-  // the original palette hues. Works headless (via _ctx.data) and in browser.
+  // CRISP 2x UPSCALE (nearest-neighbour). Bilinear here stacked on scale2x's
+  // pass blurred buildings/decor into soft dark boxes; pixel-doubling keeps
+  // the authored edges, matching the crisp envoy/character sprites.
   const w = src.width, h = src.height, W = w * 2, H = h * 2;
   return createSurface(W, H, (s) => {
     const ctx = s.canvas.getContext('2d');
     const img = ctx.createImageData(W, H);
     for (let y = 0; y < H; y++) {
-      const sy = (y - 0.5) / 2, y0 = Math.max(0, Math.floor(sy)), y1 = Math.min(h - 1, y0 + 1);
-      const fy = Math.max(0, Math.min(1, sy - y0));
       for (let x = 0; x < W; x++) {
-        const sx = (x - 0.5) / 2, x0 = Math.max(0, Math.floor(sx)), x1 = Math.min(w - 1, x0 + 1);
-        const fx = Math.max(0, Math.min(1, sx - x0));
-        const A = px(src, x0, y0), B2 = px(src, x1, y0), C2 = px(src, x0, y1), Dd = px(src, x1, y1);
+        const p = px(src, x >> 1, y >> 1);
         const o = (y * W + x) * 4;
-        for (let k = 0; k < 4; k++) {
-          const top = A[k] * (1 - fx) + B2[k] * fx;
-          const bot = C2[k] * (1 - fx) + Dd[k] * fx;
-          img.data[o + k] = (top * (1 - fy) + bot * fy) | 0;
-        }
+        img.data[o] = p[0]; img.data[o + 1] = p[1]; img.data[o + 2] = p[2]; img.data[o + 3] = p[3];
       }
     }
     ctx.putImageData(img, 0, 0);
@@ -2821,6 +2932,9 @@ const TEXTURES = {
   'decor.colony_holosign': COLONY_HOLOSIGN,
   // colony plaza decking (town walkable street)
   'tile.plaza': COLONY_PLAZA,
+  ...Object.fromEntries(PLAZA_DECK.map((c, i) => [`tile.plaza_deck${i}`, c])),
+  'bld.barn_glow': BLD_BARN_GLOW,
+  'bld.barracks_glow': BLD_BARRACKS_GLOW,
   // buildings
   'bld.house': houseSprite,
   'bld.house_glow': houseGlowSprite,

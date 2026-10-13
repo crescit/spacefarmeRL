@@ -142,13 +142,13 @@ export const BUILDINGS = [
     label: 'GRAND EXCHANGE', action: 'exchange',
   },
   {
-    key: 'barracks', tex: 'bld.barracks',
+    key: 'barracks', tex: 'bld.barracks', glow: 'bld.barracks_glow',
     x: 28, y: 40, w: 4, h: 4,
     door: { x: 28, y: 44 },
     label: 'COLONY BARRACKS', action: 'barracks',
   },
   {
-    key: 'barn', tex: 'bld.barn',
+    key: 'barn', tex: 'bld.barn', glow: 'bld.barn_glow',
     x: 4, y: 4, w: 4, h: 4,
     door: { x: 5, y: 8 },
     label: 'RANCH', action: 'ranch',

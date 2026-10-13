@@ -28,6 +28,7 @@ if (globalStory) {
     season: load('season'),
     codex: load('codex'),
     rumors: load('rumors'),
+    reckoning: load('reckoning'),
   };
 }
 
@@ -37,4 +38,5 @@ export const intro = storyBank.intro;
 export const season = storyBank.season;
 export const codex = storyBank.codex;
 export const rumors = storyBank.rumors;
+export const reckoning = storyBank.reckoning;
 export const story = storyBank;

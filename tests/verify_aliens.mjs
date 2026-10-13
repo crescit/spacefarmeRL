@@ -67,7 +67,8 @@ for (const alien of ALIEN_DATA) {
   const auraLine = s.split('\n').findIndex((l) => l.includes('const aura = this.add.image(ax, ay + 20, "fx.lamp_glow")'));
   assert(auraLine >= 0 && /setBlendMode\(Phaser\.BlendModes\.ADD\)/.test(s.split('\n').slice(auraLine, auraLine + 2).join('\n')), 'envoy aura (opaque glow disc) must use ADD blending, not draw as a dark square');
   const g = readFileSync('client/game.js', 'utf8');
-  assert(/startsWith\('alien\.'\)[^\n]*FilterMode\.NEAREST/.test(g), 'envoy textures must use NEAREST filtering');
+  const nearLine = g.split('\n').find((l) => /FilterMode\.NEAREST/.test(l)) || '';
+  for (const ns of ['alien', 'bld', 'decor']) assert(nearLine.includes(ns), `${ns}.* textures must use NEAREST filtering`);
 }
 const scene = readFileSync('client/scenes/PlanetScene.js', 'utf8');
 for (const token of ['startAlienContact', 'advanceAlienCutscene', 'chooseContactDoctrine', 'spacefarmer.firstContact', 'No alignment score']) assert(scene.includes(token), `story integration missing ${token}`);

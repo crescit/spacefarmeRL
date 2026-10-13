@@ -217,7 +217,7 @@ const GROUND_TEX = {
   grass_a: () => texAt('ground.grass', 0), grass_b: () => texAt('ground.grass', 1),
   grass_c: () => texAt('ground.grass', 2), grass_d: () => texAt('ground.grass', 3),
   grass_e: () => texAt('ground.grass', 4), grass_f: () => texAt('ground.grass', 5),
-  path: () => tex('ground.path'), plaza: () => tex('ground.plaza'),
+  path: () => tex('ground.path'), plaza: (x = 0, y = 0) => texAt('ground.plazaDeck', (y % 4) * 4 + (x % 4)),
   // water picks one of 3 caustic families per tile position (stable hash) so a
   // still frame already shows structure instead of a flat cyan slab
   water: (x = 0, y = 0) => texAt('ground.water', (x * 3 + y * 7) % 3),
@@ -288,6 +288,9 @@ class PlanetScene extends Phaser.Scene {
     this.showingQuests = false;
     this.showingBackpack = false;
     this.showingSmithy = false;
+    // SF62 'Season Reckoning' — the season's-end screen starts closed
+    this.showingReckoning = false;
+    this._reckSeq = 0;    // SF62 — token for queued reckonings
     // SF51 'Companion Corridor' — the live agent day screen starts closed
     this.showingCorridor = false;
     this._prevQuestId = null;    // last-seen current quest → drives the "quest complete" banner
@@ -1048,7 +1051,7 @@ class PlanetScene extends Phaser.Scene {
     // hide while a dialogue/panel/interior is handled elsewhere
     const hidden = !!(this.inAlienContact || this.eventQueue || this.inDialogue || this.showingGE ||
       this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes ||
-      this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.inInterior);
+      this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.showingReckoning || this.inInterior);
     if (hidden) { this.interactPrompt?.setVisible(false); return; }
     const target = this._resolveInteractTarget();
     if (!target) { this.interactPrompt?.setVisible(false); return; }
@@ -1082,7 +1085,8 @@ class PlanetScene extends Phaser.Scene {
     this.hudDay = this.add.text(width - 34, y, '', {
       ...f, fontSize: '11px', color: '#f8d797', align: 'right', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0.5).setDepth(1000); screenFix.push(this.hudDay);
-    this.colonyMark = this.add.text(width - 34, 12, 'B-612  /  FRONTIER AGRICULTURE', {
+    this.colonyMark = this.add.text(width - 18, 66, // below the HTML mute/touch buttons (top-right, ~58px)
+      'B-612  /  FRONTIER AGRICULTURE', {
       ...f, fontSize: '11px', color: '#b8e0d8',
       stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0).setDepth(1000); screenFix.push(this.colonyMark);
@@ -1674,6 +1678,7 @@ rations, and your name on the manifest.
       stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5));
     c.setVisible(false);
+    this._bannerActive = true;   // SF62 — the reckoning queues BEHIND the banner
     // defer the draw so brand-new container children settle before fading
     this.time.delayedCall(30, () => {
       c.setVisible(true);
@@ -1683,7 +1688,91 @@ rations, and your name on the manifest.
         targets: c, alpha: 0, duration: 600, delay: 2600,
         onComplete: () => c.destroy(),
       });
+      // SF62 — the banner owns the screen until its fade completes (400 fade +
+      // 2600 hold + 600 fade = 3600ms); the reckoning queues behind it.
+      this.time.delayedCall(3600, () => { this._bannerActive = false; });
     });
+  }
+
+  // ── SF62 'Season Reckoning' — the season's-end screen (human face of the
+  // same reckoning the agent season gets). Screen-anchored (scrollFactor 0,
+  // depth 1650): a dark colony plate with a teal stroke, the title in amber,
+  // the reckoning lines in cream wrapped to the panel width, and a slate
+  // footer. Reward-neutral: no score, no grade, no reward rides on it.
+  _showReckoning(payload) {
+    const { width, height } = this.game.config;
+    this.showingReckoning = true;
+    if (this.reckoningPanel) this.reckoningPanel.destroy(true);
+    this.reckoningPanel = this.add.container(width / 2, height / 2).setScrollFactor(0).setDepth(1650);
+    const plate = this.add.graphics();
+    plate.fillStyle(0x0c1019, 0.92);
+    plate.fillRoundedRect(-260, -152, 520, 300, 12);
+    plate.lineStyle(2, 0x67e1cd, 1);
+    plate.strokeRoundedRect(-260, -152, 520, 300, 12);
+    this.reckoningPanel.add(plate);
+    // QA hook + server payload both work: a raw record (credits/lifetime/
+    // contactChoices) is built through the SAME StoryBank prose the server uses;
+    // a finished payload {title, lines} renders as delivered.
+    const p = (payload && payload.lines) ? payload : story.reckoning.buildReckoning(payload || {});
+    const title = this.add.text(0, -128, p.title || 'The season is over.', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '20px', color: '#f7d698', align: 'center',
+      wordWrap: { enable: true, width: 480 },
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5);
+    this.reckoningPanel.add(title);
+    this.reckoningTitle = title;
+    // the reckoning lines: cream, wrapped to the panel width, stacked downward
+    this.reckoningLines = [];
+    const lines = Array.isArray(p.lines) ? p.lines : [];
+    let y = -104;
+    for (const line of lines) {
+      const txt = this.add.text(-240, y, String(line || ''), {
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+        fontSize: '12px', color: '#e6f6f2', lineSpacing: 4,
+        wordWrap: { enable: true, width: 480 },
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0, 0);
+      this.reckoningPanel.add(txt);
+      this.reckoningLines.push(txt);
+      y += Math.max(16, txt.height + 4);
+    }
+    // the footer in slate: SPACE hands the season to the keeper
+    const footY = Math.min(122, y + 10);
+    const foot = this.add.text(-240, footY, 'SPACE — the new season begins', {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
+      fontSize: '11px', color: '#7c95a6',
+    }).setOrigin(0, 0);
+    this.reckoningPanel.add(foot);
+    this.reckoningFoot = foot;
+    this._layoutReckoning();
+    this.updateHUD();
+  }
+
+  // Re-stack the wrapped lines (text heights settle after creation; this is
+  // idempotent so an upgrade reply or a resize can relayout safely).
+  _layoutReckoning() {
+    if (!this.reckoningLines || !this.reckoningLines.length) return;
+    let y = -104;
+    for (const kept of this.reckoningLines) {
+      kept.setY(y);
+      y += Math.max(16, (kept.height || 16) + 4);
+    }
+    if (this.reckoningFoot) this.reckoningFoot.setY(Math.min(122, y + 10));
+  }
+
+  // The reckoning arrives with the daySummary on a season boundary; the
+  // banner goes first, the reckoning follows once the banner fades (1.5s).
+  _queueReckoning(d) {
+    if (!d) return;
+    const token = ++this._reckSeq;   // a later close supersedes a queued reckoning
+    if (this._bannerActive) {
+      this.time.delayedCall(1500, () => {
+        if (this._reckSeq === token && !this._bannerActive) this._showReckoning(d);
+      });
+    } else {
+      this._showReckoning(d);
+    }
   }
 
   // ── P3: reflection & reward ─────────────────────────────────────────────
@@ -1695,6 +1784,12 @@ rations, and your name on the manifest.
     this._pendingSummary = null;
     window.SpaceFarmer.onMilestone = (d) => this._queueMilestone(d);
     window.SpaceFarmer.onDaySummary = (d) => { this._pendingSummary = d; };
+    // SF62 — the season's-end reckoning arrives with the daySummary (the server
+    // sends both on the day the calendar rolls into a new season). The banner
+    // runs first; the reckoning follows once the banner's fade completes.
+    window.SpaceFarmer.onSeasonReckoning = (d) => this._queueReckoning(d);
+    // [SF62] QA hook: show the reckoning screen from any payload, any time
+    window.SpaceFarmer.showReckoning = (p) => this._showReckoning(p);
     // [SF28] QA hook: raise the season banner manually (0..3)
     window.SpaceFarmer.seasonBanner = (s) => this._seasonBanner(s);
     // [SF30] QA hook: fire the water glint at a tile (dew motes rising)
@@ -1898,6 +1993,7 @@ rations, and your name on the manifest.
         this.showToast('Could not upgrade.');
       }
       if (this.showingSmithy) this._renderSmithy();
+      if (this.showingReckoning) this._layoutReckoning();
       this.updateHUD();
     });
   }
@@ -2635,7 +2731,7 @@ rations, and your name on the manifest.
       this.hub.confirm(this.hub.sel);
       return;
     }
-    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingBackpack || this.showingSmithy || this.showingCorridor) {
+    if (this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.showingReckoning) {
       this.closeAllPanels();
       return;
     }
@@ -2883,7 +2979,7 @@ rations, and your name on the manifest.
       }
     }
 
-    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor) {
+    if (this.inAlienContact || this.inDialogue || this.showingGE || this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes || this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.showingReckoning) {
       if (this.inAlienContact) {
         if (this._diaNPC && !this._diaDone) this.dialoguePortrait.setTexture("port." + this._diaNPC + "_" + (Math.floor(time / 70) % 3));
         if (this.contactPhase === "choice") {
@@ -2996,6 +3092,14 @@ rations, and your name on the manifest.
         const smKeys = [this.oneKey, this.twoKey, this.threeKey, this.fourKey];
         smKeys.forEach((k, i) => { if (k && Phaser.Input.Keyboard.JustDown(k)) this.upgradeTool(smTools[i]); });
         if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey)) this.closeAllPanels();
+      }
+      // ── SF62 'Season Reckoning': SPACE/ESC closes the season's-end screen —
+      //    the bell hands the season to the keeper, and SPACE opens the next one.
+      if (this.showingReckoning) {
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey)) {
+          this.closeAllPanels();
+          this.updateHUD(); this.updateNightOverlay(); return;
+        }
       }
       if (!this.inDialogue && !this.showingHub && (Phaser.Input.Keyboard.JustDown(this.spaceKey) || Phaser.Input.Keyboard.JustDown(this.escKey))) {
         this.closeAllPanels();
@@ -3587,7 +3691,7 @@ rations, and your name on the manifest.
     // hide while a dialogue/panel/interior is handled elsewhere (SF20 rule)
     const hidden = !!(this.inAlienContact || this.eventQueue || this.inDialogue || this.showingGE ||
       this.showingShop || this.showingRanch || this.showingChest || this.showingQuests || this.showingRecipes ||
-      this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.inInterior);
+      this.showingHub || this.showingBackpack || this.showingSmithy || this.showingCorridor || this.showingReckoning || this.inInterior);
     const t = hidden ? null : this._questTarget();
     if (!t) {
       this.questMarker.setVisible(false);
@@ -4544,6 +4648,11 @@ rations, and your name on the manifest.
     if (this.questPanel) this.questPanel.setVisible(false);
     if (this.backpackPanel) this.backpackPanel.setVisible(false);
     if (this.smithyPanel) this.smithyPanel.setVisible(false);
+    // SF62 — closing anything closes the reckoning screen too (it lives above
+    // every panel; SPACE/ESC are its own close path as well).
+    if (this.reckoningPanel) this.reckoningPanel.setVisible(false);
+    this.showingReckoning = false;
+    this._reckSeq++;   // SF62 — a close supersedes any queued reckoning
     if (this.hub) this.hub.close();
     this.showingHub = false;
     this.showingBackpack = false;

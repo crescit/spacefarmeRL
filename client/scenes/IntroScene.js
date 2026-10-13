@@ -19,6 +19,10 @@ class IntroScene extends Phaser.Scene {
 
   preload() {
     AudioSystem.preload(this);
+    // ART-05: painted title key art (Qwen Image 2.1 on the Mac, pixelized to a
+    // 480x270 / 160-colour plate so it sits in the game's pixel language).
+    this.load.image('art.title_keyart', 'client/art/title_keyart.png');
+    this.load.image('art.crawl_shipbay', 'client/art/crawl_shipbay.png');
   }
 
   create() {
@@ -56,6 +60,16 @@ class IntroScene extends Phaser.Scene {
       ...c,
       img: this.add.image(c.x, c.y, tex('fx.nebula-cloud')).setScale(c.scale).setAlpha(c.alpha),
     }));
+    // ART-05: during the crawl we are aboard the ship — the hydroponics bay
+    // painting sits behind the stars, dimmed so the crawl stays the subject.
+    if (this.textures.exists('art.crawl_shipbay')) {
+      const t = this.textures.get('art.crawl_shipbay');
+      t.setFilter(Phaser.Textures.FilterMode.NEAREST);
+      const src = t.getSourceImage();
+      const k = Math.max(width / src.width, height / src.height);
+      this.shipArt = this.add.image(width / 2, height / 2, 'art.crawl_shipbay').setScale(k).setAlpha(0.55);
+      this.tweens.add({ targets: this.shipArt, scale: k * 1.05, duration: 30000, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
+    }
     this.planet = this.add.image(width - 170, height - 190, tex('fx.planet'));
     this.planet2 = this.add.image(120, 150, tex('fx.planet')).setScale(0.55).setAlpha(0.6).setFlipX(true);
 
@@ -99,9 +113,17 @@ class IntroScene extends Phaser.Scene {
     // the crawl into the tutorial, so the ship's little guide is never a stranger
     this.introDroid = this.add.image(120, 300, tex('ship.droid')).setDepth(945).setScale(1.3).setAlpha(0.9);
 
+    // ART-05: with the ship-bay painting up we are INSIDE the ship — free-floating
+    // procedural planets/asteroid/droid read as stickers on the wall, so they go.
+    if (this.shipArt) {
+      [this.planet, this.planet2, this.asteroid, this.introDroid, this.nebula, this.nebula2, ...this.nebulaClouds.map((c) => c.img)]
+        .forEach((o) => o && o.setVisible(false));
+      this.starLayers.forEach((L) => L.gfx.setAlpha(0.35));
+    }
+
     // ── Title card (hidden until the crawl finishes) ──
     this.titleCard = this.add.container(width / 2, height / 2).setVisible(false);
-    const orbit = this.add.graphics();
+    const orbit = this.titleOrbit = this.add.graphics();
     orbit.lineStyle(1, 0x67e1cd, 0.28).strokeEllipse(0, -116, 310, 102);
     orbit.lineStyle(2, 0xf2bd68, 0.5).beginPath().arc(0, -116, 155, 2.8, 4.7).strokePath();
     const titlePlate = this.add.rectangle(0, 36, Math.min(620, width * 0.78), 190, 0x071a20, 0.8)
@@ -284,6 +306,26 @@ class IntroScene extends Phaser.Scene {
       duration: 600,
       onComplete: () => { this.textObject.destroy(); this.crawlPanel.destroy(); this.crawlPanelRect = null; },
     });
+    // ART-05: the colony itself rises behind the title — cover-scaled, crisp
+    // NEAREST pixels, with a soft dark band so the plate text stays readable.
+    if (this.textures.exists('art.title_keyart')) {
+      const { width, height } = this.game.config;
+      const t = this.textures.get('art.title_keyart');
+      t.setFilter(Phaser.Textures.FilterMode.NEAREST);
+      const src = t.getSourceImage();
+      const k = Math.max(width / src.width, height / src.height);
+      this.keyArt = this.add.image(width / 2, height / 2, 'art.title_keyart')
+        .setScale(k).setAlpha(0).setDepth(-5);
+      this.tweens.add({ targets: this.keyArt, alpha: 1, duration: 1400, ease: 'Sine.easeOut' });
+      // slow push-in so the frame breathes
+      this.tweens.add({ targets: this.keyArt, scale: k * 1.06, duration: 24000, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
+      // the painting IS the colony now: drop the sticker house + orbit ring and
+      // seat the plate in the lower third so the dome and gas giant stay clear
+      [this.houseImg, this.houseGlow, this.titleOrbit].forEach((o) => o && o.setVisible(false));
+      this.houseGlow = null;
+      this.titleCard.y = height * 0.66;
+      if (this.nebula) this.tweens.add({ targets: [this.shipArt, this.nebula, this.nebula2, this.planet, this.planet2, this.asteroid, this.introDroid, ...this.nebulaClouds.map((c) => c.img), ...this.starLayers.map((L) => L.gfx)].filter(Boolean), alpha: 0, duration: 1200 });
+    }
     this.titleCard.setVisible(true);
     this.titleCard.setScale(0.9);
     this.tweens.add({

@@ -8,7 +8,7 @@ mods = ["rl.python.tests.test_env_gym", "rl.python.tests.test_rollouts",
         "rl.python.tests.test_validity_gate", "rl.python.tests.test_narrative_stats",
         "rl.python.tests.test_transcript", "rl.python.tests.test_rollout_tools",
         "rl.python.tests.test_render_eval_report", "rl.python.tests.test_tool_dialog",
-        "rl.python.tests.test_compare_evals"]
+        "rl.python.tests.test_debug_dir", "rl.python.tests.test_compare_evals"]
 for mod in mods:
     try:
         m = __import__(mod, fromlist=["*"])

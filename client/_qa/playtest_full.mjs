@@ -66,9 +66,15 @@ await cmd('Emulation.setFocusEmulationEnabled', { enabled: true });
 
 // ── Phase 1: full boot through intro ──
 await cmd('Page.navigate', { url: GAME });
-await sleep(9000);
-let st = await evl(`(function(){const g=window.SpaceFarmer&&window.SpaceFarmer.game;if(!g)return 'no-game';
+// Poll (up to 30s) instead of a fixed sleep: under host load the swiftshader
+// boot can take longer than 9s and a fixed wait reads a half-booted game.
+let st = '';
+for (let i = 0; i < 60; i++) {
+  await sleep(500);
+  st = await evl(`(function(){const g=window.SpaceFarmer&&window.SpaceFarmer.game;if(!g)return 'no-game';
 return g.scene.getScenes().map(s=>s.scene.key+'='+(s.sys.isActive()?'active':s.isPaused?'paused':'sleeping')).join(',');})()`);
+  if (i >= 17 && /IntroScene=active/.test(st || '')) break;
+}
 check('boot: intro active', /IntroScene=active/.test(st || ''), st);
 await shot('01_intro_crawl.png');
 // skip crawl → title, then begin → ship
@@ -515,6 +521,36 @@ return JSON.stringify({rs:sc.corridorEs?sc.corridorEs.readyState:99,vis:sc.corri
 let corrCloseOK = false;
 try { const j = JSON.parse(corrClose || '{}'); corrCloseOK = j.rs === 2 && j.vis === false; } catch {}
 check('corridor: close tears the stream down (readyState 2)', corrCloseOK, corrClose);
+
+// ── SF62: season reckoning screen — the season's-end panel for HUMANS ──
+const SF62_PAYLOAD = { season: 2, credits: 900,
+  lifetime: { earned: 600, harvested: 40, sold: 30, fished: 7, mined: 11, gifts: 5 },
+  friends: { rhea: 72, luna: 83, nova: 60 },
+  contactChoices: { 'keth-refuge': 'cooperate', 'machine-secession': 'trade' },
+  questsCompleted: 4, marriedTo: 'luna' };
+const reckShow = await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');
+window.SpaceFarmer.showReckoning(${JSON.stringify(SF62_PAYLOAD)});
+return JSON.stringify({open:sc.showingReckoning,vis:sc.reckoningPanel?sc.reckoningPanel.visible:null,
+sf:sc.reckoningPanel?sc.reckoningPanel.scrollFactorX:99,d:sc.reckoningPanel?sc.reckoningPanel.depth:99,
+lines:(sc.reckoningLines||[]).length,title:sc.reckoningTitle?sc.reckoningTitle.text:''});})()`);
+await sleep(400);
+let reckOK = false;
+try { const j = JSON.parse(reckShow || '{}'); reckOK = j.open === true && j.vis === true && j.sf === 0 && j.d === 1650 && j.lines >= 5 && String(j.title||'').includes('is over.'); } catch {}
+check('season reckoning screen', reckOK, reckShow);
+await shot('13_reckoning.png');
+await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');if(sc.showingReckoning)sc.closeAllPanels();return 1;})()`);
+await sleep(200);
+const reckClose = await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');
+return JSON.stringify({open:sc.showingReckoning,vis:sc.reckoningPanel?sc.reckoningPanel.visible:null});})()`);
+let reckCloseOK = false;
+try { const j = JSON.parse(reckClose || '{}'); reckCloseOK = j.open === false && j.vis === false; } catch {}
+check('season reckoning: SPACE/ESC close path hides it', reckCloseOK, reckClose);
+await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');sc._bannerActive=true;return 1;})()`);
+const reckQueue = await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');
+sc._queueReckoning(${JSON.stringify(SF62_PAYLOAD)});
+return JSON.stringify({open:sc.showingReckoning});})()`);
+check('season reckoning queues behind the banner', (reckQueue||'').includes('"open":false') || (reckQueue||'').includes('open:false'), reckQueue);
+await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');sc._bannerActive=false;sc.closeAllPanels();return 1;})()`);
 
 // ── SF52: night must actually darken the frame (whole-frame mean luminance ≤ 75% of day) ──
 const sf52Lum = async (night) => {

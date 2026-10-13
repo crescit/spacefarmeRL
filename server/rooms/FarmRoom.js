@@ -14,6 +14,7 @@ const { savePlayer, loadPlayer } = require('../persistence');
 // different Calendar for tests/variants via FarmRoom.calendar or room.calendar.
 const { createCalendar, DEFAULT_CALENDAR } = require('../../shared/calendar.js');
 const { aliens: ALIEN_DATA, doctrines: CONTACT_DOCTRINES } = require('../../shared/story/aliens.js');
+const { buildReckoning } = require('../../shared/story/reckoning.js');
 
 // ── Schema definitions ──
 
@@ -606,6 +607,10 @@ class FarmRoom extends Room {
 
   onCreate() {
     this.setState(new FarmState());
+    // Colyseus' default 15s seat reservation drops joins from slow/loaded
+    // clients (headless swiftshader boot under load exceeds it) → "seat
+    // reservation expired" and the game silently falls back offline.
+    this.seatReservationTimeout = Number(process.env.COLYSEUS_SEAT_RESERVATION_TIME || 60);
     this.rng = Math.random;      // stochastic seam (see setRng)
     this._persistence = true;   // live room: save/load on join/leave/advance
     // empty simulation tick (colyseus 0.17 signature: (callback, delay));
@@ -1314,6 +1319,9 @@ class FarmRoom extends Room {
   }
 
   onAdvanceDay(client) {
+    // SF62 — capture the season index BEFORE the day increments: it names the
+    // season that is ENDING here, which is what the reckoning is about.
+    const beforeSeason = this.state.season;
     this.state.day += 1;
     this._resetClock();   // resting carries you through the dark to a fresh dawn
     const cal = this._cal();   // calendar service — the ONLY source for this math
@@ -1397,6 +1405,37 @@ class FarmRoom extends Room {
         ledger: summary || { earned: 0, spent: 0, harvested: 0, sold: 0, fished: 0, mined: 0, gifts: 0 },
       });
     }
+    // SF62 — season's end: when the calendar rolled from one season into the
+    // next, the sleeping farmer gets the same reckoning prose the agent season
+    // gets (rl/env_core.cjs testimony()). Built from THIS player's state only,
+    // and reward-neutral: no score, no grade, no reward rides on it.
+    if (client && client.send && beforeSeason !== this.state.season) {
+      const p = this.state.players.get(client.sessionId);
+      const rec = p ? this._reckoningRecord(p, beforeSeason) : { season: beforeSeason };
+      client.send('seasonReckoning', buildReckoning(rec));
+    }
+  }
+
+  // SF62 — gather one player's season record for the reckoning prose. The
+  // schema stores maps (MapSchema) and a completed-quest array; collect() turns
+  // them into plain objects the StoryBank reads.
+  _reckoningRecord(p, seasonIndex) {
+    const collect = (m) => {
+      const out = {};
+      if (!m) return out;
+      const keys = typeof m.keys === 'function' ? Array.from(m.keys()) : Object.keys(m);
+      for (const k of keys) out[k] = typeof m.get === 'function' ? m.get(k) : m[k];
+      return out;
+    };
+    return {
+      season: seasonIndex,
+      credits: p.credits,
+      lifetime: collect(p.lifetime),
+      friends: collect(p.friendships),
+      contactChoices: collect(p.contactChoices),
+      questsCompleted: p.quests && p.quests.completed ? p.quests.completed.length : 0,
+      marriedTo: p.marriedTo || '',
+    };
   }
 
   // ── M3 — Earth Day spectacle: festival phases ──

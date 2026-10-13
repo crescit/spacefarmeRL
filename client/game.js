@@ -24,7 +24,8 @@ function registerTextures(game) {
     if (game.textures.exists(name)) continue;
     game.textures.addCanvas(name, canvas);
     // SF06: envoy sprites are hard-edged pixel art — nearest filtering keeps them crisp
-    if (name.startsWith('alien.')) game.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    // buildings/decor are pixel-doubled art too: GPU bilinear re-blurs them
+    if (/^(alien|bld|decor)\./.test(name)) game.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 }
 
@@ -45,8 +46,13 @@ function init() {
       w = window.innerWidth; h = Math.round(w * 0.7);
     }
   } else {
-    // Desktop keeps the classic 4:3 viewport, letterboxed inside the window.
-    w = 960; h = 720;
+    // Desktop fills the window (no 4:3 pillarbox bars), clamped to a sane
+    // range so ultrawide/tiny windows still frame the colony well.
+    // #game may not be laid out yet at init, so take the aspect from the
+    // window (minus the ~24px hint bar) and keep a fixed 720px logical height.
+    const aspect = (window.innerWidth || 960) / Math.max(1, (window.innerHeight || 744) - 24);
+    h = 720;
+    w = Math.round(h * Math.max(4 / 3, Math.min(21 / 9, aspect)));
   }
 
   const config = {

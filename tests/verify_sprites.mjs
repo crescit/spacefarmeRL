@@ -152,6 +152,22 @@ const neb = SS.makeNebula();
 check('nebula 256x256', neb.width === 256 && neb.height === 256, `got ${neb.width}x${neb.height}`);
 check('nebula has purple', count(neb, p => p[2] > p[0] && p[2] > 50) > 500);
 
+// ART-02 — fx.nebula tiles seamlessly: the intro and planet-sky tileSprite
+// repeats this texture, so a luminance jump across ANY edge shows as a visible
+// grid of blobs. All seam axes must be quiet AND the interior must be smooth
+// (a seam cannot be hidden by a noisy edge row while blobs still jump inside).
+{
+  const nc = SS.TEXTURES['fx.nebula'];
+  const lum = (x, y) => { const p = px(nc, x, y); return 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]; };
+  let seamX = 0, seamY = 0, adj = 0, na = 0;
+  for (let y = 0; y < nc.height; y++) seamX += Math.abs(lum(0, y) - lum(nc.width - 1, y));
+  for (let x = 0; x < nc.width; x++) seamY += Math.abs(lum(x, 0) - lum(x, nc.height - 1));
+  for (let y = 0; y < nc.height; y++) for (let x = 0; x < nc.width - 1; x++) { adj += Math.abs(lum(x, y) - lum(x + 1, y)); na++; }
+  for (let x = 0; x < nc.width; x++) for (let y = 0; y < nc.height - 1; y++) { adj += Math.abs(lum(x, y) - lum(x, y + 1)); na++; }
+  const mx = seamX / nc.width, my = seamY / nc.height, ma = adj / na;
+  check('ART-02 nebula tiles seamlessly', mx <= 2.5 && my <= 2.5 && ma <= 2.5, `seamX=${mx.toFixed(2)} seamY=${my.toFixed(2)} interior=${ma.toFixed(2)}`);
+}
+
 console.log('== SHIP TILES ==');
 for (const k of Object.keys(SS.SHIP_SPRITES)) {
   const c = SS.SHIP_SPRITES[k];
@@ -496,6 +512,64 @@ console.log('== LINE-WEIGHT (2px-min stroke rule, QA 0904 gate-blindness fix) ==
 console.log('== TEXTURES registry ==');
 check('registry has 40+ entries', Object.keys(SS.TEXTURES).length >= 40, `got ${Object.keys(SS.TEXTURES).length}`);
 check('registry all canvases', Object.values(SS.TEXTURES).every(c => c && typeof c.width === 'number'));
+
+// ART-01 crispness: building/decor art is pixel-doubled, never bilinear-smeared.
+// The old stacked bilinear (scale2x + upscale2x) blurred every 32px building
+// into a soft dark box. Every 2x2 output block must be one uniform pixel.
+{
+  let blocks = 0, mixed = 0;
+  for (const [k, c] of Object.entries(SS.TEXTURES)) {
+    if (!/^(bld|decor)\./.test(k)) continue;
+    const d = c._ctx.data, w = c.width;
+    for (let y = 0; y + 1 < c.height; y += 2) for (let x = 0; x + 1 < w; x += 2) {
+      const o = (y * w + x) * 4; blocks++;
+      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1]]) {
+        const q = ((y + dy) * w + x + dx) * 4;
+        if (d[o] !== d[q] || d[o + 1] !== d[q + 1] || d[o + 2] !== d[q + 2] || d[o + 3] !== d[q + 3]) { mixed++; break; }
+      }
+    }
+  }
+  check('ART-01 bld/decor pixel-doubled crisp (0 mixed 2x2 blocks)', blocks > 1000 && mixed === 0, `${mixed}/${blocks} mixed`);
+  const src = readFileSync('client/systems/SpriteSystem.js', 'utf8');
+  const sc = src.slice(src.indexOf('function scale2x'), src.indexOf('function scale2x') + 700);
+  check('ART-01 scale2x browser path disables smoothing', /imageSmoothingEnabled = false/.test(sc) && !/imageSmoothingEnabled = true/.test(sc));
+}
+
+// ART-03: plaza is a 4x4 macro deck, not one repeated graph-paper tile.
+{
+  const keys = Array.from({ length: 16 }, (_, i) => `tile.plaza_deck${i}`);
+  const ok = keys.every((k) => SS.TEXTURES[k] && SS.TEXTURES[k].width === 32);
+  const sig = new Set(keys.filter((k) => SS.TEXTURES[k]).map((k) => Array.from(SS.TEXTURES[k]._ctx.data.slice(0, 32 * 4 * 8)).join(',')));
+  check('ART-03 plaza deck: 16 tile variants, all distinct', ok && sig.size === 16, `distinct=${sig.size}`);
+  const ps = readFileSync('client/scenes/PlanetScene.js', 'utf8');
+  check('ART-03 planet plaza uses the deck variant pick', /plaza: \(x = 0, y = 0\) => texAt\('ground\.plazaDeck', \(y % 4\) \* 4 \+ \(x % 4\)\)/.test(ps));
+}
+// ART-04: every MapData building lights up at night; glows sit on the art.
+{
+  const md = readFileSync('client/systems/MapData.js', 'utf8');
+  const blds = md.slice(md.indexOf('export const BUILDINGS'), md.indexOf('export const DECOR'));
+  const n = (blds.match(/key: '/g) || []).length, g = (blds.match(/glow: 'bld\./g) || []).length;
+  check('ART-04 every building has a night glow', n >= 6 && g === n, `${g}/${n}`);
+  for (const k of ['bld.barn_glow', 'bld.barracks_glow']) {
+    const c = SS.TEXTURES[k], b = SS.TEXTURES[k.replace('_glow', '')];
+    let op = 0, on = 0;
+    if (c && b) { const d = c._ctx.data, bd = b._ctx.data; for (let i = 0; i < c.width * c.height; i++) if (d[i * 4 + 3] > 20) { op++; if (bd[i * 4 + 3] > 200) on++; } }
+    const f = c ? op / (c.width * c.height) : 0;
+    check(`ART-04 ${k} aligned window glow`, !!c && c._ctx.data[3] === 0 && f >= 0.04 && f <= 0.25 && on / Math.max(1, op) >= 0.9, `opq=${f.toFixed(3)}`);
+  }
+}
+
+// ART-05: painted title key art ships as a small pixelized PNG and is wired in.
+{
+  const f = 'client/art/title_keyart.png';
+  let ok = false, w = 0, h = 0, size = 0;
+  try { const b = readFileSync(f); size = b.length; w = b.readUInt32BE(16); h = b.readUInt32BE(20); ok = b.slice(1, 4).toString() === 'PNG'; } catch {}
+  check('ART-05 title key art: 480x270 PNG under 300KB', ok && w === 480 && h === 270 && size < 300000, `${w}x${h} ${size}B`);
+  let sb = null; try { sb = readFileSync('client/art/crawl_shipbay.png'); } catch {}
+  check('ART-05 crawl ship-bay art: 480x270 PNG under 300KB', !!sb && sb.readUInt32BE(16) === 480 && sb.readUInt32BE(20) === 270 && sb.length < 300000);
+  const intro = readFileSync('client/scenes/IntroScene.js', 'utf8');
+  check('ART-05 IntroScene loads key art with NEAREST filter', /load\.image\('art\.title_keyart', 'client\/art\/title_keyart\.png'\)/.test(intro) && /art\.title_keyart[\s\S]{0,200}FilterMode\.NEAREST/.test(intro));
+}
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 if (fail === 0) console.log('ALL GREEN ✓');

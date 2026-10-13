@@ -78,6 +78,12 @@ class NetworkSystem {
         if (window.SpaceFarmer.onDaySummary) window.SpaceFarmer.onDaySummary(d);
       });
 
+      // SF62 — season's-end reckoning: the same prose face the agent season
+      // gets, delivered on the day the calendar rolls into a new season.
+      this.room.onMessage('seasonReckoning', (d) => {
+        if (window.SpaceFarmer.onSeasonReckoning) window.SpaceFarmer.onSeasonReckoning(d);
+      });
+
       // ROADMAP A4 — message registry: the server replies to gameplay actions
       // on the SAME channel the action was sent on (FarmRoom.dispatchGameAction
       // mirrors NetworkSystem.request()). Every server-emitted type must have a
@@ -115,7 +121,7 @@ class NetworkSystem {
       this.room.onMessage('*', (type, msg) => {
         const hook = { saved: 'onSaved', festivalPhase: 'onFestivalPhase',
           feastPeak: 'onFeastPeak', milestone: 'onMilestone',
-          daySummary: 'onDaySummary' }[type];
+          daySummary: 'onDaySummary', seasonReckoning: 'onSeasonReckoning' }[type];
         if (hook && window.SpaceFarmer[hook]) window.SpaceFarmer[hook](msg);
       });
 

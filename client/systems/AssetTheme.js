@@ -24,6 +24,8 @@ export const THEME = {
     grass: ['tile.grass_a', 'tile.grass_b', 'tile.grass_c', 'tile.grass_d', 'tile.grass_e', 'tile.grass_f'],
     path: 'tile.path',
     plaza: 'tile.plaza',
+    // ART-03: 4×4 macro deck, index = (y%4)*4 + x%4
+    plazaDeck: Array.from({ length: 16 }, (_, i) => `tile.plaza_deck${i}`),
     // 3 caustic families; the lake assigns a family per tile position and the
     // shimmer cycles each family on its own offset, so open water never reads
     // as one flat cyan billboard even on a still frame.
@@ -98,6 +100,8 @@ export const THEME = {
   bld: {
     house: 'bld.house',
     houseGlow: 'bld.house_glow',
+    barnGlow: 'bld.barn_glow',
+    barracksGlow: 'bld.barracks_glow',
     shop: 'bld.shop',
     shopGlow: 'bld.shop_glow',
     exchange: 'bld.exchange_a',

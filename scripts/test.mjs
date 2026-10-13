@@ -10,6 +10,7 @@ const offline = [
   'tests/verify_story.mjs',
   'tests/verify_codex_lore.mjs',
   'tests/verify_rumors.mjs',
+  'tests/verify_reckoning.mjs',
   'tests/verify_determinism.mjs',
   'tests/verify_energy.mjs',
   'tests/verify_festival_day.mjs',

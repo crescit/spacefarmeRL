@@ -222,7 +222,7 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   check('intro clouds drift and wrap', /c\.img\.x -= c\.drift/.test(introSrc) && /c\.img\.x = W \+/.test(introSrc));
   const spriteSrc = read('client/systems/SpriteSystem.js');
   check('nebula generator wraps seamlessly (toroidal distance)',
-    /Math\.min\(Math\.abs\(x - bl\.x\), size - Math\.abs\(x - bl\.x\)\)/.test(spriteSrc));
+    /const wrap = \(v\) => Math\.min\(Math\.abs\(v\), size - Math\.abs\(v\)\)/.test(spriteSrc) && /wrap\(x - bl\.x\)/.test(spriteSrc));
   check('fx.nebula-cloud texture registered', /'fx\.nebula-cloud':\s*makeNebulaCloud\(\)/.test(spriteSrc));
   // the ship's player walks with the same frames the planet player uses
   check('ship uses shared player walk frames', /\$\{this\.playerDir\}_\$\{f\}/.test(shipSrc));
@@ -1540,6 +1540,40 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   check('SF51 terminal has ≥1 walkable adjacent tile', neighbours >= 1, `open neighbours=${neighbours}`);
   check('SF51 resolver routes the corridor terminal',
     /kind: 'corridor'/.test(planetSrc) && /openCorridorPanel\(\)/.test(planetSrc));
+}
+
+// ── SF62 'Season Reckoning' gate: the season's-end screen is truly wired —
+//     the server room sends 'seasonReckoning' on the day the calendar rolls
+//     into a new season, guarded by a season-index comparison captured BEFORE
+//     the day increments; the client registers the message (SF34 rule); and
+//     PlanetScene opens/closes/hides it in exactly the same panel lists the
+//     smithy screen participates in (same count of flag mentions).
+{
+  const planetSrc = read('client/scenes/PlanetScene.js');
+  const farmSrc = read('server/rooms/FarmRoom.js');
+  const netSrc = read('client/systems/NetworkSystem.js');
+  const farmRev = farmSrc.indexOf('onAdvanceDay(client)');
+  const farmBlock = farmRev >= 0 ? farmSrc.slice(farmRev, farmSrc.indexOf('  // ── M3', farmRev)) : '';
+  check('SF62 FarmRoom captures the season index BEFORE the day increments',
+    /const\s+beforeSeason\s*=\s*this\.state\.season/.test(farmBlock));
+  check('SF62 FarmRoom sends seasonReckoning inside onAdvanceDay, guarded by a season-index comparison',
+    /client\.send\('seasonReckoning'/.test(farmBlock) &&
+    /beforeSeason\s*!==\s*this\.state\.season/.test(farmBlock));
+  check('SF62 FarmRoom builds the record from the player state (credits/lifetime/friends/contacts/quests/married)',
+    /_reckoningRecord\(p,\s*beforeSeason\)/.test(farmBlock) &&
+    /questsCompleted:/.test(farmSrc) && /marriedTo:/.test(farmSrc));
+  check('SF62 NetworkSystem registers seasonReckoning',
+    /onMessage\('seasonReckoning'/.test(netSrc) &&
+    /seasonReckoning:\s*'onSeasonReckoning'/.test(netSrc));
+  const smCount = (planetSrc.match(/showingSmithy/g) || []).length;
+  const recCount = (planetSrc.match(/showingReckoning/g) || []).length;
+  check('SF62 showingReckoning count equals showingSmithy count', recCount === smCount && recCount >= 8,
+    `smithy=${smCount} reckoning=${recCount}`);
+  check('SF62 reckoning screen is screen-anchored at depth 1650',
+    /_showReckoning\(payload\)/.test(planetSrc) && /setDepth\(1650\)/.test(planetSrc));
+  check('SF62 Space closes the reckoning screen',
+    /this\.showingReckoning\) \{[\s\S]*?closeAllPanels\(\)/.test(planetSrc.slice(
+      planetSrc.indexOf('if (this.showingReckoning)'), planetSrc.indexOf('if (!this.inDialogue'))));
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
