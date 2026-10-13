@@ -37,18 +37,81 @@ class NetworkSystem {
     this.room = null;
     this.playerId = null;
     this.connected = false;
+    this.status = 'connecting';
+    this.retries = 0;
+    this.everConnected = false;
+    this._retryTimer = null;
+    this._closing = false;
+  }
+
+  // Connection status for the UI: 'connecting' | 'online' | 'lost' | 'offline'.
+  // window.SpaceFarmer.onConnection(status, info) is told on every change.
+  _status(st, info) {
+    this.status = st;
+    const hook = window.SpaceFarmer && window.SpaceFarmer.onConnection;
+    if (hook) { try { hook(st, info || {}); } catch (e) { console.warn(e); } }
   }
 
   async connect(url) {
+    this.url = url;
+    this._status('connecting');
+    const ok = await this._join();
+    if (!ok) { this._status('offline'); this._scheduleRetry(); }
+    return ok;
+  }
+
+  // SHIP-01 — automatic reconnect. The save is keyed by the stable player id
+  // and the server saves on leave, so a fresh joinOrCreate restores the farm.
+  // Retries back off 1s → 2s → 4s … capped at 15s, forever (a server restart
+  // or a laptop waking from sleep heals without a page reload).
+  _scheduleRetry() {
+    if (this._retryTimer || this._closing) return;
+    this.retries = (this.retries || 0) + 1;
+    const delay = Math.min(15000, 1000 * 2 ** Math.min(this.retries - 1, 4));
+    this.nextRetryAt = Date.now() + delay;
+    this._status(this.everConnected ? 'lost' : 'offline', { attempt: this.retries, delay });
+    this._retryTimer = setTimeout(async () => {
+      this._retryTimer = null;
+      const ok = await this._join();
+      if (ok) {
+        this.retries = 0;
+        this._status('online', { restored: true });
+      } else this._scheduleRetry();
+    }, delay);
+  }
+
+  /** Try to reconnect right now (the "Retry" button). */
+  retryNow() {
+    if (this.connected) return;
+    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+    this.retries = 0;
+    this._scheduleRetry();
+  }
+
+  async _join() {
     try {
-      this.client = new Colyseus.Client(url);
+      this.client = this.client || new Colyseus.Client(this.url);
       this.room = await this.client.joinOrCreate('farm', {
         name: 'Farmer',
         playerId: getStablePlayerId(),   // stable save key (survives reconnects)
       });
       this.playerId = this.room.sessionId;
       this.connected = true;
+      const restored = !!this.everConnected;
+      this.everConnected = true;
       console.log('Connected to farm room:', this.room.sessionId);
+      if (!restored) this._status('online', {});
+
+      // Lost the room (server restart, network drop, sleep) → go offline and
+      // start retrying. A consented leave (code 4000 / 1000) never retries.
+      this.room.onLeave((code) => {
+        this.connected = false;
+        this.room = null;
+        if (this._closing || code === 4000) { this._status('offline'); return; }
+        console.warn('Connection lost (code ' + code + ') — reconnecting');
+        this._scheduleRetry();
+      });
+      this.room.onError && this.room.onError((code, msg) => console.warn('room error', code, msg));
 
       this.room.onStateChange((state) => {
         // State sync callback — game scenes will poll state
@@ -129,12 +192,13 @@ class NetworkSystem {
     } catch (err) {
       console.warn('Could not connect to server, running offline', err);
       this.connected = false;
+      this.room = null;
       return false;
     }
   }
 
   send(type, data) {
-    if (this.room) {
+    if (this.room && this.connected) {
       this.room.send(type, data);
     }
   }

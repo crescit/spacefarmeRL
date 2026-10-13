@@ -744,6 +744,9 @@ class FarmRoom extends Room {
       for (const id of data.quests.completed || []) q.completed.push(id);
       for (const [k, v] of Object.entries(data.quests.progress || {})) q.progress.set(k, v);
       q.arcDone = !!data.quests.arcDone;
+      // SHIP-04 — heal saves from before the fix: an NG+ cycle that was left
+      // with no current quest (and no completions) restarts at quest 1.
+      if (!q.current && !q.arcDone && q.completed.length === 0) q.current = QUEST_ORDER[0];
     }
     if (data.farm && farm && data.farm.tiles && data.farm.tiles.length === farm.tiles.length) {
       farm.tier = data.farm.tier || 1;
@@ -919,7 +922,9 @@ class FarmRoom extends Room {
     this._grantStarterInventory(p);
     this._grantStarterTools(p);
     // story restarts (a new cycle of The Stardust Story)
-    p.quests.current = '';
+    // SHIP-04 — the new cycle opens on the first quest again (was '', which
+    // left the NG+ farmer with a dead quest log and no story at all).
+    p.quests.current = QUEST_ORDER[0];
     p.quests.completed.clear();
     p.quests.progress.clear();
     p.quests.arcDone = false;

@@ -11,7 +11,7 @@ globalThis.Phaser = {
   BlendModes: { ADD: 0, MULTIPLY: 1 },
 };
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -622,7 +622,7 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
     hoe: /showToast\('Equip the HOE to till \(M → Backpack\)/,
     seeds: /showToast\('Out of seeds — Supply Depot sells more/,
     can: /showToast\('Equip the WATERING CAN to water \(M → Backpack\)/,
-    empty: /showToast\('Can is empty — refill at the shore \(east\)/,
+    empty: /showToast\('💧 Can is empty — refill at the pond \(stand on the shore, press SPACE\)/,
     hands: /showToast\('Wrong tool — empty your hands \(backpack\) to harvest/,
   };
   for (const [k, re] of Object.entries(refusalCases)) {
@@ -1414,8 +1414,8 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
     moodBody !== '' && /setStrokeStyle\(2, tier\.color\)/.test(moodBody) && /setFillStyle\(tier\.color, 0\.18\)/.test(moodBody));
   check('SF38 dialogue-open path calls the tint helper with heart level',
     /this\._applyPortraitMood\(moodHeartsFor\(fp\)\)/.test(planetSrc));
-  check('SF38 heart badge text is amber 10px with ♥ glyph',
-    /fontSize: '10px', color: '#f7d698'/.test(moodBody) && /`♥ \$\{h\}`/.test(moodBody));
+  check('SF38 heart badge text is amber min-readable (12px since SF66) with ♥ glyph',
+    /fontSize: '12px', color: '#f7d698'/.test(moodBody) && /`♥ \$\{h\}`/.test(moodBody));
   check('SF38 heart badge is screen-fixed under the portrait',
     moodBody !== '' && /setScrollFactor\(0\)/.test(moodBody) && /plate\.y \+ 32/.test(moodBody));
   const clearIdx = planetSrc.indexOf('_clearPortraitMood() {');
@@ -1574,6 +1574,83 @@ for (const [name, spot] of [['mine', MINE_SPOT], ['deep drop', DEEP_DROP_SPOT]])
   check('SF62 Space closes the reckoning screen',
     /this\.showingReckoning\) \{[\s\S]*?closeAllPanels\(\)/.test(planetSrc.slice(
       planetSrc.indexOf('if (this.showingReckoning)'), planetSrc.indexOf('if (!this.inDialogue'))));
+}
+
+// ── SF63 'Browser page polish' gate: the served page has a clean, emoji-free
+//     title, an inline SVG favicon, a meta description, theme-color and
+//     OpenGraph tags pointing at the real key art.
+{
+  const html = read('index.html');
+  const titleMatch = html.match(/<title>(.*?)<\/title>/s);
+  const title = titleMatch ? titleMatch[1] : '';
+  check('SF63 page meta: title, favicon, description, og:image', (() => {
+    const checks = [
+      // Title is clean: names the game, carries the promise, no emoji glyph.
+      title.includes('Space Farmer') && title.includes('space-colony'),
+      !/\p{Emoji_Presentation}|\p{Extended_Pictographic}/u.test(title),
+      // Favicon: an inline SVG data-URI link with a teal dome palette.
+      /rel="icon"\s+href="data:image\/svg\+xml/.test(html) && /%2367e1cd/.test(html),
+      // Description + theme color.
+      /<meta name="description" content="Farm, befriend colonists/.test(html),
+      /<meta name="theme-color" content="#0c1019">/.test(html),
+      // OpenGraph trio, image anchored to the shipped key art file.
+      /og:title" content="Space Farmer/.test(html),
+      /og:description/.test(html),
+      /og:image" content="client\/art\/title_keyart\.png/.test(html) &&
+        existsSync(path.join(root, 'client/art/title_keyart.png')),
+    ];
+    return checks.every(Boolean);
+  })(), title || '(no <title> found)');
+}
+
+// ── SF64 'Fullscreen button' gate: the page ships a ⛶ float button beside
+//     mute, wired to requestFullscreen / exitFullscreen, hidden without a
+//     fullscreen API, and toggled by the Shift+F shortcut (bare 'f' stays
+//     free for the game).
+{
+  const html = read('index.html');
+  check('SF64 fullscreen button wired', (() => {
+    const checks = [
+      html.includes('id="fs-float"'),
+      /#fs-float\s*\{/.test(html) && /right:\s*122px/.test(html),
+      /document\.fullscreenElement/.test(html) && /document\.exitFullscreen/.test(html),
+      /requestFullscreen/.test(html),
+      /fullscreenEnabled/.test(html),
+      /shiftKey/.test(html) && /toLowerCase\(\)\s*===\s*'f'/.test(html) &&
+        !/e\.key\s*===\s*'f'/.test(html) && !/e\.key\s*===\s*"f"/.test(html),
+    ];
+    return checks.every(Boolean);
+  })(), `fs-float=${html.includes('id="fs-float"')} requestFullscreen=${/requestFullscreen/.test(html)} exitFullscreen=${/document\.exitFullscreen/.test(html)} fullscreenEnabled=${/fullscreenEnabled/.test(html)}`);
+}
+
+// ── SF65 'Empty watering can' gate: pressing SPACE on a tilled tile with an
+//     empty can must TELL the player exactly where to refill — the pond shore
+//     tap, stand on the shore, press SPACE — throttled to one toast per 2500 ms.
+//     The tank must also drain per water action and toast once on first drop
+//     below WATER_USE_COST.
+{
+  const planet = read('client/scenes/PlanetScene.js');
+  check('SF65 empty can toast explains refill', (() => {
+    const checks = [
+      planet.includes("Can is empty — refill at the pond (stand on the shore, press SPACE)"),
+      planet.includes('_emptyCanToastAt'),
+      /_emptyCanToastAt\s*=\s*this\.time\.now/.test(planet),
+      /this\.time\.now\s*-\s*this\._emptyCanToastAt\s*>\s*2500/.test(planet),
+      planet.includes('Watered with stardust dew'),
+      /tankBefore\s*\?\?\s*0\b/.test(planet),
+      /-\s*WATER_USE_COST\)/.test(planet),
+    ];
+    return checks.every(Boolean);
+  })(), `pondToast=${planet.includes('refill at the pond')} throttleAt=${planet.includes('_emptyCanToastAt')} drain=/-${'WATER_USE_COST'}/`);
+}
+
+// ── SF66 'Minimum readable font size' gate: no text style in PlanetScene.js
+//     may render below 12px — tiny phone/laptop text is unreadable.
+{
+  const planet = read('client/scenes/PlanetScene.js');
+  const tiny = planet.match(/fontSize: '(?:[0-9]|1[01])px'/g) || [];
+  check('SF66 no PlanetScene text below 12px', (() => tiny.length === 0),
+    `tinyFonts=${tiny.length}${tiny.length ? ' first: ' + tiny.slice(0, 5).join(' ') : ''}`);
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);

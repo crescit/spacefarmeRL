@@ -6,6 +6,7 @@ import { SHIP_SPRITES } from '../systems/SpriteSystem.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { ColonyHub } from '../systems/ColonyHub.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
+import { preloadPainted, paintedPortrait } from '../systems/PaintedArt.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 
 const TILE_SIZE = 32;  // painterly colony scale (matches world)
@@ -180,6 +181,7 @@ class SpaceshipScene extends Phaser.Scene {
 
   preload() {
     AudioSystem.preload(this);
+    preloadPainted(this);   // ART-06 painted C.O.R.A. bust for the tutorial
   }
 
   create() {
@@ -1171,6 +1173,13 @@ class SpaceshipScene extends Phaser.Scene {
   showDialogue(lines, footer = 'Press SPACE to continue') {
     const text = Array.isArray(lines) ? lines.join('\n') : lines;
     this.dialog.setText(text, { footer });
+    // ART-06: C.O.R.A.'s painted bust stands on the tutorial box's top-left edge
+    const coraKey = paintedPortrait(this, 'cora');
+    if (coraKey && this.dialog.box) {
+      const b = this.dialog.box, size = Math.round(Math.min(150, this.game.config.height * 0.22));
+      if (!this.coraBust) this.coraBust = this.add.image(0, 0, coraKey).setOrigin(0.5, 1).setScrollFactor(0).setDepth(998);
+      this.coraBust.setPosition(b.x - b.width / 2 + size / 2 + 12, b.y - b.height / 2 + 2).setDisplaySize(size, size).setVisible(true);
+    }
 
     if (this.dialogueTimer) this.dialogueTimer.remove();
     this.dialogueTimer = this.time.delayedCall(14000, () => this.dismissDialogue());
@@ -1179,6 +1188,7 @@ class SpaceshipScene extends Phaser.Scene {
   dismissDialogue() {
     if (this.dialogueTimer) { this.dialogueTimer.remove(); this.dialogueTimer = null; }
     if (this.dialog) this.dialog.hide();
+    if (this.coraBust) this.coraBust.setVisible(false);
   }
 
   // ── Go to bed (Harvest Moon-style sleep to end the day) ──

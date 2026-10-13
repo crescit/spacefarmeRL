@@ -9,6 +9,7 @@ import { TEXTURES } from './systems/SpriteSystem.js';
 import { MusicDirector } from './systems/MusicDirector.js';
 import { AudioSystem } from './systems/AudioSystem.js';
 import { reducedMotion, setReducedMotion } from './systems/Motion.js';
+import { PauseMenu, installNetBanner, applyVolumes } from './systems/PauseMenu.js';
 
 window.SpaceFarmer = {};
 // SF49: expose the reduced-motion toggle for QA + embedders. The scene reads
@@ -158,7 +159,7 @@ function init() {
     try { muted = localStorage.getItem('spacefarmer_mute') === '1'; } catch (e) {}
     const apply = () => {
       window.SpaceFarmer.muted = muted;
-      if (window.SpaceFarmer.music) window.SpaceFarmer.music.setMuted(muted);
+      if (window.SpaceFarmer.music) { applyVolumes(); window.SpaceFarmer.music.setMuted(muted); }
       AudioSystem.setMuted(muted);
       btn.textContent = muted ? '🔇' : '🔊';
       btn.classList.toggle('muted', muted);
@@ -187,6 +188,9 @@ function init() {
       endpoint = 'ws://127.0.0.1:8900';
     }
   }
+  // SHIP-01/02: pause + settings menu (ESC / ☰) and the connection banner.
+  window.SpaceFarmer.pauseMenu = new PauseMenu(game);
+  installNetBanner();
   const net = new NetworkSystem();
   window.SpaceFarmer.net = net;
   net.connect(endpoint).then(() => {

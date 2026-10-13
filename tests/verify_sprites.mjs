@@ -571,6 +571,61 @@ check('registry all canvases', Object.values(SS.TEXTURES).every(c => c && typeof
   check('ART-05 IntroScene loads key art with NEAREST filter', /load\.image\('art\.title_keyart', 'client\/art\/title_keyart\.png'\)/.test(intro) && /art\.title_keyart[\s\S]{0,200}FilterMode\.NEAREST/.test(intro));
 }
 
+// ART-06: painted plates — every NPC and every first-contact envoy has a
+// 128x128 painted bust, both backdrops exist at 480x270, and the scenes use them.
+{
+  const PA = await import('../client/systems/PaintedArt.js');
+  const { ALIEN_DATA } = await import('../client/entities/AlienData.js');
+  const dims = (f) => { try { const b = readFileSync(f); return [b.readUInt32BE(16), b.readUInt32BE(20), b.length]; } catch { return null; } };
+  const ids = [...Object.keys(SS.NPC_COLORS), ...ALIEN_DATA.map((a) => a.id)];
+  const missingIds = ids.filter((id) => !PA.PAINTED_PORTRAITS.includes(id));
+  check('ART-06 every NPC + envoy is in PAINTED_PORTRAITS', missingIds.length === 0, missingIds.join(','));
+  const badP = PA.PAINTED_PORTRAITS.filter((id) => { const d = dims(`client/art/port_${id}.png`) || dims(`client/art/alien_${id}.png`); return !d || d[0] !== 128 || d[1] !== 128 || d[2] > 40000; });
+  check('ART-06 painted busts: 128x128 PNG under 40KB each', badP.length === 0, badP.join(','));
+  const badS = PA.PAINTED_SCENES.filter((id) => { const d = dims(`client/art/scene_${id}.png`); return !d || d[0] !== 480 || d[1] !== 270 || d[2] > 300000; });
+  check('ART-06 painted backdrops: 480x270 PNG under 300KB', badS.length === 0, badS.join(','));
+  const ps = readFileSync('client/scenes/PlanetScene.js', 'utf8');
+  check('ART-06 PlanetScene: preload + dialogue bust + contact + reckoning backdrops',
+    /preloadPainted\(this\)/.test(ps) && /_showPaintedBust\(this\._diaNPC\)/.test(ps) &&
+    /paintedBackdrop\(this, 'contact'/.test(ps) && /paintedBackdrop\(this, 'reckoning'/.test(ps) && /paintedPortrait\(this, alien\.id\)/.test(ps));
+  check('ART-06 SpaceshipScene: painted C.O.R.A. tutorial bust', /paintedPortrait\(this, 'cora'\)/.test(readFileSync('client/scenes/SpaceshipScene.js', 'utf8')));
+  check('ART-07 season banner paints a plate per season (4 seasons, PlanetScene wires it)',
+    PA.SEASON_PLATES.length === 4 && PA.SEASON_PLATES.every((id) => PA.PAINTED_SCENES.includes(id)) &&
+    /paintedBackdrop\(this, SEASON_PLATES\[season\]/.test(ps));
+  check('ART-06 painted textures are NEAREST', /FilterMode\.NEAREST/.test(readFileSync('client/systems/PaintedArt.js', 'utf8')));
+}
+
+// ART-06b: painted busts keep each colonist's skin tone. The cast is brown
+// (NPC_SKIN); a generator defaulting to pale skin must fail here. Measures the
+// median warm (skin-like) pixel luminance in the face box of the 128px bust and
+// requires it within reach of the in-game tone (no lighter than target + 45).
+{
+  const zlib = await import('node:zlib');
+  const decode = (f) => {
+    const b = readFileSync(f); let o = 8, w = 0, h = 0, ct = 0, idat = [], plte = null;
+    while (o < b.length) { const n = b.readUInt32BE(o), t = b.toString('latin1', o + 4, o + 8), d = b.subarray(o + 8, o + 8 + n);
+      if (t === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); ct = d[9]; } else if (t === 'PLTE') plte = d; else if (t === 'IDAT') idat.push(d); o += 12 + n; }
+    const raw = zlib.inflateSync(Buffer.concat(idat)); const bpp = ct === 3 ? 1 : ct === 6 ? 4 : 3; const st = w * bpp;
+    const out = Buffer.alloc(h * st); let prev = Buffer.alloc(st);
+    for (let y = 0; y < h; y++) { const f0 = raw[y * (st + 1)], line = raw.subarray(y * (st + 1) + 1, (y + 1) * (st + 1)), cur = Buffer.alloc(st);
+      for (let i = 0; i < st; i++) { const a = i >= bpp ? cur[i - bpp] : 0, up = prev[i], c = i >= bpp ? prev[i - bpp] : 0; let v = line[i];
+        if (f0 === 1) v += a; else if (f0 === 2) v += up; else if (f0 === 3) v += (a + up) >> 1; else if (f0 === 4) { const p0 = a + up - c, pa = Math.abs(p0 - a), pb = Math.abs(p0 - up), pc = Math.abs(p0 - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? up : c; }
+        cur[i] = v & 255; } cur.copy(out, y * st); prev = cur; }
+    const px = (x, y) => { const i = y * st + x * bpp; if (ct === 3) { const k = out[i] * 3; return [plte[k], plte[k + 1], plte[k + 2]]; } return [out[i], out[i + 1], out[i + 2]]; };
+    return { w, h, px };
+  };
+  const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+  const SKIN = { luna: [150, 100, 66], zephyr: [196, 146, 102], vega: [126, 78, 50], quasar: [180, 124, 80], rhea: [204, 152, 100], astra: [184, 142, 98], orion: [116, 72, 46], comet: [152, 98, 62] };
+  const bad = [];
+  for (const [id, tgt] of Object.entries(SKIN)) {
+    const im = decode(`client/art/port_${id}.png`); const L = [];
+    for (let y = 40; y < 80; y++) for (let x = 40; x < 88; x++) { const c = im.px(x, y); if (c[0] > c[2] + 20 && c[0] >= c[1]) L.push(lum(c)); }
+    L.sort((a, b) => a - b); const m = L.length ? L[L.length >> 1] : 999;
+    if (m > lum(tgt) + 45) bad.push(`${id}:${m.toFixed(0)}>${(lum(tgt) + 45).toFixed(0)}`);
+  }
+  check('ART-06b painted busts keep the cast\'s brown skin tones', bad.length === 0, bad.join(' '));
+}
+
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 if (fail === 0) console.log('ALL GREEN ✓');
 process.exit(fail > 0 ? 1 : 0);

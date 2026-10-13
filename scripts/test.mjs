@@ -32,6 +32,7 @@ const offline = [
   'tests/verify_esm_boundary.mjs',
   'tests/verify_message_registry.mjs',
   'tests/verify_spectator.mjs',
+  'tests/verify_ship.mjs',
 ];
 const live = [
   'tests/verify_cooking_wire.mjs',

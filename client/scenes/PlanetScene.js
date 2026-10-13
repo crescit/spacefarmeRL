@@ -15,6 +15,7 @@ import { story } from '../systems/StoryService.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { ColonyHub } from '../systems/ColonyHub.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
+import { preloadPainted, paintedPortrait, paintedBackdrop, SEASON_PLATES } from '../systems/PaintedArt.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { reducedMotion, setReducedMotion } from '../systems/Motion.js';
 import { questView, questChip, QUESTS, QUEST_ORDER, rewardLine } from '../systems/QuestSystem.js';
@@ -250,6 +251,7 @@ class PlanetScene extends Phaser.Scene {
 
   preload() {
     AudioSystem.preload(this);
+    preloadPainted(this);   // ART-06 painted portraits + backdrops (optional)
   }
 
   init(data) {
@@ -489,7 +491,7 @@ class PlanetScene extends Phaser.Scene {
     }
     this.world.add(this.fieldDeck);
     const deckLabelStyle = {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', fontStyle: 'bold',
       color: '#f1d69b', stroke: '#17231f', strokeThickness: 3,
     };
     this.fieldDeckLabels = decks.map(function (d) {
@@ -631,7 +633,7 @@ class PlanetScene extends Phaser.Scene {
       spr.npcId = npc.id;
       this.world.add(spr);
       const label = this.add.text(tx, ty - 40, npc.name, {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#cfd6ff',
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#cfd6ff',
         stroke: '#000000', strokeThickness: 3,
       }).setOrigin(0.5).setDepth(npc.y + 0.6).setAlpha(0.9);
       this.world.add(label);
@@ -783,7 +785,7 @@ class PlanetScene extends Phaser.Scene {
     }).setOrigin(0.5));
     this.questMarker.add(this.add.text(0, 16, '', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
-      fontSize: '11px', fontStyle: 'bold',
+      fontSize: '12px', fontStyle: 'bold',
       color: '#ffe9a0', stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5));
     this.questEdgeArrow = this.add.graphics().setScrollFactor(0).setDepth(985).setVisible(false);
@@ -869,10 +871,10 @@ class PlanetScene extends Phaser.Scene {
     // ── ranch pasture — helmet animals render in a pen near the farm, and
     //    _refreshRanch() re-populates it live as you buy/sell ──
     this.ranchStage = this.add.container(38 * T, 27 * T).setDepth(92);
-    this.ranchSign = this.add.text(0, -40, 'SPACE RANCH', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#9ddd72', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
+    this.ranchSign = this.add.text(0, -40, 'SPACE RANCH', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#9ddd72', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
     this.ranchStage.add(this.ranchSign);
     this.ranchStage.add(this.add.rectangle(0, 24, 130, 58, 0x141a26, 0.5).setStrokeStyle(1, 0x39c5bb));
-    this.ranchStage.add(this.add.text(0, 56, '[1][2][3] buy · feed daily', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8d8d8' }).setOrigin(0.5));
+    this.ranchStage.add(this.add.text(0, 56, '[1][2][3] buy · feed daily', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#a8d8d8' }).setOrigin(0.5));
     this._animalsSig = '';
     this.ranchStage.setVisible(false);
     // ── asteroid mining spot — a cracked rock you mine for space ore.
@@ -885,14 +887,14 @@ class PlanetScene extends Phaser.Scene {
     this.casting2 = false;
     this.mineHint = this.add.container(0, 0).setDepth(988);
     this.mineHint.add(this.add.rectangle(0, 10, 252, 24, 0x101a26, 0.88).setStrokeStyle(1, 0xd8a05a));
-    this.mineHint.add(this.add.text(0, 10, 'MINE the vein (A/SPACE · pickaxe)', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#ffe9a0' }).setOrigin(0.5));
+    this.mineHint.add(this.add.text(0, 10, 'MINE the vein (A/SPACE · pickaxe)', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#ffe9a0' }).setOrigin(0.5));
     this.mineHint.setVisible(false);
 
     this.casting = false;
     // accessible fishing hint — floats above the player when near the pond
     this.fishHint = this.add.container(0, 0).setDepth(988);
     const hintBg = this.add.rectangle(0, 10, 190, 24, 0x101a26, 0.88).setStrokeStyle(1, 0x39c5bb);
-    const hintTxt = this.add.text(0, 10, '[J] CAST · pick a spot', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#a8eeff' }).setOrigin(0.5);
+    const hintTxt = this.add.text(0, 10, '[J] CAST · pick a spot', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#a8eeff' }).setOrigin(0.5);
     this._fishHintTxt = hintTxt;
     this.fishHint.add([hintBg, hintTxt]);
     // widen the hint pill so the longer labels fit
@@ -904,7 +906,7 @@ class PlanetScene extends Phaser.Scene {
     this.deepDrop.fillStyle(0x12686e, 0.9).fillCircle(ddx, ddy, 9);
     this.deepDrop.fillStyle(0x39c5bb, 0.8).fillCircle(ddx, ddy, 5);
     this.deepDrop.lineStyle(1.5, 0x9ddd72, 0.7).strokeCircle(ddx, ddy, 9);
-    this.deepDropLabel = this.add.text(ddx, ddy + 16, 'DEEP DROP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(95);
+    this.deepDropLabel = this.add.text(ddx, ddy + 16, 'DEEP DROP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(95);
     // the shore tap — where the watering can refills. Equip the can and press
     // A/SPACE on the pond's edge; a small teal faucet makes the spot visible.
     this.shoreTap = this.add.graphics().setDepth(94);
@@ -912,7 +914,7 @@ class PlanetScene extends Phaser.Scene {
     this.shoreTap.fillStyle(0x0d4a50, 0.9).fillCircle(stx, sty, 7);
     this.shoreTap.fillStyle(0x39c5bb, 0.95).fillCircle(stx, sty, 4);
     this.shoreTap.lineStyle(1.2, 0x9ddd72, 0.6).strokeCircle(stx, sty, 7);
-    this.shoreTapLabel = this.add.text(stx, sty + 15, 'SHORE TAP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(95);
+    this.shoreTapLabel = this.add.text(stx, sty + 15, 'SHORE TAP', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#a8eeff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(95);
     this.uKey = this.input.keyboard.addKey('U');
     this.vKey = this.input.keyboard.addKey('V');
     this.qKey = this.input.keyboard.addKey('Q'); // The Stardust Story — quest log
@@ -1029,10 +1031,10 @@ class PlanetScene extends Phaser.Scene {
     const plate = this.add.rectangle(0, 0, 150, 22, 0x081a20, 0.88)
       .setStrokeStyle(1, 0x39c5bb, 0.9);
     const keyTxt = this.add.text(0, 0, 'SPACE', {
-      fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', fontStyle: 'bold', color: '#f7d698',
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', fontStyle: 'bold', color: '#f7d698',
     }).setOrigin(0, 0.5);
     const bodyTxt = this.add.text(0, 0, '', {
-      fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#b8ffcf', stroke: '#061015', strokeThickness: 2,
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#b8ffcf', stroke: '#061015', strokeThickness: 2,
     }).setOrigin(0, 0.5);
     // World-space (scrollFactor 1): x/y are the target's world pixels, so the
     // chip stays pinned above it while the camera follows the player.
@@ -1083,17 +1085,17 @@ class PlanetScene extends Phaser.Scene {
     this.energyTrack = this.add.rectangle(38, y + 11, 170, 5, 0x16363a, 1).setOrigin(0, 0.5).setDepth(999); screenFix.push(this.energyTrack);
     this.energyFill = this.add.rectangle(38, y + 11, 170, 5, 0x6be7d0, 1).setOrigin(0, 0.5).setDepth(1000); screenFix.push(this.energyFill);
     this.hudDay = this.add.text(width - 34, y, '', {
-      ...f, fontSize: '11px', color: '#f8d797', align: 'right', stroke: '#061015', strokeThickness: 3,
+      ...f, fontSize: '12px', color: '#f8d797', align: 'right', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0.5).setDepth(1000); screenFix.push(this.hudDay);
     this.colonyMark = this.add.text(width - 18, 66, // below the HTML mute/touch buttons (top-right, ~58px)
       'B-612  /  FRONTIER AGRICULTURE', {
-      ...f, fontSize: '11px', color: '#b8e0d8',
+      ...f, fontSize: '12px', color: '#b8e0d8',
       stroke: '#061015', strokeThickness: 3,
     }).setOrigin(1, 0).setDepth(1000); screenFix.push(this.colonyMark);
     this.questPlate = this.add.rectangle(12, 8, Math.min(430, width * 0.54), 38, 0x081a20, 0.78)
       .setOrigin(0, 0).setStrokeStyle(1, 0x6be7d0, 0.45).setDepth(997).setVisible(false); screenFix.push(this.questPlate);
     this.questChip = this.add.text(24, 18, '', {
-      ...f, fontSize: '11px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
+      ...f, fontSize: '12px', color: '#d5f4e8', stroke: '#061015', strokeThickness: 3,
     }).setOrigin(0, 0).setDepth(1000); screenFix.push(this.questChip);
     screenFix.forEach(o => o.setScrollFactor(0));
   }
@@ -1108,7 +1110,7 @@ class PlanetScene extends Phaser.Scene {
       tail: {},
       textX: boxL + 58, textTopY: boxT + 46,
       wrapWidth: bw - 82,
-      fontSize: '10px',
+      fontSize: '12px',
       clipTop: boxT + 38, clipHeight: bh - 56,
     });
     // Alias the old field names so the rest of the scene (input, update,
@@ -1125,6 +1127,11 @@ class PlanetScene extends Phaser.Scene {
     this.diaScrollDown  = this.dialog.scrollDown;
     this.diaCollapseBtn = this.dialog.collapseBtn;
     this._portraitBaseY = this.dialog.portraitBaseY || (boxT + 58);
+    // ART-06: painted bust — the speaker's Qwen-painted portrait stands on the
+    // dialogue box's top-left edge (the 40px pixel face inside keeps the mouth).
+    this.paintedBust = this.add.image(boxL + 78, boxT + 2, 'port.nova_0')
+      .setOrigin(0.5, 1).setScrollFactor(0).setDepth(998).setVisible(false);
+    this.paintedBustFrame = this.add.graphics().setScrollFactor(0).setDepth(998.5).setVisible(false);
     // dialogue state kept here — update()/input read these
     this._diaNPC = null; this._diaFooter = ''; this._diaDone = true;
     this._diaFull = ''; this._diaShown = 0;
@@ -1141,6 +1148,7 @@ class PlanetScene extends Phaser.Scene {
     this._diaFooter = opts.footer || '';
     this._diaFace = opts.face || 0;   // [SF46] 3 = warm (loved gift), 4 = troubled (hated gift); held for the line
     if (this.dialog.portrait) this.dialog.setPortrait(`port.${this._diaNPC}_${this._diaFace}`);
+    this._showPaintedBust(this._diaNPC);
     this.dialog.setText(full, {
       title: opts.title,
       footer: opts.footer,
@@ -1168,10 +1176,15 @@ class PlanetScene extends Phaser.Scene {
   buildContactUI(width, height) {
     this.contactPanel = this.add.container(width / 2, height / 2).setDepth(1200).setScrollFactor(0).setVisible(false);
     const panelWidth = Math.min(720, width - 40);
-    const bg = this.add.rectangle(0, 0, panelWidth, 500, 0x07121c, 0.98).setStrokeStyle(2, 0x7adfd5);
+    // ART-06: painted first-contact sky behind the council, envoy bust on the plate
+    this.contactBackdrop = paintedBackdrop(this, 'contact', 0, 0, width, height);
+    if (this.contactBackdrop) this.contactPanel.add(this.contactBackdrop.setAlpha(0.9));
+    const bg = this.add.rectangle(0, 0, panelWidth, 500, 0x07121c, this.contactBackdrop ? 0.86 : 0.98).setStrokeStyle(2, 0x7adfd5);
     this.contactTitle = this.add.text(0, -220, "FIRST CONTACT COUNCIL", { fontFamily: "system-ui, sans-serif", fontSize: "16px", color: "#f2d99a", fontStyle: "bold" }).setOrigin(0.5);
     this.contactPremise = this.add.text(0, -182, "", { fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#e9f3f4", align: "center", wordWrap: { enable: true, width: panelWidth - 70 }, lineSpacing: 4 }).setOrigin(0.5, 0);
     this.contactPanel.add([bg, this.contactTitle, this.contactPremise]);
+    this.contactEnvoy = this.add.image(-panelWidth / 2 - 4, -250, 'port.nova_0').setOrigin(0, 0).setVisible(false);
+    this.contactPanel.add(this.contactEnvoy);
     this.contactRows = CONTACT_DOCTRINES.map((doctrine, index) => {
       const y = -55 + index * 62;
       const row = this.add.rectangle(0, y, panelWidth - 70, 52, 0x132432, 0.96).setStrokeStyle(1, doctrine.color).setInteractive({ useHandCursor: true });
@@ -1195,7 +1208,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#7ef0ff',
     }).setOrigin(0.5);
     const geContent = this.add.text(0, -40, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#e8ecff',
       align: 'center', lineSpacing: 9,
     }).setOrigin(0.5);
     const geClose = this.add.text(0, 140, '[CLOSE: SPACE]', {
@@ -1210,7 +1223,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9ddd72',
     }).setOrigin(0.5);
     const shopContent = this.add.text(0, -40, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#e8ecff',
       align: 'center', lineSpacing: 9,
     }).setOrigin(0.5);
     const shopClose = this.add.text(0, 140, '[CLOSE: SPACE]', {
@@ -1225,7 +1238,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
     }).setOrigin(0.5);
     const ranchContent = this.add.text(0, -40, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#e8ecff',
       align: 'center', lineSpacing: 9,
     }).setOrigin(0.5);
     const ranchClose = this.add.text(0, 140, '[CLOSE: SPACE]', {
@@ -1241,7 +1254,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
     }).setOrigin(0.5);
     const chestContent = this.add.text(0, -20, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#e8ecff',
       align: 'center', lineSpacing: 8,
     }).setOrigin(0.5);
     this.chestPanel.add([chestBg, chestTitle, chestContent]);
@@ -1254,7 +1267,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '13px', color: '#ffe9a0',
     }).setOrigin(0.5);
     const recipeContent = this.add.text(0, -118, '', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#e8ecff',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#e8ecff',
       lineSpacing: 5,
     }).setOrigin(0.5, 0);
     this.recipePanel.add([recipeBg, recipeTitle, recipeContent]);
@@ -1267,7 +1280,7 @@ class PlanetScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '15px', color: '#7ef0ff', fontStyle: 'bold',
     }).setOrigin(0.5);
     const qContent = this.add.text(0, -10, '', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#e8ecff', lineSpacing: 8,
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#e8ecff', lineSpacing: 8,
     }).setOrigin(0.5, 0);
     const qClose = this.add.text(0, 168, '[Q] CLOSE', {
       fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#f7d698',
@@ -1316,7 +1329,7 @@ class PlanetScene extends Phaser.Scene {
       this._savedBlipShown = now;
       const { width } = this.game.config;
       const t = this.add.text(width - 14, 26, '💾 SAVED', {
-        fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#b0c8d1',
+        fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#b0c8d1',
         stroke: '#0a1020', strokeThickness: 3,
       }).setOrigin(1, 0.5).setDepth(1000).setAlpha(0);
       this.tweens.add({ targets: t, alpha: 0.9, duration: 400 });
@@ -1404,7 +1417,7 @@ class PlanetScene extends Phaser.Scene {
     const stageGlow = this.add.rectangle(px(FEST_STAGE.x), py(FEST_STAGE.y) + 14, 5.6 * T, 0.8 * T, 0x2e7d4f, 0.18);
     add(stageGlow);
     const sign = this.add.text(px(FEST_STAGE.x), py(FEST_STAGE.y) - 12, '★ EARTH DAY ★', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#ffe9a0', fontStyle: 'bold',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#ffe9a0', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(12.4);
     add(sign);
 
@@ -1659,7 +1672,12 @@ rations, and your name on the manifest.
     ];
     const name = SEASON_NAMES[season] || 'SPRING';
     const sub = SUBTITLES[season] || SUBTITLES[0];
-    const c = this.add.container(width / 2, height / 2 - 60)
+    // ART-07 — a painted season plate fills the screen behind the banner (falls
+    // back to the plain banner when the PNG is missing). The banner drops to the
+    // lower third so it doesn't sit on the painting's focal point.
+    const art = paintedBackdrop(this, SEASON_PLATES[season] || SEASON_PLATES[0], width / 2, height / 2, width, height);
+    if (art) art.setDepth(1499).setScrollFactor(0).setAlpha(0);
+    const c = this.add.container(width / 2, art ? Math.round(height * 0.74) : height / 2 - 60)
       .setDepth(1500).setScrollFactor(0).setAlpha(0);
     const plate = this.add.graphics();
     plate.fillStyle(0x0c1019, 0.88);
@@ -1688,6 +1706,11 @@ rations, and your name on the manifest.
         targets: c, alpha: 0, duration: 600, delay: 2600,
         onComplete: () => c.destroy(),
       });
+      if (art) {
+        this.tweens.add({ targets: art, alpha: 1, duration: 400 });
+        this.tweens.add({ targets: art, scale: art.scale * 1.04, duration: 3600 });
+        this.tweens.add({ targets: art, alpha: 0, duration: 600, delay: 2600, onComplete: () => art.destroy() });
+      }
       // SF62 — the banner owns the screen until its fade completes (400 fade +
       // 2600 hold + 600 fade = 3600ms); the reckoning queues behind it.
       this.time.delayedCall(3600, () => { this._bannerActive = false; });
@@ -1704,6 +1727,12 @@ rations, and your name on the manifest.
     this.showingReckoning = true;
     if (this.reckoningPanel) this.reckoningPanel.destroy(true);
     this.reckoningPanel = this.add.container(width / 2, height / 2).setScrollFactor(0).setDepth(1650);
+    // ART-06: the season closes over a painted end-of-harvest dusk
+    const reckBg = paintedBackdrop(this, 'reckoning', 0, 0, width, height);
+    if (reckBg) {
+      this.reckoningPanel.add(reckBg);
+      if (!reducedMotion()) { reckBg.setAlpha(0); this.tweens.add({ targets: reckBg, alpha: 1, duration: 900 }); }
+    }
     const plate = this.add.graphics();
     plate.fillStyle(0x0c1019, 0.92);
     plate.fillRoundedRect(-260, -152, 520, 300, 12);
@@ -1741,7 +1770,7 @@ rations, and your name on the manifest.
     const footY = Math.min(122, y + 10);
     const foot = this.add.text(-240, footY, 'SPACE — the new season begins', {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
-      fontSize: '11px', color: '#7c95a6',
+      fontSize: '12px', color: '#7c95a6',
     }).setOrigin(0, 0);
     this.reckoningPanel.add(foot);
     this.reckoningFoot = foot;
@@ -1858,7 +1887,7 @@ rations, and your name on the manifest.
     const rumor = 'Rumor: ' + story.rumors.rumorForDay(d.day);
     const { width } = this.game.config;
     const card = this.add.text(width / 2, 108, head + '\n' + body + '\n' + rumor, {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#cfe8ff',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#cfe8ff',
       align: 'center', lineSpacing: 6, backgroundColor: '#0a0f1fee', padding: { x: 14, y: 8 },
       stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5).setDepth(1100).setAlpha(0);
@@ -1866,7 +1895,7 @@ rations, and your name on the manifest.
     // screen — slate card above it, gossip beneath it, both fading together.
     const { height } = this.game.config;
     const rumorLine = this.add.text(width / 2, height - 24, rumor, {
-      fontFamily: "'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px',
+      fontFamily: "'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px',
       color: '#67e1cd', align: 'center',
       backgroundColor: '#0a0f1fdd', padding: { x: 12, y: 4 },
       stroke: '#000', strokeThickness: 2,
@@ -2180,7 +2209,7 @@ rations, and your name on the manifest.
     const fishTxt = this.add.text(0, -6, label, { fontFamily: "system-ui,'Segoe UI'", fontSize: '19px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
     const worthTxt = this.add.text(0, 20, `+${worth} CR to your inventory`, { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#9ddd72' }).setOrigin(0.5);
     const kids = [panel, title, fishTxt, worthTxt];
-    if (note) { const nt = this.add.text(0, 38, note, { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8d8d8' }).setOrigin(0.5); kids.push(nt); }
+    if (note) { const nt = this.add.text(0, 38, note, { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#a8d8d8' }).setOrigin(0.5); kids.push(nt); }
     c.add(kids);
     c.setScale(0.6);
     this.tweens.add({ targets: c, scale: 1, duration: 220, ease: 'Back.out' });
@@ -2261,7 +2290,7 @@ rations, and your name on the manifest.
       this.mineProg.add(this.add.rectangle(0, 0, 66, 8, 0x101a26, 0.88).setStrokeStyle(1, 0xd8a05a));
       this.mineProgFill = this.add.rectangle(-32, 0, 64, 5, 0x9ddd72, 0.9).setOrigin(0, 0.5);
       this.mineProg.add(this.mineProgFill);
-      this.mineProgTxt = this.add.text(0, 16, '', { fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#ffe9a0' }).setOrigin(0.5);
+      this.mineProgTxt = this.add.text(0, 16, '', { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#ffe9a0' }).setOrigin(0.5);
       this.mineProg.add(this.mineProgTxt);
     }
     if (!max || max <= 0) { this.mineProg.setVisible(false); return; }
@@ -2279,7 +2308,7 @@ rations, and your name on the manifest.
     const title = this.add.text(0, -32, 'MINED', { fontFamily: "system-ui,'Segoe UI'", fontSize: '13px', color: '#d8a05a' }).setOrigin(0.5);
     const oreTxt = this.add.text(0, -6, label, { fontFamily: "system-ui,'Segoe UI'", fontSize: '19px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
     const worthTxt = this.add.text(0, 20, `+${worth} CR ore to inventory`, { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#9ddd72' }).setOrigin(0.5);
-    if (note) { const noteTxt = this.add.text(0, 40, note, { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8d8d8' }).setOrigin(0.5); c.add(noteTxt); }
+    if (note) { const noteTxt = this.add.text(0, 40, note, { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#a8d8d8' }).setOrigin(0.5); c.add(noteTxt); }
     c.add([panel, title, oreTxt, worthTxt]);
     c.setScale(0.6);
     this.tweens.add({ targets: c, scale: 1, duration: 220, ease: 'Back.out' });
@@ -2337,7 +2366,7 @@ rations, and your name on the manifest.
       const r = this.add.rectangle(x, 150, w, 26, 0x132432, 0.94)
         .setStrokeStyle(1, 0xd8a05a).setInteractive({ useHandCursor: true });
       const t = this.add.text(x, 150, label, {
-        fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3,
+        fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5);
       r.on('pointerdown', cb);
       this.recipePanel.add([r, t]);
@@ -2455,7 +2484,7 @@ rations, and your name on the manifest.
     room.door = { x: cx + W / 2 - 30, y: cy + H / 2 - 24 };
     room.points.push({ x: room.door.x, y: room.door.y, action: 'exit' });
     stage.add(this.add.text(cx + W / 2 - 30, cy + H / 2 - 58, 'DOOR', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3,
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#ffe9a0', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5));
 
     // interior player (drawn inside the room)
@@ -2506,7 +2535,7 @@ rations, and your name on the manifest.
     const sign = (x, y, name) => {
       stage.add(this.add.image(x, y, 'int.signplate').setScale(1));
       stage.add(this.add.text(x - 2, y, name, {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', fontStyle: 'bold',
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', fontStyle: 'bold',
         color: '#f2d9a2', stroke: '#061116', strokeThickness: 3,
       }).setOrigin(0.5));
     };
@@ -2536,10 +2565,10 @@ rations, and your name on the manifest.
       stage.add(spouse);
       room.spouse = spouse; room.spouseBaseY = cy + 42;
       stage.add(this.add.text(cx + 95, cy + 14, '', {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe9a0',
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#ffe9a0',
       }).setOrigin(0.5));
       stage.add(this.add.text(cx, cy - H / 2 + 78, 'SLEEP IN YOUR BED (SPACE)', {
-        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#b8c0e0',
+        fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#b8c0e0',
         stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5));
     } else if (kind === 'shop') {
@@ -3465,7 +3494,7 @@ rations, and your name on the manifest.
         this.world.add(spr);
         const label = this.add.text(p.x, p.y - 40, p.name || 'Farmer', {
           fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
-          fontSize: '11px', color: '#ffd6f0',
+          fontSize: '12px', color: '#ffd6f0',
           stroke: '#000000', strokeThickness: 3,
         }).setOrigin(0.5).setDepth(p.y + 2).setAlpha(0.9);
         this.world.add(label);
@@ -4070,7 +4099,10 @@ rations, and your name on the manifest.
           break;
         }
         if (this.waterLevel < WATER_USE_COST) {
-          this.showToast('Can is empty — refill at the shore (east).');
+          if (!this._emptyCanToastAt || this.time.now - this._emptyCanToastAt > 2500) {
+            this._emptyCanToastAt = this.time.now;
+            this.showToast('💧 Can is empty — refill at the pond (stand on the shore, press SPACE)');
+          }
           break;
         }
         if (!s.watered) {
@@ -4084,6 +4116,15 @@ rations, and your name on the manifest.
           this._waterGlint(s.x, s.y);                 // SF30 dew motes rise + fade
           if (this.audio) this.audio.sfx('glow');
           this.showToast('Watered with stardust dew');
+          // SF65: the tank drains with each water action — the first time it
+          // drops below WATER_USE_COST, tell the player where the tap is.
+          const tankBefore = this.waterLevel;
+          this.waterLevel = Math.max(0, (tankBefore ?? 0) - WATER_USE_COST);
+          if (tankBefore >= WATER_USE_COST && this.waterLevel < WATER_USE_COST &&
+              (!this._emptyCanToastAt || this.time.now - this._emptyCanToastAt > 2500)) {
+            this._emptyCanToastAt = this.time.now;
+            this.showToast('💧 Can is empty — refill at the pond (stand on the shore, press SPACE)');
+          }
         } else {
           this.showToast('Already watered today');
         }
@@ -4156,9 +4197,9 @@ rations, and your name on the manifest.
       const label = this.add.text(-(panelW / 2 - 30), y, `${CROPS[key].label}${inSeason ? '  ✓' : ''}${cs.regrow ? '' : '  ʘ'}`,
         { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: inSeason ? '#c8ffd8' : '#98aabc', stroke: '#000', strokeThickness: 2 }).setOrigin(0, 0.5);
       const seasonTxt = this.add.text(panelW / 2 - 74, y - 6, cs.seasons.map(si => SEASON_NAMES[si][0]).join(' '),
-        { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff' }).setOrigin(1, 0.5);
+        { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#a8eeff' }).setOrigin(1, 0.5);
       const regrowTxt = this.add.text(panelW / 2 - 74, y + 10, cs.regrow ? '↻ regrows' : '① one harvest',
-        { fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: cs.regrow ? '#9ddd72' : '#ffdd44' }).setOrigin(1, 0.5);
+        { fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: cs.regrow ? '#9ddd72' : '#ffdd44' }).setOrigin(1, 0.5);
       c.add([rowBg, label, seasonTxt, regrowTxt]);
       rowBg.on('pointerdown', () => { this._plantCrop(ft, key); c.destroy(); this.cropMenu = null; });
     });
@@ -4212,7 +4253,7 @@ rations, and your name on the manifest.
       entries.forEach(([h, b], i) => {
         const y = -(H / 2) + 70 + i * rowH;
         this._codexGroup.add(this.add.text(-280, y, h.toUpperCase(), { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#ffd98a', fontStyle: 'bold' }));
-        this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#c8d6ff', wordWrap: { enable: true, width: 560 }, lineSpacing: 4 }));
+        this._codexGroup.add(this.add.text(-280, y + 16, b, { fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#c8d6ff', wordWrap: { enable: true, width: 560 }, lineSpacing: 4 }));
       });
       this._codexGroup.add(this.add.text(0, H / 2 - 22, story.codex.closeHint, { fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#f7d698' }).setOrigin(0.5));
     }
@@ -4304,6 +4345,17 @@ rations, and your name on the manifest.
     if (this.dialog) this.dialog.hide();
     this.contactTitle.setText(alien.glyph + " " + alien.name.toUpperCase() + " // COLONY COUNCIL");
     this.contactPremise.setText(alien.premise + "\n\n" + alien.stakes);
+    const envoyKey = paintedPortrait(this, alien.id);
+    if (this.contactEnvoy) {
+      // outside the plate's left edge when the screen has room, else a small
+      // badge in the title row (never over the premise text)
+      const pw = Math.min(720, this.game.config.width - 40);
+      const roomy = (this.game.config.width - pw) / 2 >= 140;
+      const sz = roomy ? 120 : 52;
+      if (envoyKey) this.contactEnvoy.setTexture(envoyKey).setDisplaySize(sz, sz)
+        .setPosition(roomy ? -pw / 2 - sz - 12 : -pw / 2 + 8, roomy ? -250 : -246).setVisible(true);
+      else this.contactEnvoy.setVisible(false);
+    }
     this.contactNote.setText(prior ? "Current doctrine: " + prior.toUpperCase() + " · choose again to revise the charter" : "No reward · no correct answer · this becomes colony history");
     this.contactPanel.setVisible(true);
   }
@@ -4413,7 +4465,7 @@ rations, and your name on the manifest.
     // tiny amber heart-count badge under the portrait
     if (!this._moodHeartText) {
       this._moodHeartText = this.add.text(plate.x, plate.y + 32, '', {
-        fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#f7d698',
+        fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#f7d698',
         stroke: '#061015', strokeThickness: 2,
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
     }
@@ -4425,6 +4477,25 @@ rations, and your name on the manifest.
 
   // [SF38] clear the heart badge and reset the plate to its neutral colony look
   // when dialogue closes (called from closeAllPanels alongside dialog.hide()).
+  // ART-06: show the speaker's painted bust (or hide it when there is none).
+  _showPaintedBust(id) {
+    if (!this.paintedBust) return;
+    const key = paintedPortrait(this, id);
+    if (!key) { this.paintedBust.setVisible(false); this.paintedBustFrame.setVisible(false); return; }
+    const size = Math.round(Math.min(168, this.game.config.height * 0.26));
+    const was = this.paintedBust.visible && this.paintedBust.texture.key === key;
+    this.paintedBust.setTexture(key).setDisplaySize(size, size).setVisible(true);
+    const f = this.paintedBustFrame.clear();
+    const x0 = this.paintedBust.x - size / 2, y0 = this.paintedBust.y - size;
+    f.lineStyle(2, 0x67e1cd, 1).strokeRect(x0, y0, size, size);
+    f.fillStyle(0xf7d698, 1).fillRect(x0 - 1, y0 - 1, 6, 2).fillRect(x0 + size - 5, y0 - 1, 6, 2);
+    f.setVisible(true);
+    if (!was && !reducedMotion()) {
+      this.paintedBust.setAlpha(0); f.setAlpha(0);
+      this.tweens.add({ targets: [this.paintedBust, f], alpha: 1, duration: 220 });
+    } else { this.paintedBust.setAlpha(1); f.setAlpha(1); }
+  }
+
   _clearPortraitMood() {
     const plate = this.dialog && this.dialog.portraitPlate;
     if (plate) plate.setStrokeStyle(2, 0x39c5bb).setFillStyle(0x141426, 1);
@@ -4636,6 +4707,7 @@ rations, and your name on the manifest.
   // ── panels ──
   closeAllPanels() {
     if (this.dialog) { this.dialog.hide(); this._clearPortraitMood(); }
+    if (this.paintedBust) { this.paintedBust.setVisible(false); this.paintedBustFrame.setVisible(false); }
     this._diaFace = 0;   // [SF46] reaction face ends with the line   // hides + resets dialogue box/scroll/collapse
     this._diaDone = true;
     this.gePanel.setVisible(false);
@@ -4694,10 +4766,10 @@ rations, and your name on the manifest.
       fontFamily: "system-ui,'Segoe UI'", fontSize: '13px', color: '#f6ecd4',
     }).setOrigin(0, 0).setScrollFactor(0);
     const foot = this.add.text(-240, 132, '[CLOSE: ESC]', {
-      fontFamily: "system-ui,'Segoe UI'", fontSize: '11px', color: '#f7d698',
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#f7d698',
     }).setOrigin(0, 0).setScrollFactor(0);
     const empty = this.add.text(-240, -122, '(awaiting the stream…)', {
-      fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#7c95a6',
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '12px', color: '#7c95a6',
     }).setOrigin(0, 0).setScrollFactor(0);
     this.corridorPanel.add([plate, head, foot, empty]);
     this.corridorHead = head; this.corridorFoot = foot; this.corridorEmpty = empty;
@@ -4715,7 +4787,7 @@ rations, and your name on the manifest.
     const st = styleBy[kind] || styleBy.result;
     if (this.corridorEmpty && this.corridorEmpty.visible) this.corridorEmpty.setVisible(false);
     const line = this.add.text(-240, 0, String(text || ''), {
-      fontFamily: "system-ui,'Segoe UI'", fontSize: '10px',
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '12px',
       color: st.color, fontStyle: st.fontStyle || 'normal',
       wordWrap: { enable: true, width: 470 }, stroke: '#061015', strokeThickness: 2,
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(1501);
@@ -4840,10 +4912,10 @@ rations, and your name on the manifest.
         .setInteractive({ useHandCursor: true });
       rect.on('pointerdown', () => onTap(d, i));
       const label = this.add.text(-width / 2 + 18, y, d.label, {
-        ...f, fontSize: '11px', fontStyle: 'bold', color: '#e8ecff',
+        ...f, fontSize: '12px', fontStyle: 'bold', color: '#e8ecff',
       }).setOrigin(0, 0.5);
       const sub = this.add.text(width / 2 - 18, y, d.sub || '', {
-        ...f, fontSize: '11px', color: '#a9d9d0',
+        ...f, fontSize: '12px', color: '#a9d9d0',
       }).setOrigin(1, 0.5);
       panel.add([rect, label, sub]);
       this[store].push(rect, label, sub);
@@ -5022,7 +5094,7 @@ rations, and your name on the manifest.
         ...f, fontSize: '13px', color: cur ? '#9dffec' : '#e8ecff', fontStyle: 'bold',
       }).setOrigin(0, 0.5);
       const hint = this.add.text(-206, y + 12, d.sub, {
-        ...f, fontSize: '11px', color: '#a9d9d0',
+        ...f, fontSize: '12px', color: '#a9d9d0',
       }).setOrigin(0, 0.5);
       this.backpackPanel.add([rect, name, hint]);
       this._backpackDynamic.push(rect, name, hint);
@@ -5040,7 +5112,7 @@ rations, and your name on the manifest.
     };
     const parts = Object.keys(inv).filter(k => (inv[k] || 0) > 0).map(k => `${ITEM_LABEL[k] || k} ×${inv[k]}`);
     const cargo = this.add.text(0, 152, 'CARGO  ·  ' + (parts.length ? parts.join('   ') : 'empty — plant a field!'), {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '11px', color: '#a9d9d0',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#a9d9d0',
       align: 'center', wordWrap: { enable: true, width: 440 },
     }).setOrigin(0.5, 0);
     this.backpackPanel.add(cargo);
@@ -5084,12 +5156,12 @@ rations, and your name on the manifest.
       }).setOrigin(0, 0.5);
       const hint = this.add.text(-206, y + 12,
         next ? `${TOOL_TIER_NAME[cur]} → ${TOOL_TIER_NAME[next]}   ·   ${cost} CR${id === 'watering' ? `   ·   tank 💧 ${TANK_MAX_FOR[next]}` : ''}` : `${TOOL_TIER_NAME[cur]} — the finest in the colony${id === 'watering' ? `   ·   tank 💧 ${TANK_MAX_FOR[cur]}` : ''}`,
-        { ...f, fontSize: '10px', color: next ? '#8fb8ae' : '#d8a05a' }).setOrigin(0, 0.5);
+        { ...f, fontSize: '12px', color: next ? '#8fb8ae' : '#d8a05a' }).setOrigin(0, 0.5);
       this.smithyPanel.add([rect, name, hint]);
       this._smithyDynamic.push(rect, name, hint);
     });
     const foot = this.add.text(0, 152, `${this.credits ?? '—'} CR on hand   ·   higher tiers cut energy costs and hold more water`, {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', color: '#ffe9a0',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '12px', color: '#ffe9a0',
       align: 'center',
     }).setOrigin(0.5);
     this.smithyPanel.add(foot);
@@ -5128,7 +5200,7 @@ rations, and your name on the manifest.
     this._toastKey = msg; this._toastStamp = now;
     const { width } = this.game.config;
     const toast = this.add.text(width / 2, 44, msg, {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#b8ffcf',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '12px', color: '#b8ffcf',
       backgroundColor: '#070714cc', padding: { x: 10, y: 6 },
       stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5).setDepth(1100);

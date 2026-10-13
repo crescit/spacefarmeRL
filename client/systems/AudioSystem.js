@@ -12,6 +12,12 @@ class AudioSystem {
   // Live instances + global mute, so the 🔊 button silences every scene's BGM.
   static _instances = [];
   static _muted = false;
+  // SHIP-02: player SFX/BGM volume (0..1) from the pause menu slider.
+  static _sfxVol = 1;
+  static setSfxVolume(v) {
+    AudioSystem._sfxVol = Math.max(0, Math.min(1, Number(v) || 0));
+    for (const i of AudioSystem._instances) i.applyMute();
+  }
   static setMuted(m) {
     AudioSystem._muted = !!m;
     for (const i of AudioSystem._instances) i.applyMute();
@@ -104,14 +110,14 @@ class AudioSystem {
   // then the user clicks mute later). The instance flag is kept in sync too.
   applyMute() {
     this.muted = AudioSystem._muted;
-    if (this.bgm) this.bgm.setVolume(this.muted ? 0 : 0.32);
+    if (this.bgm) this.bgm.setVolume(this.muted ? 0 : 0.32 * AudioSystem._sfxVol);
   }
 
 
   // play a one-shot SFX by registered key (silenced while global mute is on)
   sfx(key, { volume = 0.5 } = {}) {
-    if (!this.ready || !this.scene.sound || AudioSystem._muted) return;
-    try { this.scene.sound.play(key, { volume }); } catch (e) { /* no audio */ }
+    if (!this.ready || !this.scene.sound || AudioSystem._muted || AudioSystem._sfxVol <= 0) return;
+    try { this.scene.sound.play(key, { volume: volume * AudioSystem._sfxVol }); } catch (e) { /* no audio */ }
   }
 }
 
