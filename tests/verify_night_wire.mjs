@@ -22,8 +22,10 @@ function checkNightScene() {
   const src = readFileSync(SCENE, 'utf8');
   console.log('  — SF08 static night-light gate —');
   // 1: night overlay alpha ≥ 0.6
-  const alpha = src.match(/nightOverlay\.setAlpha\(this\.isNight \? ([\d.]+) : 0\)/);
-  ok('night overlay alpha ≥ 0.6', !!alpha && Number(alpha[1]) >= 0.6, alpha ? `alpha=${alpha[1]}` : 'no nightOverlay.setAlpha line');
+  // (SF32 tweens the overlay to `toNight`; older builds set it directly)
+  const alpha = src.match(/toNight = this\.isNight \? ([\d.]+) : 0/)
+    || src.match(/nightOverlay\.setAlpha\(this\.isNight \? ([\d.]+) : 0\)/);
+  ok('night overlay alpha ≥ 0.6', !!alpha && Number(alpha[1]) >= 0.6, alpha ? `alpha=${alpha[1]}` : 'no night overlay alpha line');
   // deeper blue tint (e.g. 0x0e1838) on the overlay rectangle
   const tint = src.match(/nightOverlay = this\.add\.rectangle\([^;]*, 0x([0-9a-fA-F]{6}), 0\)/);
   ok('night overlay uses a deeper blue tint', !!tint && tint[1] !== '142048', tint ? `0x${tint[1]}` : 'no rectangle tint');
@@ -34,8 +36,11 @@ function checkNightScene() {
   ok('pool discs are amber (0xffbe5a) + ADD blend', src.includes('setTint(0xffbe5a)')
     && (src.match(/\.setBlendMode\(Phaser\.BlendModes\.ADD\)/g) || []).length >= 4);
   // the rings loop is inside the lamp branch (guarded by decor.lamp key)
-  const lampBranch = src.match(/decKey === resolveKey\('decor\.lamp'\)[\s\S]{0,1200}?for \(const ring of POOL_RINGS\)/);
-  ok('every lamp branch creates 3 pool discs', !!lampBranch);
+  // (no fixed char window: the loop just has to come before the next decKey branch)
+  const lampStart = src.indexOf("if (decKey === resolveKey('decor.lamp'))");
+  const ringLoop = lampStart < 0 ? -1 : src.indexOf('for (const ring of POOL_RINGS)', lampStart);
+  const nextBranch = lampStart < 0 ? -1 : src.indexOf('if (decKey', lampStart + 1);
+  ok('every lamp branch creates 3 pool discs', ringLoop > 0 && (nextBranch < 0 || ringLoop < nextBranch));
   // 3: pools hidden by day — the shared registry toggles with isNight
   // 3: pools hidden by day — the shared registry toggles with isNight.
   // Simple line-level check, not a fragile distance regex.

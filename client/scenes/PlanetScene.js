@@ -4144,7 +4144,7 @@ rations, and your name on the manifest.
           if (net3 && net3.connected) net3.send('harvest', { tileX: s.x, tileY: s.y });
           if (this.audio) this.audio.sfx('harvest', { volume: 0.4 });
           this._popReward(s.x * T + T / 2, s.y * T - 6, `+${info.sellPrice} CR`, '#f7d698');
-          this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR — ${tag}`);
+          this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR, +1 to your bag — ${tag}`);
         } else {
           s.type = 'empty'; s.crop = ''; s.growth = 0; s.watered = false;
           ft.img.setTexture(ft.baseKey || tex('farm.empty'));
@@ -4153,7 +4153,7 @@ rations, and your name on the manifest.
           if (net4 && net4.connected) net4.send('harvest', { tileX: s.x, tileY: s.y });
           if (this.audio) this.audio.sfx('harvest', { volume: 0.4 });
           this._popReward(s.x * T + T / 2, s.y * T - 6, `+${info.sellPrice} CR`, '#f7d698');
-          this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR (one-time)`);
+          this.showToast(`Harvested ${info.label}! +${info.sellPrice} CR, +1 to your bag (one-time)`);
         }
         break;
       }

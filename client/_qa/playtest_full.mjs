@@ -470,22 +470,28 @@ const pre=(${sf36Pre});sc._nightOverride=true;sc.dayCount=pre.dayCount;sc.isNigh
 return JSON.stringify({tw:(sc._lampBloomTweens||[]).length,
 tint:(sc.lampGlows||[]).length>0&&sc.lampGlows.every(l=>(l.tintTopLeft|0)===0xffffff)});})()`);
 const rmToast1 = await cmd('Input.dispatchKeyEvent', { type: 'keyDown', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120, nativeKeyCode: 120 });
-await sleep(70); await cmd('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120, nativeKeyCode: 120 });
-await sleep(300);
-const rmT1 = await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');if(!sc)return 'no-scene';
+await sleep(180); await cmd('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120, nativeKeyCode: 120 });
+// poll up to 2.5s — the swiftshader frame loop can lag the key under load
+let rmT1 = null, rmT1OK = false;
+for (let k = 0; k < 25 && !rmT1OK; k++) {
+  await sleep(100);
+  rmT1 = await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');if(!sc)return 'no-scene';
 const ts=(sc.children.list||[]).filter(o=>o.text&&o.text.indexOf('Reduced motion')>-1&&o.depth===1100);
 return JSON.stringify({t:ts.length?ts[ts.length-1].text:'none',rm:!!window.SpaceFarmer.reducedMotion()});})()`);
-let rmT1OK = false;
-try { const j = JSON.parse(rmT1 || '{}'); rmT1OK = j.t === 'Reduced motion ON' && j.rm === true; } catch {}
+  try { const j = JSON.parse(rmT1 || '{}'); rmT1OK = j.t === 'Reduced motion ON' && j.rm === true; } catch {}
+}
 check('F9 toast: Reduced motion ON (flag flips true)', rmT1OK, rmT1);
 await cmd('Input.dispatchKeyEvent', { type: 'keyDown', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120, nativeKeyCode: 120 });
-await sleep(70); await cmd('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120, nativeKeyCode: 120 });
-await sleep(300);
-const rmT2 = await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');if(!sc)return 'no-scene';
+await sleep(180); await cmd('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120, nativeKeyCode: 120 });
+// poll up to 2.5s — the swiftshader frame loop can lag the key under load
+let rmT2 = null, rmT2OK = false;
+for (let k = 0; k < 25 && !rmT2OK; k++) {
+  await sleep(100);
+  rmT2 = await evl(`(function(){const sc=window.SpaceFarmer.game.scene.getScene('PlanetScene');if(!sc)return 'no-scene';
 const ts=(sc.children.list||[]).filter(o=>o.text&&o.text.indexOf('Reduced motion')>-1&&o.depth===1100);
 return JSON.stringify({t:ts.length?ts[ts.length-1].text:'none',rm:!!window.SpaceFarmer.reducedMotion()});})()`);
-let rmT2OK = false;
-try { const j = JSON.parse(rmT2 || '{}'); rmT2OK = j.t === 'Reduced motion OFF' && j.rm === false; } catch {}
+  try { const j = JSON.parse(rmT2 || '{}'); rmT2OK = j.t === 'Reduced motion OFF' && j.rm === false; } catch {}
+}
 check('F9 toast: Reduced motion OFF (flag flips back false)', rmT2OK, rmT2);
 if (rmToast1 && rmToast1.exceptionDetails) check('F9 key dispatched cleanly', false, JSON.stringify(rmToast1));
 // [SF46] 5 portrait expressions per NPC; a loved-gift line holds the warm face (no blab override)

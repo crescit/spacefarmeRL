@@ -1,6 +1,6 @@
 {
   "name": "space-farmer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A cozy multiplayer space-farming game and deterministic reinforcement-learning environment.",
   "main": "server.js",
   "scripts": {

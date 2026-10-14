@@ -1075,7 +1075,12 @@ class FarmRoom extends Room {
     const gate = this._spendEnergy(player, 'harvest');
     if (!gate.ok) return gate;
     const info = CROP_INFO[tile.crop] || { cr: 50, regrow: false };
+    const harvestedCrop = tile.crop;
     player.credits += info.cr;
+    // SHIP-05 — the crop goes in the bag as well as paying the field bonus, so
+    // recipes (and the Earth Feast Plates the story ends on) are cookable from
+    // real farming. Credits are unchanged: the RL reward contract holds.
+    if (tile.crop) player.inventory.set(tile.crop, (player.inventory.get(tile.crop) || 0) + 1);
     this._ledgerAdd(client.sessionId, { earned: info.cr, harvested: 1 });
     this._checkMilestones(client);
     if (info.regrow) {
@@ -1091,7 +1096,7 @@ class FarmRoom extends Room {
       tile.watered = false;
     }
     this.questEvent(client, { kind: 'harvest' });
-    return { ok: true, earned: info.cr, energy: player.energy, credits: player.credits };
+    return { ok: true, earned: info.cr, crop: harvestedCrop, energy: player.energy, credits: player.credits };
   }
 
   onTill(client, data) {

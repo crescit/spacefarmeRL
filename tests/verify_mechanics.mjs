@@ -251,6 +251,8 @@ console.log('== Seasonal depth (crop regrow vs one-time) ==');
   check('continuous crop regrows (stays planted)', t0.type === 'growing' && t0.crop === 'space-wheat', `type=${t0.type}`);
   rC.onHarvest(cli, { tileX: 1, tileY: 0 });
   check('one-time crop consumed \u2192 replant needed', t1.type === 'empty' && t1.crop === '', `type=${t1.type}`);
+  const invC = rC.state.players.get('crop2').inventory;
+  check('SHIP-05 harvest puts the crop in the bag', (invC.get('space-wheat') || 0) >= 1 && (invC.get('moon-melon') || 0) >= 1, `wheat=${invC.get('space-wheat')} melon=${invC.get('moon-melon')}`);
   check('harvest credits awarded', rC.state.players.get('crop2').credits > creditsBefore, `credits ${rC.state.players.get('crop2').credits}`);
 }
 
