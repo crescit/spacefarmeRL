@@ -120,6 +120,24 @@ def parse_rationale(text: str | None) -> str | None:
     return str(reason).strip() if reason else None
 
 
+def parse_journal_entry(text: str | None) -> str | None:
+    """Read the optional top-level ``journal`` string without touching the action.
+
+    The wrapper payload may carry ``journal`` alongside ``action``/``arguments``;
+    it is never validated as an argument and never changes the action choice.
+    """
+    if not text:
+        return None
+    cleaned = re.sub(r"^\s*```(?:json)?\s*", "", text.strip(), flags=re.I)
+    cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+    journal = payload.get("journal") if isinstance(payload, dict) else None
+    return journal if isinstance(journal, str) and journal.strip() else None
+
+
 def _schema_accepts(value: Any, schema: dict[str, Any]) -> bool:
     """Validate the small JSON-Schema subset emitted by the Node bridge."""
     kind = schema.get("type")
@@ -180,6 +198,7 @@ def parse_native_action_candidate(
         raw = {"type": payload["action"], **(payload.get("arguments") or {})}
     if not isinstance(raw, dict) or not isinstance(raw.get("type"), str):
         return None
+    raw.pop("journal", None)
     action_type = raw["type"]
     if action_type not in ACTION_LABELS:
         return None
@@ -245,6 +264,7 @@ def native_action_validation_error(text: str | None, env: FarmGymEnv) -> str:
         raw = {"type": payload["action"], **arguments}
     if not isinstance(raw, dict) or not isinstance(raw.get("type"), str):
         return "Supply action as a valid action name and arguments as an object."
+    raw.pop("journal", None)
     action_type = raw["type"]
     if action_type not in ACTION_LABELS:
         return f"Unknown action {action_type!r}."
@@ -438,6 +458,7 @@ class OpenAIActionPolicy:
         stream: bool = True,
         action_batch_size: int = 1,
         model_task: str | None = None,
+        debug_dir: str | None = None,
     ):
         self.base_url = (
             base_url or os.getenv("OPENAI_BASE_URL") or "http://127.0.0.1:4000/v1"
@@ -458,8 +479,60 @@ class OpenAIActionPolicy:
         self.stream = bool(stream)
         self.action_batch_size = max(1, int(action_batch_size))
         self.model_task = model_task
+        self.debug_dir = Path(debug_dir) if debug_dir else None
+        if self.debug_dir:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+        self.debug_call_index = 0
         self._pending_actions: list[int | dict[str, Any]] = []
         self.last_decision: ActionDecision | None = None
+        # ActionDecision carries no free-form journal field, so the optional
+        # journal from a successful parse is stored on the policy itself.
+        self.last_journal: str | None = None
+
+    @staticmethod
+    def _redact_debug(value: Any) -> Any:
+        """Drop auth material — debug records never carry keys or tokens."""
+        if isinstance(value, dict):
+            clean: dict[str, Any] = {}
+            for key, item in value.items():
+                if str(key).lower() in {"authorization", "api_key", "api-key"}:
+                    clean[key] = "***REDACTED***"
+                else:
+                    clean[key] = OpenAIActionPolicy._redact_debug(item)
+            return clean
+        if isinstance(value, list):
+            return [OpenAIActionPolicy._redact_debug(item) for item in value]
+        if isinstance(value, str) and "Bearer " in value:
+            return "***REDACTED***"
+        return value
+
+    def _record_call(
+        self,
+        request: dict[str, Any],
+        response: dict[str, Any] | None,
+        latency_ms: float,
+        finish_reason: str | None,
+        usage: Any,
+        *,
+        error: str | None = None,
+    ) -> None:
+        """Append one JSON line per model call to <debug_dir>/calls.jsonl."""
+        if not self.debug_dir:
+            return
+        self.debug_call_index += 1
+        record = {
+            "i": self.debug_call_index,
+            "ts": time.time(),
+            "request": self._redact_debug(request),
+            "response": (
+                {"error": error} if error is not None else self._redact_debug(response)
+            ),
+            "latency_ms": round(float(latency_ms), 1),
+            "finish_reason": finish_reason,
+            "usage": usage,
+        }
+        with (self.debug_dir / "calls.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, separators=(",", ":")) + "\n")
 
     @staticmethod
     def _state(env: FarmGymEnv) -> dict[str, Any]:
@@ -467,7 +540,25 @@ class OpenAIActionPolicy:
         obs = env.raw_obs
         seasons = ((env.bridge.spec.get("vocabulary") or {}).get("seasons") or [])
         season_index = int(obs["season"])
+        aliens = (
+            (((env.bridge.spec.get("evaluation") or {}).get("planningFacts") or {}).get(
+                "firstContact"
+            ) or {}).get("aliens") or []
+        )
+        contact_choices = obs.get("contactChoices") or {}
         return {
+            # Volatile, top-of-state: envoys still awaiting a doctrine. The
+            # contactChoices map is keyed by scenarioId (FarmRoom), so the
+            # filter matches on scenarioId, not alien id.
+            "envoys_awaiting_doctrine": [
+                {
+                    "id": alien.get("id"), "name": alien.get("name"),
+                    "premise": alien.get("premise"), "stakes": alien.get("stakes"),
+                }
+                for alien in aliens
+                if str(alien.get("scenarioId") or alien.get("id") or "")
+                not in contact_choices
+            ],
             "credits": obs["credits"], "energy": obs["energy"], "day": obs["day"],
             "season": {
                 "index": season_index,
@@ -662,11 +753,26 @@ class OpenAIActionPolicy:
             method="POST",
         )
         started_at = time.perf_counter()
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return (
-                self._read_stream(response, started_at=started_at)
-                if self.stream else json.load(response)
+        parsed: dict[str, Any]
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                parsed = (
+                    self._read_stream(response, started_at=started_at)
+                    if self.stream else json.load(response)
+                )
+        except Exception as exc:  # noqa: BLE001 - capture the failure for debug
+            self._record_call(
+                payload, None, (time.perf_counter() - started_at) * 1000.0,
+                None, None, error=type(exc).__name__ + ": " + str(exc),
             )
+            raise
+        choice = (parsed.get("choices") or [{}])[0]
+        finish_reason = choice.get("finish_reason")
+        self._record_call(
+            payload, parsed, (time.perf_counter() - started_at) * 1000.0,
+            finish_reason, parsed.get("usage"),
+        )
+        return parsed
 
     def choose(self, env: FarmGymEnv) -> int:
         mask = env.action_masks()
@@ -718,6 +824,7 @@ class OpenAIActionPolicy:
                     "exactly one action's parameter object: copy property names from its "
                     "schema, with no aliases, nesting, bulk quantity, or extra properties"
                 ),
+                "journal": "optional: a private journal entry in your own words, or omit",
             }
             if self.action_batch_size == 1 else
             {
@@ -819,6 +926,12 @@ class OpenAIActionPolicy:
                     self._pending_actions = (
                         native_actions[1:] if native_actions is not None else actions[1:]
                     )
+                    # Optional top-level journal: reward-neutral prose the model
+                    # chose on its own. It never gates or scores the action.
+                    journal = parse_journal_entry(text)
+                    if journal:
+                        env.write_journal(journal[:1000])
+                        self.last_journal = journal
                     self.last_decision = ActionDecision(
                         action=action,
                         parsed=True,
@@ -1060,8 +1173,23 @@ class ToolDialogPolicy(OpenAIActionPolicy):
             method="POST",
         )
         started = time.perf_counter()
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            payload = json.load(response)
+        payload: dict[str, Any]
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                payload = json.load(response)
+        except Exception as exc:  # noqa: BLE001 - capture the failure for debug
+            self._record_call(
+                body, None, (time.perf_counter() - started) * 1000.0,
+                None, None, error=type(exc).__name__ + ": " + str(exc),
+            )
+            raise
+        finish_reason = (payload.get("choices") or [{}])[0].get("finish_reason")
+        self._record_call(
+            body, payload, (time.perf_counter() - started) * 1000.0,
+            finish_reason, payload.get("usage"),
+        )
+        # requests.jsonl keeps the raw-dialog transcript already used by
+        # rollout_tools --debug-dir; calls.jsonl (above) is the uniform index.
         if self.debug_dir:
             line = json.dumps({
                 "t": "chat", "model": self.model,

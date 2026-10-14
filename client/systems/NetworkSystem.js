@@ -37,18 +37,81 @@ class NetworkSystem {
     this.room = null;
     this.playerId = null;
     this.connected = false;
+    this.status = 'connecting';
+    this.retries = 0;
+    this.everConnected = false;
+    this._retryTimer = null;
+    this._closing = false;
+  }
+
+  // Connection status for the UI: 'connecting' | 'online' | 'lost' | 'offline'.
+  // window.SpaceFarmer.onConnection(status, info) is told on every change.
+  _status(st, info) {
+    this.status = st;
+    const hook = window.SpaceFarmer && window.SpaceFarmer.onConnection;
+    if (hook) { try { hook(st, info || {}); } catch (e) { console.warn(e); } }
   }
 
   async connect(url) {
+    this.url = url;
+    this._status('connecting');
+    const ok = await this._join();
+    if (!ok) { this._status('offline'); this._scheduleRetry(); }
+    return ok;
+  }
+
+  // SHIP-01 — automatic reconnect. The save is keyed by the stable player id
+  // and the server saves on leave, so a fresh joinOrCreate restores the farm.
+  // Retries back off 1s → 2s → 4s … capped at 15s, forever (a server restart
+  // or a laptop waking from sleep heals without a page reload).
+  _scheduleRetry() {
+    if (this._retryTimer || this._closing) return;
+    this.retries = (this.retries || 0) + 1;
+    const delay = Math.min(15000, 1000 * 2 ** Math.min(this.retries - 1, 4));
+    this.nextRetryAt = Date.now() + delay;
+    this._status(this.everConnected ? 'lost' : 'offline', { attempt: this.retries, delay });
+    this._retryTimer = setTimeout(async () => {
+      this._retryTimer = null;
+      const ok = await this._join();
+      if (ok) {
+        this.retries = 0;
+        this._status('online', { restored: true });
+      } else this._scheduleRetry();
+    }, delay);
+  }
+
+  /** Try to reconnect right now (the "Retry" button). */
+  retryNow() {
+    if (this.connected) return;
+    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+    this.retries = 0;
+    this._scheduleRetry();
+  }
+
+  async _join() {
     try {
-      this.client = new Colyseus.Client(url);
+      this.client = this.client || new Colyseus.Client(this.url);
       this.room = await this.client.joinOrCreate('farm', {
         name: 'Farmer',
         playerId: getStablePlayerId(),   // stable save key (survives reconnects)
       });
       this.playerId = this.room.sessionId;
       this.connected = true;
+      const restored = !!this.everConnected;
+      this.everConnected = true;
       console.log('Connected to farm room:', this.room.sessionId);
+      if (!restored) this._status('online', {});
+
+      // Lost the room (server restart, network drop, sleep) → go offline and
+      // start retrying. A consented leave (code 4000 / 1000) never retries.
+      this.room.onLeave((code) => {
+        this.connected = false;
+        this.room = null;
+        if (this._closing || code === 4000) { this._status('offline'); return; }
+        console.warn('Connection lost (code ' + code + ') — reconnecting');
+        this._scheduleRetry();
+      });
+      this.room.onError && this.room.onError((code, msg) => console.warn('room error', code, msg));
 
       this.room.onStateChange((state) => {
         // State sync callback — game scenes will poll state
@@ -78,16 +141,64 @@ class NetworkSystem {
         if (window.SpaceFarmer.onDaySummary) window.SpaceFarmer.onDaySummary(d);
       });
 
+      // SF62 — season's-end reckoning: the same prose face the agent season
+      // gets, delivered on the day the calendar rolls into a new season.
+      this.room.onMessage('seasonReckoning', (d) => {
+        if (window.SpaceFarmer.onSeasonReckoning) window.SpaceFarmer.onSeasonReckoning(d);
+      });
+
+      // ROADMAP A4 — message registry: the server replies to gameplay actions
+      // on the SAME channel the action was sent on (FarmRoom.dispatchGameAction
+      // mirrors NetworkSystem.request()). Every server-emitted type must have a
+      // registered handler, otherwise @colyseus/sdk warns per reply. These
+      // listeners route a reply to a fitting window.SpaceFarmer hook when one
+      // exists; otherwise they are quiet no-ops — request() adds its own
+      // per-request listener, so a second listener here is belt-and-braces.
+      const routeReply = (t, d) => {
+        const hook = window.SpaceFarmer.onActionReply;
+        if (hook) hook(t, d);
+      };
+      this.room.onMessage('sell', (d) => routeReply('sell', d));
+      this.room.onMessage('order', (d) => routeReply('order', d));
+      this.room.onMessage('buy', (d) => routeReply('buy', d));
+      this.room.onMessage('gift', (d) => routeReply('gift', d));
+      this.room.onMessage('talk', (d) => routeReply('talk', d));
+      this.room.onMessage('propose', (d) => routeReply('propose', d));
+      this.room.onMessage('newGamePlus', (d) => routeReply('newGamePlus', d));
+      this.room.onMessage('buyAnimal', (d) => routeReply('buyAnimal', d));
+      this.room.onMessage('feedAnimal', (d) => routeReply('feedAnimal', d));
+      this.room.onMessage('fish', (d) => routeReply('fish', d));
+      this.room.onMessage('mine', (d) => routeReply('mine', d));
+      this.room.onMessage('cook', (d) => routeReply('cook', d));
+      this.room.onMessage('deposit', (d) => routeReply('deposit', d));
+      this.room.onMessage('withdraw', (d) => routeReply('withdraw', d));
+      this.room.onMessage('upgradeTool', (d) => routeReply('upgradeTool', d));
+      this.room.onMessage('equip', (d) => routeReply('equip', d));
+      this.room.onMessage('fillWater', (d) => routeReply('fillWater', d));
+      this.room.onMessage('claimFestival', (d) => routeReply('claimFestival', d));
+      this.room.onMessage('contact', (d) => routeReply('contact', d));
+
+      // Catch-all for any server type this registry does not enumerate
+      // (future protocol types) — keeps live play quiet without shadowing
+      // the named handlers above (named keys fire first in this SDK).
+      this.room.onMessage('*', (type, msg) => {
+        const hook = { saved: 'onSaved', festivalPhase: 'onFestivalPhase',
+          feastPeak: 'onFeastPeak', milestone: 'onMilestone',
+          daySummary: 'onDaySummary', seasonReckoning: 'onSeasonReckoning' }[type];
+        if (hook && window.SpaceFarmer[hook]) window.SpaceFarmer[hook](msg);
+      });
+
       return true;
     } catch (err) {
       console.warn('Could not connect to server, running offline', err);
       this.connected = false;
+      this.room = null;
       return false;
     }
   }
 
   send(type, data) {
-    if (this.room) {
+    if (this.room && this.connected) {
       this.room.send(type, data);
     }
   }

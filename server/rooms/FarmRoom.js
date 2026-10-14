@@ -14,6 +14,7 @@ const { savePlayer, loadPlayer } = require('../persistence');
 // different Calendar for tests/variants via FarmRoom.calendar or room.calendar.
 const { createCalendar, DEFAULT_CALENDAR } = require('../../shared/calendar.js');
 const { aliens: ALIEN_DATA, doctrines: CONTACT_DOCTRINES } = require('../../shared/story/aliens.js');
+const { buildReckoning } = require('../../shared/story/reckoning.js');
 
 // ── Schema definitions ──
 
@@ -157,11 +158,11 @@ class FarmState extends Schema {
     this.players = {};
     this.farms = {};
     this.orders = new ArraySchema();
-    this.day = 0;
-    this.time = 0;      // colony clock: a fresh world starts at dawn
-    this.isDay = true;  // the world owns the light — morning at day 0
+    this.day = 1;        // shared/calendar.js is 1-based — the world begins on Day 1
+    this.time = 0;      // colony clock: a fresh world starts at dawn of Day 1
+    this.isDay = true;  // the world owns the light — morning at day 1
     this.season = 0;   // start in spring
-    this.festival = false;      // no festival on day 0
+    this.festival = false;      // no festival on day 1
     this.festivalClaimed = false;
     this.festivalPhase = 'none'; // M3: 'none' | 'setup' | 'feast' | 'afterglow'
     this.feastPeak = false;      // M3: the Earth Feast was served this festival day
@@ -205,6 +206,16 @@ const TOOL_TIERS = {
   iron: { name: 'Iron',  energyMult: 0.8 },
   gold: { name: 'Gold',  energyMult: 0.6 },
 };
+// ── Watering-can tank capacity by can tier ────────────────────────────────
+// The tank is part of the tool: a better can holds more water (base 100 →
+// iron 160 → gold 240 water units = 5 → 8 → 12 waters at WATER_USE_COST 20).
+// Upgrading the can raises the cap immediately; the water already in the tank
+// is unchanged. One source of truth shared by server, browser, RL env and MCP.
+const TANK_MAX_FOR = { base: 100, iron: 160, gold: 240 };
+function tankMaxFor(player) {
+  const tier = (player && player.tools && player.tools.get('watering')) || 'base';
+  return TANK_MAX_FOR[tier] || WATER_TANK_MAX;
+}
 const TIER_NEXT = { base: 'iron', iron: 'gold', gold: null };   // null = max tier
 const TOOL_DEFS = {
   hoe:      { id: 'hoe',      label: 'Hoe',          verb: 'till',  upgradeCost: { base: 150, iron: 400 } },
@@ -227,7 +238,7 @@ const TOOLS = {
 // The can is a real container: watering drains it (WATER_USE_COST per action),
 // and you refill it at a station (the ship's greenhouse tap, the planet's
 // stardust shore). Server-authoritative so agents learn the same chore.
-const WATER_TANK_MAX = 100;   // can capacity, in water units
+const WATER_TANK_MAX = TANK_MAX_FOR.base;   // base-tier can capacity, in water units
 const WATER_USE_COST = 20;    // units drained per water action
 
 // A new game starts from this exact inventory. New Game+ uses the same table,
@@ -596,6 +607,10 @@ class FarmRoom extends Room {
 
   onCreate() {
     this.setState(new FarmState());
+    // Colyseus' default 15s seat reservation drops joins from slow/loaded
+    // clients (headless swiftshader boot under load exceeds it) → "seat
+    // reservation expired" and the game silently falls back offline.
+    this.seatReservationTimeout = Number(process.env.COLYSEUS_SEAT_RESERVATION_TIME || 60);
     this.rng = Math.random;      // stochastic seam (see setRng)
     this._persistence = true;   // live room: save/load on join/leave/advance
     // empty simulation tick (colyseus 0.17 signature: (callback, delay));
@@ -633,7 +648,7 @@ class FarmRoom extends Room {
       tool: player.tool,
       equipped: player.equipped || '',
       tools: map(player.tools),
-      waterLevel: player.waterLevel ?? WATER_TANK_MAX,
+      waterLevel: player.waterLevel ?? tankMaxFor(player),
       friendships: map(player.friendships),
       lastTalkDay: map(player.lastTalkDay),
       heartEvents: map(player.heartEvents),
@@ -711,7 +726,7 @@ class FarmRoom extends Room {
     fill(player.animals, data.animals);
     fill(player.animalsFedDay, data.animalsFedDay);
     fill(player.tools, data.tools);
-    player.waterLevel = (typeof data.waterLevel === 'number') ? data.waterLevel : WATER_TANK_MAX;
+    player.waterLevel = (typeof data.waterLevel === 'number') ? data.waterLevel : tankMaxFor(player);
     // old saves: migrate to own the basic kit (backfill only — keep the
     // restored equipped tool and tank level exactly as they were saved)
     this._grantStarterTools(player, { fresh: false });
@@ -729,6 +744,9 @@ class FarmRoom extends Room {
       for (const id of data.quests.completed || []) q.completed.push(id);
       for (const [k, v] of Object.entries(data.quests.progress || {})) q.progress.set(k, v);
       q.arcDone = !!data.quests.arcDone;
+      // SHIP-04 — heal saves from before the fix: an NG+ cycle that was left
+      // with no current quest (and no completions) restarts at quest 1.
+      if (!q.current && !q.arcDone && q.completed.length === 0) q.current = QUEST_ORDER[0];
     }
     if (data.farm && farm && data.farm.tiles && data.farm.tiles.length === farm.tiles.length) {
       farm.tier = data.farm.tier || 1;
@@ -904,7 +922,9 @@ class FarmRoom extends Room {
     this._grantStarterInventory(p);
     this._grantStarterTools(p);
     // story restarts (a new cycle of The Stardust Story)
-    p.quests.current = '';
+    // SHIP-04 — the new cycle opens on the first quest again (was '', which
+    // left the NG+ farmer with a dead quest log and no story at all).
+    p.quests.current = QUEST_ORDER[0];
     p.quests.completed.clear();
     p.quests.progress.clear();
     p.quests.arcDone = false;
@@ -958,7 +978,7 @@ class FarmRoom extends Room {
     for (const t of TOOL_ORDER) if (!p.tools.get(t)) p.tools.set(t, 'base');
     if (opts.fresh !== false) {
       p.equipped = '';
-      p.waterLevel = WATER_TANK_MAX;
+      p.waterLevel = tankMaxFor(p);
     }
   }
 
@@ -988,9 +1008,10 @@ class FarmRoom extends Room {
     this._tickClock();  // filling the can takes a moment of the day
     const player = this.state.players.get(client.sessionId);
     if (!player) return { ok: false, reason: 'no-player' };
-    if (player.waterLevel >= WATER_TANK_MAX) return { ok: false, reason: 'already-full', level: player.waterLevel };
-    player.waterLevel = WATER_TANK_MAX;
-    return { ok: true, waterLevel: WATER_TANK_MAX };
+    const cap = tankMaxFor(player);
+    if (player.waterLevel >= cap) return { ok: false, reason: 'already-full', level: player.waterLevel, tankMax: cap };
+    player.waterLevel = cap;
+    return { ok: true, waterLevel: cap, tankMax: cap };
   }
 
   // ── Colony clock: every meaningful action spends a moment of the day's
@@ -1054,7 +1075,12 @@ class FarmRoom extends Room {
     const gate = this._spendEnergy(player, 'harvest');
     if (!gate.ok) return gate;
     const info = CROP_INFO[tile.crop] || { cr: 50, regrow: false };
+    const harvestedCrop = tile.crop;
     player.credits += info.cr;
+    // SHIP-05 — the crop goes in the bag as well as paying the field bonus, so
+    // recipes (and the Earth Feast Plates the story ends on) are cookable from
+    // real farming. Credits are unchanged: the RL reward contract holds.
+    if (tile.crop) player.inventory.set(tile.crop, (player.inventory.get(tile.crop) || 0) + 1);
     this._ledgerAdd(client.sessionId, { earned: info.cr, harvested: 1 });
     this._checkMilestones(client);
     if (info.regrow) {
@@ -1070,7 +1096,7 @@ class FarmRoom extends Room {
       tile.watered = false;
     }
     this.questEvent(client, { kind: 'harvest' });
-    return { ok: true, earned: info.cr, energy: player.energy, credits: player.credits };
+    return { ok: true, earned: info.cr, crop: harvestedCrop, energy: player.energy, credits: player.credits };
   }
 
   onTill(client, data) {
@@ -1303,6 +1329,9 @@ class FarmRoom extends Room {
   }
 
   onAdvanceDay(client) {
+    // SF62 — capture the season index BEFORE the day increments: it names the
+    // season that is ENDING here, which is what the reckoning is about.
+    const beforeSeason = this.state.season;
     this.state.day += 1;
     this._resetClock();   // resting carries you through the dark to a fresh dawn
     const cal = this._cal();   // calendar service — the ONLY source for this math
@@ -1386,6 +1415,37 @@ class FarmRoom extends Room {
         ledger: summary || { earned: 0, spent: 0, harvested: 0, sold: 0, fished: 0, mined: 0, gifts: 0 },
       });
     }
+    // SF62 — season's end: when the calendar rolled from one season into the
+    // next, the sleeping farmer gets the same reckoning prose the agent season
+    // gets (rl/env_core.cjs testimony()). Built from THIS player's state only,
+    // and reward-neutral: no score, no grade, no reward rides on it.
+    if (client && client.send && beforeSeason !== this.state.season) {
+      const p = this.state.players.get(client.sessionId);
+      const rec = p ? this._reckoningRecord(p, beforeSeason) : { season: beforeSeason };
+      client.send('seasonReckoning', buildReckoning(rec));
+    }
+  }
+
+  // SF62 — gather one player's season record for the reckoning prose. The
+  // schema stores maps (MapSchema) and a completed-quest array; collect() turns
+  // them into plain objects the StoryBank reads.
+  _reckoningRecord(p, seasonIndex) {
+    const collect = (m) => {
+      const out = {};
+      if (!m) return out;
+      const keys = typeof m.keys === 'function' ? Array.from(m.keys()) : Object.keys(m);
+      for (const k of keys) out[k] = typeof m.get === 'function' ? m.get(k) : m[k];
+      return out;
+    };
+    return {
+      season: seasonIndex,
+      credits: p.credits,
+      lifetime: collect(p.lifetime),
+      friends: collect(p.friendships),
+      contactChoices: collect(p.contactChoices),
+      questsCompleted: p.quests && p.quests.completed ? p.quests.completed.length : 0,
+      marriedTo: p.marriedTo || '',
+    };
   }
 
   // ── M3 — Earth Day spectacle: festival phases ──
@@ -1607,8 +1667,9 @@ class FarmRoom extends Room {
     player.tools.set(tool, next);
     if (tool === 'hoe') player.tool = next;   // keep the legacy alias honest
     const name = `${TOOL_TIERS[next].name} ${def.label}`;
+    const tankMax = tankMaxFor(player);   // a better watering can holds more
     this.checkQuestComplete(client);   // 'tool' objective is level-based
-    return { ok: true, tool, tier: next, name, credits: player.credits };
+    return { ok: true, tool, tier: next, name, credits: player.credits, tankMax };
   }
 
   // ── Seasonal festival claim: attend once per festival for rewards ──
@@ -1753,4 +1814,4 @@ class FarmRoom extends Room {
   }
 }
 
-module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY, SHOP_PRICES, SELL_PRICES, MINING_INFO, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, PRODUCE_PRICES, CROP_INFO, FISH_INFO, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE, STAMINA_TRAIN_RATE, STAMINA_MAX };
+module.exports = { FarmRoom, FarmState, QuestState, Player, Tile, FarmPlot, GrandExchangeOrder, GAME_ACTIONS, dispatchGameAction, STARTER_INVENTORY, SHOP_PRICES, SELL_PRICES, MINING_INFO, NPC_GIFTS, HEART_THRESHOLDS, ANIMALS, PRODUCE_PRICES, CROP_INFO, FISH_INFO, TOOLS, RECIPES, DISH_SELL, DISH_GIFT_BONUS, QUESTS, QUEST_ORDER, ENERGY_COSTS, TOOL_DEFS, TOOL_TIERS, TIER_NEXT, TOOL_ORDER, TOOL_FOR_ACTION, TANK_MAX_FOR, tankMaxFor, WATER_TANK_MAX, WATER_USE_COST, CLOCK_TICK, DUSK, STAMINA_REST_RATE, STAMINA_TRAIN_RATE, STAMINA_MAX };

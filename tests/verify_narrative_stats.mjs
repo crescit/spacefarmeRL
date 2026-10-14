@@ -39,7 +39,7 @@ console.log('== narrative ledger ==');
     JSON.stringify(s.tools));
   check('journal entries tallied via writeJournal', s.journalEntries === 2, String(s.journalEntries));
   check('friendships recorded', s.friendshipsTotal > 0 && s.friendsMade === 1, JSON.stringify(s.friendshipsTotal));
-  check('days survived equals elapsed live-game days', s.daysSurvived === 1 && s.day === 1, JSON.stringify(s));
+  check('days survived equals elapsed live-game days', s.daysSurvived === 1 && s.day === 2, JSON.stringify(s));
   env.close();
 }
 

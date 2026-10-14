@@ -20,6 +20,17 @@ sounds = {
     'confirm.wav': [(600, 0.15), (800, 0.15)],
     'harvest.wav': [(400, 0.2), (500, 0.2), (600, 0.2)],
     'star.wav': [(1000, 0.05), (1200, 0.05)],
+    # SF25 — soft, short (<0.35s) one-shots for the missing planet actions
+    'till.wav':      [(150, 0.12)],                                   # low soil thunk
+    'plant.wav':     [(500, 0.06), (700, 0.07)],                      # soft seed tick
+    'mine_hit.wav':  [(900, 0.05), (400, 0.09)],                      # pick clack
+    'ore.wav':       [(300, 0.11), (200, 0.18)],                      # vein collapse
+    'fish_catch.wav':[(600, 0.09), (800, 0.09), (1000, 0.11)],        # rising catch
+    'sell.wav':      [(1200, 0.05), (1400, 0.05)],                    # coin ping
+    'equip.wav':     [(500, 0.05), (650, 0.06)],                      # tool clack
+    'door.wav':      [(250, 0.16)],                                   # airlock puff
+    'refill.wav':    [(300, 0.08), (350, 0.08), (300, 0.1)],          # glug
+    'tired.wav':     [(180, 0.2), (160, 0.15)],                       # low yawn
 }
 
 os.makedirs('sounds', exist_ok=True)

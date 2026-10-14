@@ -183,7 +183,10 @@ function buildSmoothGround() {
     cliff: { lit: [118, 108, 98], base: [90, 82, 74], deep: [60, 54, 48] },        // rocky MOUNTAIN stone
     forest:{ lit: [66, 92, 50], base: [46, 66, 38], deep: [28, 44, 26] },          // mossy FOREST floor
   };
-  const tile = (kind, phase = 0, vseed = 0) => {
+  // ridge>0 turns a soil tile into an UNTILLED variant: alternating 2px
+  // ridge/furrow rows + seed-shifted value noise (QA 0904B.9 — the farm block
+  // used to read as one flat rust slab).
+  const tile = (kind, phase = 0, vseed = 0, ridge = 0) => {
     const P = PA[kind];
     return createSurface(S, S, (s) => {
       const ctx = s.canvas.getContext('2d');
@@ -224,6 +227,18 @@ function buildSmoothGround() {
                      + 0.5 * Math.sin((nx - ny) * 4 * TAU);
           t += clod * 0.05;
           if (clod > 1.15) t -= 0.14; else if (clod < -1.15) t += 0.12;
+          // UNTILLED-soil variants: alternating 2px ridge/furrow rows, uniform
+          // in x so neighbours lock seamlessly; the 8-row cycle drifts per
+          // variant seed so adjacent tiles alternate their ridge phase.
+          if (ridge) {
+            const row = (y + ridge * 3) % 8;
+            if (row < 2) t += 0.30;              // furrow shadow (2px, darker)
+            else if (row >= 6) t -= 0.20;        // ridge crest highlight (2px, lighter)
+            // subtle deterministic value noise, rotated per variant
+            const vn = Math.sin(x * 9.3 + y * 4.7 + ridge * 2.7)
+                     * Math.sin(x * 2.9 - y * 15.3 + ridge * 1.9);
+            t += vn * 0.06;
+          }
         }
         let r = P.lit[0] + (P.deep[0] - P.lit[0]) * t;
         let g = P.lit[1] + (P.deep[1] - P.lit[1]) * t;
@@ -318,10 +333,35 @@ function buildSmoothGround() {
       ctx.putImageData(img, 0, 0);
     });
   };
+  // QA 0904B.9: packed sand/slate BORDER RING for where soil tiles meet grass.
+  // Transparent core — only the rim pixels draw over the tile, so the band reads
+  // as packed worked-earth instead of a razor seam. Deterministic grain breaks
+  // the outline into organic packed clods (no straight neon edge).
+  const soilEdgeTile = createSurface(S, S, (s) => {
+    const ctx = s.canvas.getContext('2d');
+    const img = ctx.createImageData(S, S), d = img.data;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const rim = Math.min(x, y, S - 1 - x, S - 1 - y);   // 0 at tile edge → rim depth
+      const i = (y * S + x) * 4;
+      if (rim > 4) { d[i + 3] = 0; continue; }            // transparent core
+      const packed = rim === 0 ? [92, 82, 76] : rim <= 2 ? [114, 100, 86] : [134, 118, 98];
+      const grain = Math.sin(x * 13.7 + y * 7.9) * Math.sin(x * 4.3 - y * 11.3);
+      const w = grain > 0.6 ? 16 : grain < -0.6 ? -14 : 0;
+      d[i]     = Math.max(0, Math.min(255, packed[0] + w)) | 0;
+      d[i + 1] = Math.max(0, Math.min(255, packed[1] + w * 0.7)) | 0;
+      d[i + 2] = Math.max(0, Math.min(255, packed[2] + w * 0.5)) | 0;
+      d[i + 3] = rim === 0 ? 255 : 205;
+    }
+    ctx.putImageData(img, 0, 0);
+  });
   return {
     grassA: tile('grass', 0, 0), grassB: tile('grass', 0, 1), grassC: tile('grass', 0, 2),
     grassD: tile('grass', 0, 3), grassE: tile('grass', 0, 4), grassF: tile('grass', 0, 5),
-    path: tile('path'), soil: tile('soil'), soilB: tile('soil', 0, 1),
+    path: tile('path'), soil: tile('soil'),
+    // UNTILLED-soil variants (ridge rows + value noise); `soil` stays the plain
+    // crop-tile base so tilled/seeded/growing/mature stay visually distinct.
+    soilB: tile('soil', 0, 1, 1), soilC: tile('soil', 0, 2, 2), soilD: tile('soil', 0, 3, 3),
+    soilEdge: soilEdgeTile,
     water: tile('water', 0, 0), water2: tile('water', 2, 1), water3: tile('water', 4, 2),
     sand: tile('sand'), wetSand: tile('wetSand'), cliff: tile('cliff'), forest: tile('forest'),
     tilled: cropTile('tilled'), seeded: cropTile('seeded'),
@@ -333,6 +373,58 @@ function buildSmoothGround() {
 // Cool slate-grey metal plating with teal panel seams, warm underglow, and
 // subtle vent slots. Reads unmistakably as "built space" so the town separates
 // from the grassy farm — the Harvest-Moon "walk into town" moment.
+// ART-03: COLONY DECK — the plaza is laid as big 64px plates on a 128px
+// (4×4 tile) macro pattern, sliced into 16 tile variants picked by (x%4, y%4).
+// The old single tile carried a 16px seam grid + 4 rivets per tile, which
+// repeated across downtown as graph paper. Plates here are 2×2 tiles, seams
+// are rare, wear is hashed so no two plates read identical.
+const PLAZA_DECK = (() => {
+  const M = 128, PL = 64;
+  const P = { lit: [104, 113, 130], deep: [56, 64, 80] };
+  const h = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const macro = new Uint8ClampedArray(M * M * 4);
+  for (let y = 0; y < M; y++) for (let x = 0; x < M; x++) {
+    const plx = Math.floor(x / PL), ply = Math.floor(y / PL), lx = x % PL, ly = y % PL;
+    // each plate has its own tone + a soft brushed direction
+    const tone = 0.42 + (h(plx, ply) - 0.5) * 0.10;
+    const brushed = Math.sin((((plx + ply) & 1) ? lx : ly) * 0.9 + h(ply, plx) * 6) * 0.012;
+    const grain = Math.sin(x * 13.3 + y * 7.1) * Math.sin(x * 5.9 - y * 11.3) * 0.03;
+    // gentle bevel: plate edges catch light top-left, fall off bottom-right
+    const bev = (lx < 2 || ly < 2) ? -0.10 : (lx > PL - 3 || ly > PL - 3) ? 0.10 : 0;
+    let t = Math.max(0, Math.min(1, tone + brushed + grain + bev));
+    let r = P.lit[0] + (P.deep[0] - P.lit[0]) * t;
+    let g = P.lit[1] + (P.deep[1] - P.lit[1]) * t;
+    let b = P.lit[2] + (P.deep[2] - P.lit[2]) * t;
+    // groove between plates: dark with a 1px teal (0x67e1cd) catch-light
+    if (lx === 0 || ly === 0) { r = r * 0.45 + 8; g = g * 0.45 + 22; b = b * 0.45 + 34; }
+    if ((lx === 1 && ly > 0) || (ly === 1 && lx > 0)) { r = r * 0.8 + 103 * 0.2; g = g * 0.8 + 225 * 0.2; b = b * 0.8 + 205 * 0.2; }
+    // one bolt per plate corner, inset
+    const bx = (lx === 5 || lx === PL - 6), by = (ly === 5 || ly === PL - 6);
+    if (bx && by) { r = 150; g = 160; b = 172; }
+    // hashed wear: scuffs + boot-polish streaks, sparse
+    const w = h(x * 0.37 | 0, y * 0.37 | 0);
+    if (w > 0.985) { r *= 0.82; g *= 0.82; b *= 0.84; }
+    else if (w < 0.006) { r = Math.min(255, r + 18); g = Math.min(255, g + 18); b = Math.min(255, b + 20); }
+    // a cream service-lane inlay crosses the macro once (wayfinding stripe)
+    if (y >= 61 && y <= 62 && lx > 1) { r = r * 0.55 + 240 * 0.45; g = g * 0.55 + 228 * 0.45; b = b * 0.55 + 196 * 0.45; }
+    const i = (y * M + x) * 4;
+    macro[i] = r; macro[i + 1] = g; macro[i + 2] = b; macro[i + 3] = 255;
+  }
+  const tiles = [];
+  for (let ty = 0; ty < 4; ty++) for (let tx = 0; tx < 4; tx++) {
+    tiles.push(createSurface(32, 32, (s) => {
+      const ctx = s.canvas.getContext('2d');
+      const img = ctx.createImageData(32, 32);
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        const o = ((ty * 32 + y) * M + tx * 32 + x) * 4, i = (y * 32 + x) * 4;
+        img.data[i] = macro[o]; img.data[i + 1] = macro[o + 1]; img.data[i + 2] = macro[o + 2]; img.data[i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }));
+  }
+  return tiles;
+})();
+
 const COLONY_PLAZA = (() => {
   const S = 32, TAU = Math.PI * 2;
   const P = { lit: [108, 116, 132], base: [74, 82, 100], deep: [48, 56, 72] };
@@ -467,6 +559,49 @@ CccCccCccCccCccC
 ................
 ................
 `, { c: [80, 168, 192], C: [134, 242, 242] }, 1);
+
+// ═══════════════════════════════════════════════════════════
+// SF10 farm fence — colony palette (slate metal + teal cap),
+// NOT fantasy wood. 6x14 post, 16x3 horizontal beam strip that
+// stretches post-to-post along the derived soil-bounds perimeter.
+// ═══════════════════════════════════════════════════════════
+const farmPost = mkSprite(`
+......TT......
+......Tt......
+......ss......
+......ss......
+......ss......
+......ss......
+......ss......
+......ss......
+......ss......
+......ss......
+......ss......
+......ss......
+......ss......
+.....SSSS.....
+....MMMMMM....
+...mmmmmmmm...
+`, { T: [103, 225, 205], t: [58, 128, 112], s: [92, 104, 110], S: [58, 70, 74], M: [170, 170, 196], m: [108, 108, 136] }, 1);
+
+const farmBeam = mkSprite(`
+................
+................
+................
+................
+................
+................
+................
+.TTTTTTTTTTTTTT.
+.ssssssssssssss.
+.ssssssssssssss.
+................
+................
+................
+................
+................
+................
+`, { T: [103, 225, 205], s: [92, 104, 110] }, 1);
 
 const lampPost = mkSprite(`
 ................
@@ -716,8 +851,9 @@ function scale2x(cv) {
   return createSurface(cv.width * 2, cv.height * 2, (s) => {
     const ctx = s.canvas.getContext('2d');
     if (typeof ctx.drawImage === 'function') {
-      // browser: smooth bilinear 2×
-      ctx.imageSmoothingEnabled = true;
+      // browser: nearest-neighbour 2× — bilinear here (then upscale2x again)
+      // smeared every 32px building into a blurry dark box at 128px.
+      ctx.imageSmoothingEnabled = false;
       ctx.drawImage(cv, 0, 0, cv.width, cv.height, 0, 0, cv.width * 2, cv.height * 2);
     } else {
       // headless stub (tests): nearest-neighbour pixel scale, preserving alpha
@@ -1131,6 +1267,21 @@ const blobs = [
     { x: 120, y: 170, r: 55, c: [120, 160, 170] },  // aqua underglow
     { x: 90, y: 130, r: 40, c: [160, 135, 180] },   // core lavender bump
   ];
+  // ART-02 — the base was NOT periodic in y (r = 14 + y*0.03), so the top/bottom
+  // seam of the tiled backdrop jumped by ~8 luminance on the first screen a
+  // player sees. The base is now a constant deep-space bed plus a sinusoidal
+  // ripple whose period (size/2) divides `size` exactly — periodic in y and
+  // constant in x, so tiling stays seamless on both axes.
+  const ripple = (y) => Math.sin((y / size) * Math.PI * 4) * 2;
+  // Wrapped dust lanes — faint sinusoidal wisps whose periods divide `size` and
+  // whose thickness fades toroidally, so lanes bend through BOTH edges instead
+  // of clipping into a visible seam row/column.
+  const lanes = [
+    { cy: 60, amp: 22, per: 128, th: 26, a: 0.10, c: [120, 150, 165] },  // teal-slate wisp
+    { cy: 158, amp: 18, per: 64, th: 22, a: 0.08, c: [150, 122, 152] },  // lavender dust
+    { cy: 210, amp: 26, per: 128, th: 18, a: 0.09, c: [196, 158, 122] }, // warm ember dust
+  ];
+  const wrap = (v) => Math.min(Math.abs(v), size - Math.abs(v));
   // deterministic star field (seeded — identical in browser/headless)
   let seed = 987654321;
   const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
@@ -1139,11 +1290,33 @@ const blobs = [
     const bright = rnd() < 0.18;
     stars.push({ x: Math.floor(rnd() * size), y: Math.floor(rnd() * size), b: bright });
   }
+  // ART-02 extra field: ~60 wrapped 1px colony star points in cream/teal so the
+  // backdrop reads as a lived-in sky. Coordinates are stored wrapped (mod size);
+  // each point writes exactly one pixel, so tiling never clips a star.
+  let seed2 = 424242101;
+  const rnd2 = () => (seed2 = (seed2 * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const dustStars = [];
+  for (let i = 0; i < 60; i++) {
+    const cream = rnd2() < 0.45;
+    dustStars.push({
+      x: Math.floor(rnd2() * size) % size, y: Math.floor(rnd2() * size) % size,
+      c: cream ? [247, 214, 152] : [103, 231, 205], a: cream ? 120 : 90,
+    });
+  }
   const fill = (x, y) => {
-    let r = 14 + y * 0.03, g = 12 + y * 0.025, b = 26 + y * 0.04;
+    let r = 16 + ripple(y), g = 14 + ripple(y) * 0.8, b = 28 + ripple(y) * 1.4;
     for (const bl of blobs) {
-      const d = Math.hypot(x - bl.x, y - bl.y);
+      // toroidal distance so the texture wraps seamlessly on BOTH axes when
+      // tiled 3×3 — the blobs bend through the edges instead of clipping
+      const dx = wrap(x - bl.x), dy = wrap(y - bl.y);
+      const d = Math.hypot(dx, dy);
       if (d < bl.r) { const t = Math.pow(1 - d / bl.r, 1.35) * 0.55; r += bl.c[0] * t; g += bl.c[1] * t; b += bl.c[2] * t; }
+    }
+    for (const ln of lanes) {
+      const py = ln.cy + ln.amp * Math.sin((x / ln.per) * Math.PI * 2);
+      const dy = wrap(y - py);
+      const t = Math.max(0, 1 - dy / ln.th) * ln.a;
+      if (t > 0) { r += ln.c[0] * t; g += ln.c[1] * t; b += ln.c[2] * t; }
     }
     return [r, g, b];
   };
@@ -1156,25 +1329,67 @@ const blobs = [
       const i = (y * size + x) * 4;
       img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
     }
-    // star specks (additive)
+    // star specks (additive, toroidally wrapped so tiles never clip a star)
+    const addStar = (idx, dr, dg, db) => {
+      const j = idx * 4;
+      img.data[j] = Math.min(255, img.data[j] + dr);
+      img.data[j + 1] = Math.min(255, img.data[j + 1] + dg);
+      img.data[j + 2] = Math.min(255, img.data[j + 2] + db);
+    };
     for (const st of stars) {
       const base = st.b ? 235 : 150;
-      const i = (st.y * size + st.x) * 4;
-      img.data[i] = Math.min(255, img.data[i] + base);
-      img.data[i + 1] = Math.min(255, img.data[i + 1] + base);
-      img.data[i + 2] = Math.min(255, img.data[i + 2] + base + 30);
+      addStar(st.y * size + st.x, base, base, base + 30);
       if (st.b) { // bright stars get a soft cross
-        const jx = (st.y * size + st.x + 1) * 4, jx2 = (st.y * size + st.x - 1) * 4;
-        const jy = (((st.y + 1) % size) * size + st.x) * 4, jy2 = (((st.y - 1 + size) % size) * size + st.x) * 4;
-        for (const j of [jx, jx2, jy, jy2]) {
-          img.data[j] = Math.min(255, img.data[j] + 70);
-          img.data[j + 1] = Math.min(255, img.data[j + 1] + 70);
-          img.data[j + 2] = Math.min(255, img.data[j + 2] + 90);
-        }
+        const jx = st.y * size + (st.x + 1) % size, jx2 = st.y * size + (st.x + size - 1) % size;
+        const jy = ((st.y + 1) % size) * size + st.x, jy2 = ((st.y + size - 1) % size) * size + st.x;
+        for (const j of [jx, jx2, jy, jy2]) addStar(j, 70, 70, 90);
       }
+    }
+    // ART-02 colony dust-stars: cream/teal 1px points, blended by alpha so they
+    // sit behind the bright seeded field
+    for (const ds of dustStars) {
+      const j = (ds.y * size + ds.x) * 4;
+      const da = ds.a / 255, oa = da + 1 * (1 - da);
+      img.data[j] = (ds.c[0] * da + img.data[j] * 1 * (1 - da)) / oa | 0;
+      img.data[j + 1] = (ds.c[1] * da + img.data[j + 1] * 1 * (1 - da)) / oa | 0;
+      img.data[j + 2] = (ds.c[2] * da + img.data[j + 2] * 1 * (1 - da)) / oa | 0;
     }
     if (isBrowser) ctx.putImageData(img, 0, 0);
     else ctx.putImageData(img, 0, 0); // TestCtx stores data either way
+  });
+}
+
+// Single nebula cloud sprite 320×220 — one large, soft gas cloud with a
+// transparent background, hand-placed in the intro to break the tile grid's
+// wallpaper repetition (QA 0904B.4). Built per-pixel with its own blob set so
+// every placement reads as a DIFFERENT cloud, not a tile crop.
+function makeNebulaCloud() {
+  const size = 320, height = 220;
+  const blobs = [
+    { x: 96, y: 92, r: 118, c: [140, 132, 168], w: 0.62 },  // lavender core
+    { x: 214, y: 138, r: 96, c: [196, 148, 122], w: 0.5 }, // warm peach wing
+    { x: 268, y: 58, r: 72, c: [124, 158, 178], w: 0.44 }, // aqua tail
+    { x: 66, y: 186, r: 78, c: [152, 122, 152], w: 0.4 },  // dusty rose root
+    { x: 160, y: 66, r: 46, c: [232, 178, 132], w: 0.34 }, // amber ember bump
+  ];
+  return createSurface(size, height, (s) => {
+    const ctx = s.canvas.getContext('2d');
+    const img = ctx.createImageData(size, height);
+    for (let y = 0; y < height; y++) for (let x = 0; x < size; x++) {
+      let acc = 0, r = 0, g = 0, b = 0;
+      for (const bl of blobs) {
+        const d = Math.hypot(x - bl.x, y - bl.y);
+        if (d < bl.r) { const t = Math.pow(1 - d / bl.r, 1.9) * bl.w; acc += t; r += bl.c[0] * t; g += bl.c[1] * t; b += bl.c[2] * t; }
+      }
+      const i = (y * size + x) * 4;
+      if (acc > 0.001) {
+        img.data[i] = Math.min(255, r / acc * 0.62);
+        img.data[i + 1] = Math.min(255, g / acc * 0.62);
+        img.data[i + 2] = Math.min(255, b / acc * 0.62);
+        img.data[i + 3] = Math.min(255, Math.floor(acc * 255 * 1.55));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
   });
 }
 
@@ -1609,26 +1824,51 @@ for (const [id, col] of Object.entries(NPC_COLORS)) {
 // ══ SHIP INTERIOR — painterly colony tiles (dark steel + teal glow), the
 //    spacecraft's bridge/bunk/greenhouse deck at the world's 32px standard. ══
 const SHIP_SPRITES = {
-  // metal deck floor — soft centre-light, faint panel seams, teal rivets
+  // metal deck floor — warm machined panels. QA 0904B.8: the old per-tile teal
+  // rivet dots turned every tile into graph paper. Panels are now seamless and
+  // the ONLY structure is plate seams that land on 4-tile block edges (the
+  // scene picks the variant by tile coordinate). Deck base is warmed one step
+  // so the habitat reads amber-lit, not cold slate.
   floor: paintSurface(32, 32, (P) => {
-    P.box(0, 0, 31, 31, 1, [52, 60, 72], [34, 42, 52]);
-    P.box(2, 2, 27, 27, 6, [60, 70, 84], [40, 48, 58]);       // recessed panel
-    P.ell(9, 9, 2, 2, [70, 178, 176], [40, 120, 120]);           // teal rivet
-    P.ell(23, 23, 2, 2, [70, 178, 176], [40, 120, 120]);
+    P.box(0, 0, 31, 31, 1, [58, 62, 72], [40, 44, 54]);
+    P.box(2, 2, 27, 27, 6, [64, 68, 80], [44, 50, 60]);       // recessed panel (no dots)
   }),
-  // hull wall — dark slate bulkhead: recessed panel, glowing teal light strip,
-  // a bright top beam so it reads as a RAISED surface (distinct from the deck)
+  // deck plate variants — seam lines sit on the 4-tile block boundary
+  floorSeamR: paintSurface(32, 32, (P) => {
+    P.box(0, 0, 31, 31, 1, [58, 62, 72], [40, 44, 54]);
+    P.box(2, 2, 27, 27, 6, [64, 68, 80], [44, 50, 60]);
+    P.box(30, 2, 31, 27, 0, [30, 34, 44], [24, 30, 40]);        // right block seam
+    P.box(29, 2, 29, 27, 0, [66, 88, 90], [44, 72, 76]);        // teal seam highlight
+  }),
+  floorSeamB: paintSurface(32, 32, (P) => {
+    P.box(0, 0, 31, 31, 1, [58, 62, 72], [40, 44, 54]);
+    P.box(2, 2, 27, 27, 6, [64, 68, 80], [44, 50, 60]);
+    P.box(2, 30, 27, 31, 0, [30, 34, 44], [24, 30, 40]);        // bottom block seam
+    P.box(2, 29, 27, 29, 0, [66, 88, 90], [44, 72, 76]);        // teal seam highlight
+  }),
+  floorSeamRB: paintSurface(32, 32, (P) => {
+    P.box(0, 0, 31, 31, 1, [58, 62, 72], [40, 44, 54]);
+    P.box(2, 2, 27, 27, 6, [64, 68, 80], [44, 50, 60]);
+    P.box(30, 2, 31, 27, 0, [30, 34, 44], [24, 30, 40]);
+    P.box(2, 30, 27, 31, 0, [30, 34, 44], [24, 30, 40]);
+    P.box(29, 2, 29, 27, 0, [66, 88, 90], [44, 72, 76]);
+    P.box(2, 29, 27, 29, 0, [66, 88, 90], [44, 72, 76]);
+  }),
+  // hull wall — dark slate bulkhead, QA 0904B.8: wall must sit ≥10 luminance
+  // under the deck so wall vs deck never reads as near-identical flat metal.
+  // The old bright top beam + full-width teal strip pulled the wall mean back up
+  // to deck level; both are now narrower/dimmer so the bulkhead stays dark.
   wall: paintSurface(32, 32, (P) => {
-    P.box(0, 0, 31, 31, 1, [40, 50, 62], [26, 34, 44]);            // dark slate bulkhead (clearly darker than deck)
-    P.box(4, 8, 27, 24, 3, [48, 58, 72], [36, 44, 54]);            // recessed panel
-    P.box(4, 26, 27, 27, 1, [56, 168, 166], [34, 120, 122]);        // teal light strip
-    P.ell(16, 6, 4, 3, [90, 200, 196], [50, 150, 150]);             // indicator
-    // top bulkhead beam — bright lit edge so the wall reads as raised, not floor
-    P.box(0, 0, 31, 4, 1, [92, 104, 118], [70, 80, 92]);
-    P.box(0, 3, 31, 3, 1, [64, 74, 86], [48, 56, 66]);
+    P.box(0, 0, 31, 31, 1, [26, 34, 46], [16, 22, 30]);            // dark slate bulkhead (clearly darker than deck)
+    P.box(4, 8, 27, 24, 3, [32, 40, 54], [22, 28, 38]);            // recessed panel
+    P.box(6, 26, 25, 27, 1, [34, 96, 100], [20, 74, 78]);          // teal light strip (narrow)
+    P.ell(16, 6, 3, 2.4, [62, 132, 132], [34, 96, 98]);            // indicator
+    // top bulkhead beam — dimmer so the bulkhead keeps its dark mass
+    P.box(0, 0, 31, 3, 1, [64, 74, 86], [50, 58, 70]);
+    P.box(0, 3, 31, 3, 1, [44, 52, 64], [34, 40, 52]);
     // vertical seam lines so repeated wall tiles read as metal plates
-    P.box(0, 8, 1, 27, 1, [32, 40, 50], [24, 30, 38]);
-    P.box(30, 8, 31, 27, 1, [32, 40, 50], [24, 30, 38]);
+    P.box(0, 8, 1, 27, 1, [18, 24, 32], [14, 18, 26]);
+    P.box(30, 8, 31, 27, 1, [18, 24, 32], [14, 18, 26]);
   }),
   // cryo-pod — glass tube with teal life-fluid, dark amber veneer cradle
   // QA fix: the old frame [120,104,84] read as bare cardboard stuck on a metal
@@ -2124,6 +2364,75 @@ const BLD_BARRACKS = scale2x(makePaint32((P) => {
   P.box(5, 9, 7, 10, 1, [56, 68, 86], [40, 50, 66]);            // vent slot
 }));
 
+// ── The old mission bell tower — ROADMAP A1 'The first bell' ──
+// Colony Plaza Bell Tower — a slim slate tower with teal trim, an arched
+// opening, and an amber/brass bell inside. NOT enterable: a plaza landmark
+// that rings when a festival begins (PlanetScene._ringBell). Same 32x32 paint
+// helper + scale2x wrap as every other building sprite.
+const BLD_BELL_TOWER = scale2x(makePaint32((P) => {
+  P.ell(16, 30, 8, 2.4, [30, 40, 56], [22, 30, 44]);               // ground shadow
+  P.box(10, 4, 22, 30, 3, [44, 56, 74], [26, 34, 50]);             // slim slate tower hull
+  P.box(10, 6, 22, 8, 1, [30, 38, 54], [22, 30, 44]);              // roof cap band
+  P.ell(16, 7.5, 9, 1.2, [70, 200, 200], [42, 150, 164]);          // ★ teal seam trim (signature)
+  P.box(13, 9, 19, 11, 1, [36, 46, 62], [24, 32, 46]);             // belfry deck seam
+  // arched opening in the belfry — the bell hangs inside
+  P.box(11, 14, 21, 15, 1, [52, 64, 84], [32, 42, 60]);            // arch lintel
+  P.ell(16, 17, 5, 5.4, [16, 22, 34], [10, 14, 24]);               // arch shadow well
+  P.ell(16, 14.5, 1.4, 1.4, [110, 124, 148], [70, 82, 104]);       // yoke pin
+  P.ell(16, 16.5, 3.6, 3.4, [247, 214, 152], [214, 168, 96]);      // ★ amber/brass bell
+  P.ell(16, 19.4, 1.6, 1.2, [214, 168, 96], [170, 124, 64]);       // bell clapper lip
+  P.ell(16, 19.6, 1.1, 1.1, [120, 240, 232], [52, 158, 170]);      // clapper glint (teal)
+  P.box(15, 13, 17, 15, 0.5, [110, 124, 148], [70, 82, 104]);      // bell mount strut
+  P.box(11, 20, 21, 23, 1, [52, 64, 84], [32, 42, 60]);            // sill band under the arch
+  P.box(9, 12, 10, 28, 1, [36, 46, 62], [24, 32, 46]);             // side panel seam L
+  P.box(22, 12, 23, 28, 1, [36, 46, 62], [24, 32, 46]);            // side panel seam R
+  P.box(13, 28, 19, 30, 2, [30, 42, 60], [20, 30, 44]);            // base plinth
+  P.box(10, 30, 22, 32, 1, [60, 72, 90], [40, 52, 68]);            // base plate
+}));
+
+// SF51 'Companion Corridor' — the plaza agent terminal (decor, not enterable):
+// slate console shell with a live teal screen, amber feed accent and an
+// antenna stub, drawn on the same 32px paint surface as the bell tower so it
+// reads as colony hardware, not a fantasy prop.
+// ART-04: night window glows for the "someone is home" buildings that had none.
+// Derived from the sprite's OWN lit pixels (windows, sign, door strip), so the
+// glow always sits exactly on the art — never a floating blob.
+function windowGlowFrom(base, minLum = 150) {
+  return createSurface(base.width, base.height, (s) => {
+    const ctx = s.canvas.getContext('2d');
+    const img = ctx.createImageData(base.width, base.height), d = img.data;
+    for (let y = 0; y < base.height; y++) for (let x = 0; x < base.width; x++) {
+      const p = px(base, x, y);
+      if (p[3] < 200) continue;
+      const L = 0.3 * p[0] + 0.59 * p[1] + 0.11 * p[2];
+      if (L < minLum) continue;
+      const k = Math.min(1, (L - minLum) / 70 + 0.35), i = (y * base.width + x) * 4;
+      // warm the core toward colony amber #f7d698, keep teal accents teal
+      const teal = p[1] > p[0] + 30;
+      d[i] = teal ? p[0] : Math.min(255, (p[0] + 247) / 2);
+      d[i + 1] = teal ? Math.min(255, p[1] + 20) : Math.min(255, (p[1] + 214) / 2);
+      d[i + 2] = teal ? Math.min(255, p[2] + 20) : Math.min(255, (p[2] + 152) / 2);
+      d[i + 3] = (255 * k) | 0;
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+}
+const BLD_BARN_GLOW = windowGlowFrom(BLD_BARN, 140);
+const BLD_BARRACKS_GLOW = windowGlowFrom(BLD_BARRACKS, 165);
+
+const BLD_CORRIDOR_TERMINAL = scale2x(makePaint32((P) => {
+  P.ell(16, 30, 8, 2.0, [30, 40, 56], [22, 30, 44]);              // ground shadow
+  P.box(8, 8, 26, 22, 3, [44, 56, 74], [26, 34, 50]);             // slate console hull
+  P.box(10, 11, 22, 14, 2, [26, 34, 50], [16, 22, 34]);           // screen bezel
+  P.box(12, 13, 18, 10, 0.5, [103, 225, 205], [60, 170, 170]);    // ★ teal live screen
+  P.box(13, 15, 5, 1.5, 0.5, [247, 214, 152], [214, 168, 96]);    // ★ amber feed accent
+  P.box(13, 18, 12, 1, 0.5, [110, 124, 148], [70, 82, 104]);      // slate feed row
+  P.box(13, 21, 8, 1, 0.5, [110, 124, 148], [70, 82, 104]);       // slate feed row 2
+  P.box(10, 26, 22, 5, 2, [60, 72, 90], [40, 52, 68]);            // base plate
+  P.box(9, 5, 14, 4, 1, [52, 64, 84], [32, 42, 60]);              // console neck
+  P.box(15, 4, 3, 3, 1, [110, 124, 148], [70, 82, 104]);          // antenna stub
+}));
+
 // ── stardust pond (fishing spot) ──
 const DECOR_POND = mkSprite(`
 ...wwwwwwww...
@@ -2297,9 +2606,15 @@ function drawPortrait(s, frame, P) {
       s.rect(4, 14, 1, 6, PMETAL_S); s.rect(35, 14, 1, 6, PMETAL_S);
       // hot single visor slit with a scalar pupil bar — reads as a welder mask
       s.rect(9, 13, 22, 7, [40, 26, 18]);
-      s.rect(10, 14, 20, 5, P.visor);
-      s.rect(10, 14, 20, 2, P.glow);
-      s.rect(22, 15, 3, 3, [255, 244, 210]);                // hot core
+      if (frame === 4) {                                     // [SF46] troubled: visor dims + narrows, core sinks
+        s.rect(10, 16, 20, 3, shade(P.visor, 0.55));
+        s.rect(21, 17, 3, 2, [200, 150, 110]);
+      } else {
+        s.rect(10, 14, 20, 5, P.visor);
+        s.rect(10, 14, 20, 2, P.glow);
+        if (frame === 3) { s.rect(15, 14, 4, 2, [255, 250, 230]); s.rect(21, 14, 4, 2, [255, 250, 230]); } // [SF46] warm: twin happy glints
+        else s.rect(22, 15, 3, 3, [255, 244, 210]);         // hot core
+      }
       s.rect(12, 16, 4, 1, [120, 60, 26]);                   // slit shutter bars
       s.rect(17, 16, 4, 1, [120, 60, 26]);
       // spark antenna (off-centre, live spark)
@@ -2313,6 +2628,8 @@ function drawPortrait(s, frame, P) {
       s.rect(15, 20, 10, 5, [30, 34, 48]);
       if (frame === 0) { for (let i = 0; i < 3; i++) s.rect(16, 21 + i * 2, 8, 1, P.metalS); }
       else if (frame === 1) { s.rect(16, 21, 8, 2, P.visor); s.rect(16, 23, 8, 2, [30, 34, 48]); }
+      else if (frame === 3) { s.rect(16, 21, 1, 1, P.visor); s.rect(17, 22, 6, 2, P.visor); s.rect(23, 21, 1, 1, P.visor); s.rect(8, 21, 4, 2, [230, 140, 70]); s.rect(28, 21, 4, 2, [230, 140, 70]); } // [SF46] warm grill grin + forge flush
+      else if (frame === 4) { s.rect(16, 23, 8, 1, shade(P.visor, 0.55)); s.rect(16, 24, 1, 1, shade(P.visor, 0.55)); s.rect(23, 24, 1, 1, shade(P.visor, 0.55)); } // [SF46] troubled sag
       else { s.rect(16, 21, 8, 4, P.visor); s.rect(18, 23, 4, 2, P.glow); }
       return;
     }
@@ -2328,14 +2645,26 @@ function drawPortrait(s, frame, P) {
     s.rect(11, 11, 7, 8, [26, 44, 40]); s.rect(22, 11, 7, 8, [26, 44, 40]);
     s.rect(12, 12, 5, 6, P.visor);  s.rect(23, 12, 5, 6, P.visor);
     s.rect(13, 13, 3, 4, P.glow);   s.rect(24, 13, 3, 4, P.glow);
-    s.rect(13, 13, 2, 2, [255, 255, 255]); s.rect(24, 13, 2, 2, [255, 255, 255]);
-    s.rect(13, 15, 2, 2, [20, 60, 54]);  s.rect(24, 15, 2, 2, [20, 60, 54]); // pupils
+    if (frame === 3) {                                       // [SF46] warm: optics squint into happy arcs
+      for (const ox of [11, 22]) { s.rect(ox, 11, 7, 8, [26, 44, 40]); s.rect(ox + 1, 15, 1, 2, P.glow); s.rect(ox + 2, 14, 3, 1, P.glow); s.rect(ox + 5, 15, 1, 2, P.glow); }
+    } else if (frame === 4) {                                // [SF46] troubled: lids drop, pupils look down
+      s.rect(12, 12, 5, 3, [26, 44, 40]); s.rect(23, 12, 5, 3, [26, 44, 40]);
+      s.rect(12, 12, 2, 1, P.metalS); s.rect(26, 12, 2, 1, P.metalS);
+      s.rect(14, 16, 2, 2, [20, 60, 54]); s.rect(24, 16, 2, 2, [20, 60, 54]);
+    } else {
+      s.rect(13, 13, 2, 2, [255, 255, 255]); s.rect(24, 13, 2, 2, [255, 255, 255]);
+      s.rect(13, 15, 2, 2, [20, 60, 54]);  s.rect(24, 15, 2, 2, [20, 60, 54]); // pupils
+    }
     // cheek status lights
-    s.rect(8, 18, 2, 2, [255, 168, 96]); s.rect(30, 18, 2, 2, P.visor);
+    if (frame === 3) { s.rect(7, 18, 3, 2, [255, 150, 150]); s.rect(30, 18, 3, 2, [255, 150, 150]); } // [SF46] warm: both cheeks flush
+    else if (frame === 4) { s.rect(8, 18, 2, 2, [140, 96, 70]); s.rect(30, 18, 2, 2, shade(P.visor, 0.5)); } // dimmed status
+    else { s.rect(8, 18, 2, 2, [255, 168, 96]); s.rect(30, 18, 2, 2, P.visor); }
     // smile grille — animates per frame (open happy mouth, not a slot)
     s.rect(15, 20, 10, 4, [22, 40, 38]);
     if (frame === 0) { s.rect(16, 22, 8, 2, P.visor); s.rect(17, 21, 6, 1, P.glow); }
     else if (frame === 1) { s.rect(16, 21, 8, 3, P.visor); s.rect(17, 22, 6, 1, P.glow); }
+    else if (frame === 3) { s.rect(15, 20, 1, 1, P.visor); s.rect(16, 21, 8, 3, P.visor); s.rect(24, 20, 1, 1, P.visor); s.rect(17, 22, 6, 1, [255, 255, 255]); } // [SF46] wide grin
+    else if (frame === 4) { s.rect(17, 22, 6, 1, shade(P.visor, 0.6)); s.rect(16, 23, 1, 1, shade(P.visor, 0.6)); s.rect(23, 23, 1, 1, shade(P.visor, 0.6)); } // [SF46] frown
     else { s.rect(16, 21, 8, 4, P.visor); s.rect(17, 22, 6, 2, [255, 255, 255]); }
     if (P.pin) { s.rect(27, 39, 5, 3, [250, 210, 80]); s.rect(28, 40, 3, 1, [255, 240, 170]); }
     return;
@@ -2348,7 +2677,10 @@ function drawPortrait(s, frame, P) {
   // ── eyes + brows + mouth, all shaped by P.expr (QA 0904 Stage 5) ──
   // one geometry shared by the whole cast = a flat, dead cast; the mood is now
   // drawn, not implied by a hair-colour swap.
-  const E = P.expr;
+  // [SF46] frames 3/4 are reaction faces (warm after a loved gift, troubled
+  // after a hated one) — they override the NPC's resting mood for one line.
+  const MOOD = frame === 3 ? 'warm' : frame === 4 ? 'troubled' : null;
+  const E = MOOD || P.expr;
   // brows: angle + height carry most of the read (inner-up = worried,
   // inner-down/low = gruff or stern, high + arched = bright/dreamy)
   const brow = (x, innerHi, lift) => {
@@ -2357,7 +2689,9 @@ function drawPortrait(s, frame, P) {
     else if (innerHi < 0) { s.rect(x, y, 5, 1, P.browDark); s.rect(x + 2, y + 1, 3, 1, P.browDark); }
     else { s.rect(x, y, 5, 1, P.browDark); }
   };
-  if (E === 'worry')  { brow(11, 1, 1); brow(24, 1, 1); }
+  if (E === 'warm') { brow(11, 0, 2); brow(24, 0, 2); }
+  else if (E === 'troubled') { brow(11, 1, 2); brow(24, 1, 2); s.rect(19, 9, 2, 1, P.skinSh); } // knit brow crease
+  else if (E === 'worry')  { brow(11, 1, 1); brow(24, 1, 1); }
   else if (E === 'gruff' || E === 'sharp') { brow(11, -1, 1); brow(24, -1, 1); }
   else if (E === 'bright' || E === 'dreamy') { brow(11, 0, 2); brow(24, 0, 2); }
   else if (E === 'clever') { brow(11, 0, 0); brow(24, 1, 2); }
@@ -2366,13 +2700,22 @@ function drawPortrait(s, frame, P) {
   const eh = E === 'bright' ? 7 : E === 'dreamy' ? 7 : E === 'sharp' ? 4 : E === 'gruff' ? 4 : 6;
   const ew = E === 'sharp' ? 6 : 5;
   const ey = 12 + (6 - eh);
-  s.rect(12, ey, ew, eh, P.eye); s.rect(23, ey, ew, eh, P.eye);
-  s.rect(13, ey + 1, 2, 2, P.eyeHi); s.rect(24, ey + 1, 2, 2, P.eyeHi);
+  if (E === 'warm') {                                       // [SF46] closed happy arcs ^ ^
+    for (const ox of [12, 23]) { s.rect(ox, 16, 1, 2, P.eye); s.rect(ox + 1, 15, 3, 1, P.eye); s.rect(ox + 4, 16, 1, 2, P.eye); }
+  } else if (E === 'troubled') {                            // [SF46] heavy lids, gaze dropped
+    s.rect(12, 14, 5, 4, P.eye); s.rect(23, 14, 5, 4, P.eye);
+    s.rect(12, 13, 5, 1, P.skinSh); s.rect(23, 13, 5, 1, P.skinSh);
+    s.rect(13, 16, 2, 1, P.eyeHi); s.rect(24, 16, 2, 1, P.eyeHi);
+  } else {
+    s.rect(12, ey, ew, eh, P.eye); s.rect(23, ey, ew, eh, P.eye);
+    s.rect(13, ey + 1, 2, 2, P.eyeHi); s.rect(24, ey + 1, 2, 2, P.eyeHi);
+  }
   if (E === 'bright' || E === 'dreamy') { s.rect(13, ey + 4, 1, 1, [210, 226, 255]); s.rect(24, ey + 4, 1, 1, [210, 226, 255]); }
   if (E === 'worry') { s.rect(12, ey - 1, ew, 1, P.skinSh); s.rect(23, ey - 1, ew, 1, P.skinSh); } // tired lid
   if (E === 'clever') { s.rect(23, ey, ew, 1, P.skinSh); }                                          // one narrowed eye
   s.rect(19, 16, 2, 2, P.skinSh);              // nose
-  if (E !== 'gruff') { s.rect(10, 17, 3, 2, P.blush); s.rect(27, 17, 3, 2, P.blush); } // blush
+  if (E === 'warm') { s.rect(9, 17, 4, 2, P.blush); s.rect(27, 17, 4, 2, P.blush); s.rect(10, 19, 2, 1, P.blush); s.rect(28, 19, 2, 1, P.blush); } // [SF46] full flush
+  else if (E !== 'gruff' && E !== 'troubled') { s.rect(10, 17, 3, 2, P.blush); s.rect(27, 17, 3, 2, P.blush); } // blush
   if (P.glasses) {
     s.rect(9, 12, 12, 7, [198, 204, 216]);
     s.rect(20, 12, 12, 7, [198, 204, 216]);
@@ -2397,6 +2740,11 @@ function drawPortrait(s, frame, P) {
       s.rect(18, 22, 4, 1, PMOUTH);                        // calm neutral
       s.rect(17, 23, 6, 1, P.skinSh);
     }
+  } else if (frame === 3) {                                // [SF46] warm: broad open smile
+    s.rect(16, 21, 1, 1, PMOUTH); s.rect(23, 21, 1, 1, PMOUTH);
+    s.rect(17, 22, 6, 2, PMOUTH); s.rect(18, 22, 4, 1, [250, 250, 250]);
+  } else if (frame === 4) {                                // [SF46] troubled: downturned
+    s.rect(18, 22, 4, 1, PMOUTH); s.rect(17, 23, 1, 1, PMOUTH); s.rect(22, 23, 1, 1, PMOUTH);
   } else if (frame === 1) {
     s.rect(16, 21, 8, 1, P.skinSh);                        // top lip
     s.rect(17, 22, 6, E === 'bright' ? 4 : 3, PMOUTH);    // open
@@ -2407,38 +2755,29 @@ function drawPortrait(s, frame, P) {
   }
 }
 
-// id → [frame0, frame1, frame2]
+// id → [neutral, blab-open, blab-wide, warm, troubled]  ([SF46] 3 → 5 expressions)
 const PORTRAITS = {};
 for (const [id, col] of Object.entries(NPC_COLORS)) {
   const P = mkPortraitCFG(id, hexRGB(col));
-  PORTRAITS[id] = [0, 1, 2].map((f) => createSurface(40, 48, (s) => drawPortrait(s, f, P)));
+  PORTRAITS[id] = [0, 1, 2, 3, 4].map((f) => createSurface(40, 48, (s) => drawPortrait(s, f, P)));
 }
 
 // Smooth 2× supersample — doubles a canvas with a soft box-blur feather so the
 // world renders as rich high-res art (no 2px chunkiness), matching the modern
 // painterly direction. Screen-space fx/portraits are left untouched.
 function upscale2x(src) {
-  // SMOOTH 2x UPSCALE (bilinear): samples each output pixel's color from its
-  // 2x2 source neighborhood with fractional weights, so edges stay soft and
-  // painterly instead of hard 2px blocks. Kills the CRT/grid look; preserves
-  // the original palette hues. Works headless (via _ctx.data) and in browser.
+  // CRISP 2x UPSCALE (nearest-neighbour). Bilinear here stacked on scale2x's
+  // pass blurred buildings/decor into soft dark boxes; pixel-doubling keeps
+  // the authored edges, matching the crisp envoy/character sprites.
   const w = src.width, h = src.height, W = w * 2, H = h * 2;
   return createSurface(W, H, (s) => {
     const ctx = s.canvas.getContext('2d');
     const img = ctx.createImageData(W, H);
     for (let y = 0; y < H; y++) {
-      const sy = (y - 0.5) / 2, y0 = Math.max(0, Math.floor(sy)), y1 = Math.min(h - 1, y0 + 1);
-      const fy = Math.max(0, Math.min(1, sy - y0));
       for (let x = 0; x < W; x++) {
-        const sx = (x - 0.5) / 2, x0 = Math.max(0, Math.floor(sx)), x1 = Math.min(w - 1, x0 + 1);
-        const fx = Math.max(0, Math.min(1, sx - x0));
-        const A = px(src, x0, y0), B2 = px(src, x1, y0), C2 = px(src, x0, y1), Dd = px(src, x1, y1);
+        const p = px(src, x >> 1, y >> 1);
         const o = (y * W + x) * 4;
-        for (let k = 0; k < 4; k++) {
-          const top = A[k] * (1 - fx) + B2[k] * fx;
-          const bot = C2[k] * (1 - fx) + Dd[k] * fx;
-          img.data[o + k] = (top * (1 - fy) + bot * fy) | 0;
-        }
+        img.data[o] = p[0]; img.data[o + 1] = p[1]; img.data[o + 2] = p[2]; img.data[o + 3] = p[3];
       }
     }
     ctx.putImageData(img, 0, 0);
@@ -2564,6 +2903,10 @@ const TEXTURES = {
   // ranch + fishing
   'bld.barn': BLD_BARN,
   'bld.barracks': BLD_BARRACKS,
+  // ROADMAP A1 'The first bell' — the plaza mission bell tower (decor, not enterable)
+  'bld.bell_tower': BLD_BELL_TOWER,
+  // SF51 'Companion Corridor' — plaza agent terminal prop (decor, solid)
+  'bld.corridor_terminal': BLD_CORRIDOR_TERMINAL,
   'decor.pond': DECOR_POND,
   // ground (every GROUND variant auto-registered as tile.<key snake_cased>)
   ...Object.fromEntries(Object.entries(GROUND).map(([k, c]) => [`tile.${toSnake(k)}`, c])),
@@ -2571,6 +2914,9 @@ const TEXTURES = {
   'decor.fence_post': fencePost,
   'decor.fence_beam_a': fenceBeamA,
   'decor.fence_beam_b': fenceBeamB,
+  // SF10 farm fence — procedural colony-palette posts + beams
+  'decor.farm_post': farmPost,
+  'decor.farm_beam': farmBeam,
   'decor.lamp': lampPost,
   'decor.lamp_glow': lampGlow,
   'decor.planter': planterBox,
@@ -2586,6 +2932,9 @@ const TEXTURES = {
   'decor.colony_holosign': COLONY_HOLOSIGN,
   // colony plaza decking (town walkable street)
   'tile.plaza': COLONY_PLAZA,
+  ...Object.fromEntries(PLAZA_DECK.map((c, i) => [`tile.plaza_deck${i}`, c])),
+  'bld.barn_glow': BLD_BARN_GLOW,
+  'bld.barracks_glow': BLD_BARRACKS_GLOW,
   // buildings
   'bld.house': houseSprite,
   'bld.house_glow': houseGlowSprite,
@@ -2601,6 +2950,7 @@ const TEXTURES = {
   // atmosphere
   'fx.planet': planetSprite,
   'fx.nebula': makeNebula(),
+  'fx.nebula-cloud': makeNebulaCloud(),
   'fx.sky_dusk': makeSky(),
   'fx.fog': makeFog(),
   'fx.meteor': makeMeteor(),
@@ -2638,10 +2988,8 @@ const TEXTURES = {
   ...Object.fromEntries(Object.entries(NPC_WALK).flatMap(([id, frames]) =>
     Object.entries(frames).map(([f, c]) => [`npc.${id}_${f}`, c])
   )),
-  // portraits — EarthBound speech-box faces (40×48, 3 mouth frames)
-  ...Object.fromEntries(Object.entries(PORTRAITS).flatMap(([id, fr]) => [
-    [`port.${id}_0`, fr[0]], [`port.${id}_1`, fr[1]], [`port.${id}_2`, fr[2]],
-  ])),
+  // portraits — EarthBound speech-box faces (40×48): 3 mouth frames + [SF46] warm (_3) / troubled (_4)
+  ...Object.fromEntries(Object.entries(PORTRAITS).flatMap(([id, fr]) => fr.map((c, f) => [`port.${id}_${f}`, c]))),
   // ship tiles
   ...Object.fromEntries(Object.entries(SHIP_SPRITES).map(([id, c]) => [`ship.${id}`, c])),
   'ship.porthole': portholeSprite,

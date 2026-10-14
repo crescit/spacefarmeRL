@@ -152,6 +152,22 @@ const neb = SS.makeNebula();
 check('nebula 256x256', neb.width === 256 && neb.height === 256, `got ${neb.width}x${neb.height}`);
 check('nebula has purple', count(neb, p => p[2] > p[0] && p[2] > 50) > 500);
 
+// ART-02 — fx.nebula tiles seamlessly: the intro and planet-sky tileSprite
+// repeats this texture, so a luminance jump across ANY edge shows as a visible
+// grid of blobs. All seam axes must be quiet AND the interior must be smooth
+// (a seam cannot be hidden by a noisy edge row while blobs still jump inside).
+{
+  const nc = SS.TEXTURES['fx.nebula'];
+  const lum = (x, y) => { const p = px(nc, x, y); return 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]; };
+  let seamX = 0, seamY = 0, adj = 0, na = 0;
+  for (let y = 0; y < nc.height; y++) seamX += Math.abs(lum(0, y) - lum(nc.width - 1, y));
+  for (let x = 0; x < nc.width; x++) seamY += Math.abs(lum(x, 0) - lum(x, nc.height - 1));
+  for (let y = 0; y < nc.height; y++) for (let x = 0; x < nc.width - 1; x++) { adj += Math.abs(lum(x, y) - lum(x + 1, y)); na++; }
+  for (let x = 0; x < nc.width; x++) for (let y = 0; y < nc.height - 1; y++) { adj += Math.abs(lum(x, y) - lum(x, y + 1)); na++; }
+  const mx = seamX / nc.width, my = seamY / nc.height, ma = adj / na;
+  check('ART-02 nebula tiles seamlessly', mx <= 2.5 && my <= 2.5 && ma <= 2.5, `seamX=${mx.toFixed(2)} seamY=${my.toFixed(2)} interior=${ma.toFixed(2)}`);
+}
+
 console.log('== SHIP TILES ==');
 for (const k of Object.keys(SS.SHIP_SPRITES)) {
   const c = SS.SHIP_SPRITES[k];
@@ -460,7 +476,7 @@ console.log('== LINE-WEIGHT (2px-min stroke rule, QA 0904 gate-blindness fix) ==
     if (d.x >= MD.MAP_W || d.y >= MD.MAP_H) { bad++; continue; }
     const g = MD.ground[d.y][d.x];
     if ((g === 'water' || g === 'river') && !/pond/.test(d.tex)) bad++;
-    if (MD.blocks[d.y][d.x] && !/barrel|planter/.test(d.tex)) bad++;
+    if (MD.blocks[d.y][d.x] && !/barrel|planter|corridor_terminal/.test(d.tex)) bad++;
     for (const b of MD.BUILDINGS) if (d.x >= b.x && d.x < b.x + (b.w || 4) && d.y >= b.y && d.y < b.y + (b.h || 4)) bad++;
   }
   check('no decor stands in water / on a building / on a blocked tile', bad === 0, `violations=${bad}`);
@@ -496,6 +512,119 @@ console.log('== LINE-WEIGHT (2px-min stroke rule, QA 0904 gate-blindness fix) ==
 console.log('== TEXTURES registry ==');
 check('registry has 40+ entries', Object.keys(SS.TEXTURES).length >= 40, `got ${Object.keys(SS.TEXTURES).length}`);
 check('registry all canvases', Object.values(SS.TEXTURES).every(c => c && typeof c.width === 'number'));
+
+// ART-01 crispness: building/decor art is pixel-doubled, never bilinear-smeared.
+// The old stacked bilinear (scale2x + upscale2x) blurred every 32px building
+// into a soft dark box. Every 2x2 output block must be one uniform pixel.
+{
+  let blocks = 0, mixed = 0;
+  for (const [k, c] of Object.entries(SS.TEXTURES)) {
+    if (!/^(bld|decor)\./.test(k)) continue;
+    const d = c._ctx.data, w = c.width;
+    for (let y = 0; y + 1 < c.height; y += 2) for (let x = 0; x + 1 < w; x += 2) {
+      const o = (y * w + x) * 4; blocks++;
+      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1]]) {
+        const q = ((y + dy) * w + x + dx) * 4;
+        if (d[o] !== d[q] || d[o + 1] !== d[q + 1] || d[o + 2] !== d[q + 2] || d[o + 3] !== d[q + 3]) { mixed++; break; }
+      }
+    }
+  }
+  check('ART-01 bld/decor pixel-doubled crisp (0 mixed 2x2 blocks)', blocks > 1000 && mixed === 0, `${mixed}/${blocks} mixed`);
+  const src = readFileSync('client/systems/SpriteSystem.js', 'utf8');
+  const sc = src.slice(src.indexOf('function scale2x'), src.indexOf('function scale2x') + 700);
+  check('ART-01 scale2x browser path disables smoothing', /imageSmoothingEnabled = false/.test(sc) && !/imageSmoothingEnabled = true/.test(sc));
+}
+
+// ART-03: plaza is a 4x4 macro deck, not one repeated graph-paper tile.
+{
+  const keys = Array.from({ length: 16 }, (_, i) => `tile.plaza_deck${i}`);
+  const ok = keys.every((k) => SS.TEXTURES[k] && SS.TEXTURES[k].width === 32);
+  const sig = new Set(keys.filter((k) => SS.TEXTURES[k]).map((k) => Array.from(SS.TEXTURES[k]._ctx.data.slice(0, 32 * 4 * 8)).join(',')));
+  check('ART-03 plaza deck: 16 tile variants, all distinct', ok && sig.size === 16, `distinct=${sig.size}`);
+  const ps = readFileSync('client/scenes/PlanetScene.js', 'utf8');
+  check('ART-03 planet plaza uses the deck variant pick', /plaza: \(x = 0, y = 0\) => texAt\('ground\.plazaDeck', \(y % 4\) \* 4 \+ \(x % 4\)\)/.test(ps));
+}
+// ART-04: every MapData building lights up at night; glows sit on the art.
+{
+  const md = readFileSync('client/systems/MapData.js', 'utf8');
+  const blds = md.slice(md.indexOf('export const BUILDINGS'), md.indexOf('export const DECOR'));
+  const n = (blds.match(/key: '/g) || []).length, g = (blds.match(/glow: 'bld\./g) || []).length;
+  check('ART-04 every building has a night glow', n >= 6 && g === n, `${g}/${n}`);
+  for (const k of ['bld.barn_glow', 'bld.barracks_glow']) {
+    const c = SS.TEXTURES[k], b = SS.TEXTURES[k.replace('_glow', '')];
+    let op = 0, on = 0;
+    if (c && b) { const d = c._ctx.data, bd = b._ctx.data; for (let i = 0; i < c.width * c.height; i++) if (d[i * 4 + 3] > 20) { op++; if (bd[i * 4 + 3] > 200) on++; } }
+    const f = c ? op / (c.width * c.height) : 0;
+    check(`ART-04 ${k} aligned window glow`, !!c && c._ctx.data[3] === 0 && f >= 0.04 && f <= 0.25 && on / Math.max(1, op) >= 0.9, `opq=${f.toFixed(3)}`);
+  }
+}
+
+// ART-05: painted title key art ships as a small pixelized PNG and is wired in.
+{
+  const f = 'client/art/title_keyart.png';
+  let ok = false, w = 0, h = 0, size = 0;
+  try { const b = readFileSync(f); size = b.length; w = b.readUInt32BE(16); h = b.readUInt32BE(20); ok = b.slice(1, 4).toString() === 'PNG'; } catch {}
+  check('ART-05 title key art: 480x270 PNG under 300KB', ok && w === 480 && h === 270 && size < 300000, `${w}x${h} ${size}B`);
+  let sb = null; try { sb = readFileSync('client/art/crawl_shipbay.png'); } catch {}
+  check('ART-05 crawl ship-bay art: 480x270 PNG under 300KB', !!sb && sb.readUInt32BE(16) === 480 && sb.readUInt32BE(20) === 270 && sb.length < 300000);
+  const intro = readFileSync('client/scenes/IntroScene.js', 'utf8');
+  check('ART-05 IntroScene loads key art with NEAREST filter', /load\.image\('art\.title_keyart', 'client\/art\/title_keyart\.png'\)/.test(intro) && /art\.title_keyart[\s\S]{0,200}FilterMode\.NEAREST/.test(intro));
+}
+
+// ART-06: painted plates — every NPC and every first-contact envoy has a
+// 128x128 painted bust, both backdrops exist at 480x270, and the scenes use them.
+{
+  const PA = await import('../client/systems/PaintedArt.js');
+  const { ALIEN_DATA } = await import('../client/entities/AlienData.js');
+  const dims = (f) => { try { const b = readFileSync(f); return [b.readUInt32BE(16), b.readUInt32BE(20), b.length]; } catch { return null; } };
+  const ids = [...Object.keys(SS.NPC_COLORS), ...ALIEN_DATA.map((a) => a.id)];
+  const missingIds = ids.filter((id) => !PA.PAINTED_PORTRAITS.includes(id));
+  check('ART-06 every NPC + envoy is in PAINTED_PORTRAITS', missingIds.length === 0, missingIds.join(','));
+  const badP = PA.PAINTED_PORTRAITS.filter((id) => { const d = dims(`client/art/port_${id}.png`) || dims(`client/art/alien_${id}.png`); return !d || d[0] !== 128 || d[1] !== 128 || d[2] > 40000; });
+  check('ART-06 painted busts: 128x128 PNG under 40KB each', badP.length === 0, badP.join(','));
+  const badS = PA.PAINTED_SCENES.filter((id) => { const d = dims(`client/art/scene_${id}.png`); return !d || d[0] !== 480 || d[1] !== 270 || d[2] > 300000; });
+  check('ART-06 painted backdrops: 480x270 PNG under 300KB', badS.length === 0, badS.join(','));
+  const ps = readFileSync('client/scenes/PlanetScene.js', 'utf8');
+  check('ART-06 PlanetScene: preload + dialogue bust + contact + reckoning backdrops',
+    /preloadPainted\(this\)/.test(ps) && /_showPaintedBust\(this\._diaNPC\)/.test(ps) &&
+    /paintedBackdrop\(this, 'contact'/.test(ps) && /paintedBackdrop\(this, 'reckoning'/.test(ps) && /paintedPortrait\(this, alien\.id\)/.test(ps));
+  check('ART-06 SpaceshipScene: painted C.O.R.A. tutorial bust', /paintedPortrait\(this, 'cora'\)/.test(readFileSync('client/scenes/SpaceshipScene.js', 'utf8')));
+  check('ART-07 season banner paints a plate per season (4 seasons, PlanetScene wires it)',
+    PA.SEASON_PLATES.length === 4 && PA.SEASON_PLATES.every((id) => PA.PAINTED_SCENES.includes(id)) &&
+    /paintedBackdrop\(this, SEASON_PLATES\[season\]/.test(ps));
+  check('ART-06 painted textures are NEAREST', /FilterMode\.NEAREST/.test(readFileSync('client/systems/PaintedArt.js', 'utf8')));
+}
+
+// ART-06b: painted busts keep each colonist's skin tone. The cast is brown
+// (NPC_SKIN); a generator defaulting to pale skin must fail here. Measures the
+// median warm (skin-like) pixel luminance in the face box of the 128px bust and
+// requires it within reach of the in-game tone (no lighter than target + 45).
+{
+  const zlib = await import('node:zlib');
+  const decode = (f) => {
+    const b = readFileSync(f); let o = 8, w = 0, h = 0, ct = 0, idat = [], plte = null;
+    while (o < b.length) { const n = b.readUInt32BE(o), t = b.toString('latin1', o + 4, o + 8), d = b.subarray(o + 8, o + 8 + n);
+      if (t === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); ct = d[9]; } else if (t === 'PLTE') plte = d; else if (t === 'IDAT') idat.push(d); o += 12 + n; }
+    const raw = zlib.inflateSync(Buffer.concat(idat)); const bpp = ct === 3 ? 1 : ct === 6 ? 4 : 3; const st = w * bpp;
+    const out = Buffer.alloc(h * st); let prev = Buffer.alloc(st);
+    for (let y = 0; y < h; y++) { const f0 = raw[y * (st + 1)], line = raw.subarray(y * (st + 1) + 1, (y + 1) * (st + 1)), cur = Buffer.alloc(st);
+      for (let i = 0; i < st; i++) { const a = i >= bpp ? cur[i - bpp] : 0, up = prev[i], c = i >= bpp ? prev[i - bpp] : 0; let v = line[i];
+        if (f0 === 1) v += a; else if (f0 === 2) v += up; else if (f0 === 3) v += (a + up) >> 1; else if (f0 === 4) { const p0 = a + up - c, pa = Math.abs(p0 - a), pb = Math.abs(p0 - up), pc = Math.abs(p0 - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? up : c; }
+        cur[i] = v & 255; } cur.copy(out, y * st); prev = cur; }
+    const px = (x, y) => { const i = y * st + x * bpp; if (ct === 3) { const k = out[i] * 3; return [plte[k], plte[k + 1], plte[k + 2]]; } return [out[i], out[i + 1], out[i + 2]]; };
+    return { w, h, px };
+  };
+  const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+  const SKIN = { luna: [150, 100, 66], zephyr: [196, 146, 102], vega: [126, 78, 50], quasar: [180, 124, 80], rhea: [204, 152, 100], astra: [184, 142, 98], orion: [116, 72, 46], comet: [152, 98, 62] };
+  const bad = [];
+  for (const [id, tgt] of Object.entries(SKIN)) {
+    const im = decode(`client/art/port_${id}.png`); const L = [];
+    for (let y = 40; y < 80; y++) for (let x = 40; x < 88; x++) { const c = im.px(x, y); if (c[0] > c[2] + 20 && c[0] >= c[1]) L.push(lum(c)); }
+    L.sort((a, b) => a - b); const m = L.length ? L[L.length >> 1] : 999;
+    if (m > lum(tgt) + 45) bad.push(`${id}:${m.toFixed(0)}>${(lum(tgt) + 45).toFixed(0)}`);
+  }
+  check('ART-06b painted busts keep the cast\'s brown skin tones', bad.length === 0, bad.join(' '));
+}
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 if (fail === 0) console.log('ALL GREEN ✓');

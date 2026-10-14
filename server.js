@@ -4,6 +4,7 @@ const http = require('http');
 const path = require('path');
 const { Server } = require('@colyseus/core');
 const { FarmRoom } = require('./server/rooms/FarmRoom');
+const { mountSpectator } = require('./server/spectator');
 
 const app = express();
 app.disable('x-powered-by');
@@ -11,6 +12,9 @@ app.disable('x-powered-by');
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'space-farmer' });
 });
+
+// ROADMAP A2 — watch an agent's season as it happens from the web UI.
+mountSpectator(app);
 
 // Always serve a fresh copy — no stale cache (prevents leftover debug pages)
 // Applied to ALL assets: a stale JS/CSS/font bundle can re-introduce old UI.

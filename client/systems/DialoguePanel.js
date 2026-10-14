@@ -113,7 +113,7 @@ export class DialoguePanel {
 
     // ── footer hint (prompt / gift keys) ──
     this.hint = scene.add.text(boxR - 4, boxB - 14, '', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#f7d698',
     }).setOrigin(1, 0.5).setDepth(1001).setVisible(false);
 
     // ── state ──

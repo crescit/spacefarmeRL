@@ -517,6 +517,7 @@ def make_policy(args: argparse.Namespace) -> OpenAIActionPolicy:
         stream=getattr(args, "stream", True),
         action_batch_size=getattr(args, "action_batch_size", 1),
         model_task=getattr(args, "model_task", None),
+        debug_dir=str(args.debug_dir) if getattr(args, "debug_dir", None) else None,
     )
 
 
@@ -648,6 +649,10 @@ def main() -> None:
         "--resume", action="store_true",
         help="reuse completed seeds from a compatible partial output report",
     )
+    parser.add_argument(
+        "--debug-dir", type=Path, default=None,
+        help="capture every raw model request/response as calls.jsonl JSON lines",
+    )
     args = parser.parse_args()
     if args.seeds < 1:
         parser.error("--seeds must be positive")
@@ -706,7 +711,7 @@ def main() -> None:
         "model": [asdict(episode) for episode in model_episodes]
     }
     if not args.no_baselines:
-        for name in ("random", "economic"):
+        for name in ("random", "economic", "farmer"):
             policies[name] = [
                 asdict(run_episode(name, seed, args.horizon_days)) for seed in seeds
             ]

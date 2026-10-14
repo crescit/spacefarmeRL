@@ -12,6 +12,12 @@ class AudioSystem {
   // Live instances + global mute, so the 🔊 button silences every scene's BGM.
   static _instances = [];
   static _muted = false;
+  // SHIP-02: player SFX/BGM volume (0..1) from the pause menu slider.
+  static _sfxVol = 1;
+  static setSfxVolume(v) {
+    AudioSystem._sfxVol = Math.max(0, Math.min(1, Number(v) || 0));
+    for (const i of AudioSystem._instances) i.applyMute();
+  }
   static setMuted(m) {
     AudioSystem._muted = !!m;
     for (const i of AudioSystem._instances) i.applyMute();
@@ -31,6 +37,17 @@ class AudioSystem {
     scene.load.audio('glow', '/sounds/glow.wav');
     scene.load.audio('bounce', '/sounds/bounce.wav');
     scene.load.audio('alarm', '/sounds/alarm.wav');
+    // SF25 — soft planet-action one-shots (<0.35s each)
+    scene.load.audio('till', '/sounds/till.wav');
+    scene.load.audio('plant', '/sounds/plant.wav');
+    scene.load.audio('mine_hit', '/sounds/mine_hit.wav');
+    scene.load.audio('ore', '/sounds/ore.wav');
+    scene.load.audio('fish_catch', '/sounds/fish_catch.wav');
+    scene.load.audio('sell', '/sounds/sell.wav');
+    scene.load.audio('equip', '/sounds/equip.wav');
+    scene.load.audio('door', '/sounds/door.wav');
+    scene.load.audio('refill', '/sounds/refill.wav');
+    scene.load.audio('tired', '/sounds/tired.wav');
   }
 
   constructor(scene) {
@@ -93,14 +110,14 @@ class AudioSystem {
   // then the user clicks mute later). The instance flag is kept in sync too.
   applyMute() {
     this.muted = AudioSystem._muted;
-    if (this.bgm) this.bgm.setVolume(this.muted ? 0 : 0.32);
+    if (this.bgm) this.bgm.setVolume(this.muted ? 0 : 0.32 * AudioSystem._sfxVol);
   }
 
 
   // play a one-shot SFX by registered key (silenced while global mute is on)
   sfx(key, { volume = 0.5 } = {}) {
-    if (!this.ready || !this.scene.sound || AudioSystem._muted) return;
-    try { this.scene.sound.play(key, { volume }); } catch (e) { /* no audio */ }
+    if (!this.ready || !this.scene.sound || AudioSystem._muted || AudioSystem._sfxVol <= 0) return;
+    try { this.scene.sound.play(key, { volume: volume * AudioSystem._sfxVol }); } catch (e) { /* no audio */ }
   }
 }
 

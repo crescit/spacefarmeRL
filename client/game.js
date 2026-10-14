@@ -8,8 +8,15 @@ import { NetworkSystem } from './systems/NetworkSystem.js';
 import { TEXTURES } from './systems/SpriteSystem.js';
 import { MusicDirector } from './systems/MusicDirector.js';
 import { AudioSystem } from './systems/AudioSystem.js';
+import { reducedMotion, setReducedMotion } from './systems/Motion.js';
+import { PauseMenu, installNetBanner, applyVolumes } from './systems/PauseMenu.js';
 
 window.SpaceFarmer = {};
+// SF49: expose the reduced-motion toggle for QA + embedders. The scene reads
+// Motion.reducedMotion() live at every motion site, so a flip applies on the
+// very next frame.
+window.SpaceFarmer.setReducedMotion = setReducedMotion;
+window.SpaceFarmer.reducedMotion = reducedMotion;
 
 // ── Register all sprites as Phaser textures ──
 // TEXTURES is the single source of truth (name → canvas) from SpriteSystem.
@@ -17,6 +24,9 @@ function registerTextures(game) {
   for (const [name, canvas] of Object.entries(TEXTURES)) {
     if (game.textures.exists(name)) continue;
     game.textures.addCanvas(name, canvas);
+    // SF06: envoy sprites are hard-edged pixel art — nearest filtering keeps them crisp
+    // buildings/decor are pixel-doubled art too: GPU bilinear re-blurs them
+    if (/^(alien|bld|decor)\./.test(name)) game.textures.get(name).setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 }
 
@@ -37,8 +47,13 @@ function init() {
       w = window.innerWidth; h = Math.round(w * 0.7);
     }
   } else {
-    // Desktop keeps the classic 4:3 viewport, letterboxed inside the window.
-    w = 960; h = 720;
+    // Desktop fills the window (no 4:3 pillarbox bars), clamped to a sane
+    // range so ultrawide/tiny windows still frame the colony well.
+    // #game may not be laid out yet at init, so take the aspect from the
+    // window (minus the ~24px hint bar) and keep a fixed 720px logical height.
+    const aspect = (window.innerWidth || 960) / Math.max(1, (window.innerHeight || 744) - 24);
+    h = 720;
+    w = Math.round(h * Math.max(4 / 3, Math.min(21 / 9, aspect)));
   }
 
   const config = {
@@ -116,6 +131,9 @@ function init() {
             if (params.get('night') === '1' && sc && sc.isNight !== undefined) {
               sc._nightOverride = true;   // screenshot debug: keep night even though the clock says day
               sc.isNight = true; sc.updateNightVisuals?.(); sc.nightOverlay?.setAlpha(0.42);
+              // SF52: shapes render their fill via fillAlpha on the Canvas renderer,
+              // so mirror the debug alpha there too (otherwise the wash stays invisible)
+              sc.nightOverlay?.setFillStyle(0x0e1838, 1);
               (sc.glowRegistry || []).forEach(g => g.setVisible(true));
               (sc.lampGlows || []).forEach(g => g.setVisible(true));
             }
@@ -141,7 +159,7 @@ function init() {
     try { muted = localStorage.getItem('spacefarmer_mute') === '1'; } catch (e) {}
     const apply = () => {
       window.SpaceFarmer.muted = muted;
-      if (window.SpaceFarmer.music) window.SpaceFarmer.music.setMuted(muted);
+      if (window.SpaceFarmer.music) { applyVolumes(); window.SpaceFarmer.music.setMuted(muted); }
       AudioSystem.setMuted(muted);
       btn.textContent = muted ? '🔇' : '🔊';
       btn.classList.toggle('muted', muted);
@@ -170,6 +188,9 @@ function init() {
       endpoint = 'ws://127.0.0.1:8900';
     }
   }
+  // SHIP-01/02: pause + settings menu (ESC / ☰) and the connection banner.
+  window.SpaceFarmer.pauseMenu = new PauseMenu(game);
+  installNetBanner();
   const net = new NetworkSystem();
   window.SpaceFarmer.net = net;
   net.connect(endpoint).then(() => {

@@ -12,7 +12,7 @@ from rl.python.compare_evals import (
 )
 
 
-def fixture(model: str = "model-a", seeds: tuple[int, ...] = (1, 2)):
+def fixture(model: str = "model-a", seeds: tuple[int, ...] = (1, 2), narrative: bool = False):
     def episodes(policy: str, rewards: tuple[float, float], credits: tuple[int, int]):
         return [
             {
@@ -22,6 +22,11 @@ def fixture(model: str = "model-a", seeds: tuple[int, ...] = (1, 2)):
                     "mean_latency_ms": 100 + index, "p95_latency_ms": 150,
                     "replay_ok": True, "trajectory": f"seed-{seed}.jsonl",
                 } if policy == model else {}),
+                **({
+                    "days": 12 + index, "quests": index, "friends_made": index,
+                    "journal_entries": 1 + index, "festivals": index % 2,
+                    "testimony": "The greenhouse bell rang on day twelve.",
+                } if narrative else {}),
             }
             for index, seed in enumerate(seeds)
         ]
@@ -84,6 +89,32 @@ class CompareEvalTests(unittest.TestCase):
         # invalid reports must not appear in the comparable table
         self.assertNotIn("| model-a |", markdown)
 
+    def test_narrative_markdown_shows_testimony(self):
+        long = "Testimony with a pipe | and " + "x" * 180
+        report = fixture("narr", narrative=True)
+        report["episodes"]["model"][0]["testimony"] = long + "\nsecond line"
+        row = report_row(report, Path("narr.json"))
+        self.assertTrue(row["narrative"])
+        markdown = render_markdown([row])
+        table = [line for line in markdown.splitlines() if line.startswith("| Model")]
+        self.assertEqual(len(table), 1)
+        self.assertTrue(table[0].endswith("| Testimony |"))
+        cells = markdown.splitlines()[markdown.splitlines().index(table[0]) + 1]
+        self.assertTrue(cells.startswith("|---|"))
+        self.assertIn("|:---|", cells)
+        body = [line for line in markdown.splitlines() if line.startswith("| narr |")][0]
+        self.assertIn("\\|", body)
+        self.assertNotIn("\n", body)
+        self.assertNotIn("second line", body)
+        self.assertIn("…", body)
+        for line in markdown.splitlines():
+            if line.startswith("| narr |"):
+                cell = line.split(" | ")[9].strip()
+                self.assertLessEqual(len(cell.rstrip("…")), 81)
+
+    def test_non_narrative_markdown_has_no_testimony(self):
+        markdown = render_markdown([report_row(fixture(), Path("a.json"))])
+        self.assertNotIn("Testimony", markdown)
     def test_empty_leaderboard_is_honest(self):
         markdown = render_markdown([], [], {})
         self.assertIn("No valid reports on the locked protocol", markdown)

@@ -6,6 +6,7 @@ import { SHIP_SPRITES } from '../systems/SpriteSystem.js';
 import { TouchControls } from '../systems/TouchControls.js';
 import { ColonyHub } from '../systems/ColonyHub.js';
 import { DialoguePanel } from '../systems/DialoguePanel.js';
+import { preloadPainted, paintedPortrait } from '../systems/PaintedArt.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 
 const TILE_SIZE = 32;  // painterly colony scale (matches world)
@@ -74,6 +75,11 @@ const SHIP_MAP = [
 // Tile type definitions for the spaceship (new texture registry keys)
 import { tex, resolveKey } from '../systems/AssetTheme.js';
 
+// Tutorial tracker panel width — module scope because create() AND
+// _refreshTracker() both lay it out (SF04 left it create()-local → ReferenceError
+// on the first setObjective, killing the ship scene).
+const TRACK_W = 246;
+
 const TILE_TYPES = {
   0: { tex: () => tex('ship.floor'), color: 0xdcc090 },
   1: { tex: () => tex('ship.wall'), color: 0x5a6e6e },
@@ -90,6 +96,15 @@ const PLAYER_TEX_BACK = () => tex('player.back');
 const PLAYER_TEX_LEFT = () => tex('player.left');
 const PLAYER_TEX_RIGHT = () => tex('player.right');
 const FARM_TEX = { soil: () => tex('farm.empty'), tilled: () => tex('farm.tilled'), seeded: () => tex('farm.seeded'), growing: () => tex('farm.growing'), mature: () => tex('farm.mature'), empty: () => tex('ship.floor') };
+// deck plate variants — seams land on 4-tile block edges so repeated deck tiles
+// read as large machined plates, never as graph paper with a dot per tile
+function deckVariant(x, y) {
+  const right = (x % 4) === 3, bottom = (y % 4) === 3;
+  if (right && bottom) return tex('ship.floorSeamRB');
+  if (right) return tex('ship.floorSeamR');
+  if (bottom) return tex('ship.floorSeamB');
+  return tex('ship.floor');
+}
 
 // NPC dialogue data
 const NPC_DIALOGUES = {
@@ -141,6 +156,7 @@ const NPC_DIALOGUES = {
   airlock: {
     text: [
       '[C.O.R.A.]: You have earned enough credits for landing. Proceeding to airlock.',
+      '[C.O.R.A.]: The 500 cr landing-fuel fee is spent on descent fuel — you land with the colony\'s starter purse.',
       '[C.O.R.A.]: Prepare for planetary descent.',
     ],
     x: 46, y: 14,
@@ -165,6 +181,7 @@ class SpaceshipScene extends Phaser.Scene {
 
   preload() {
     AudioSystem.preload(this);
+    preloadPainted(this);   // ART-06 painted C.O.R.A. bust for the tutorial
   }
 
   create() {
@@ -181,7 +198,7 @@ class SpaceshipScene extends Phaser.Scene {
         const idx = y * MAP_W + x;
         const val = this.mapData[idx];
         const tileInfo = TILE_TYPES[val] || TILE_TYPES[0];
-        const texKey = tileInfo.tex();
+        const texKey = val === 0 ? deckVariant(x, y) : tileInfo.tex();
         const spr = this.add.image(
           x * TILE_SIZE + TILE_SIZE / 2,
           y * TILE_SIZE + TILE_SIZE / 2,
@@ -251,13 +268,14 @@ class SpaceshipScene extends Phaser.Scene {
       .setBlendMode(Phaser.BlendModes.SOFT_LIGHT).setDepth(190).setAlpha(0.34);
     this.shipSheen = this.add.rectangle(width / 2, height / 2, width, height, 0xffd9a0, 0)
       .setBlendMode(Phaser.BlendModes.ADD).setDepth(189).setAlpha(0.05);
-    // warm ceiling light pools so the deck reads lit-from-above, not uniformly cold
-    [[0.28, 0.30], [0.62, 0.62], [0.78, 0.34]].forEach(([fx, fy], i) => {
-      const p = this.add.image(width * fx, height * fy, tex('fx.poolWarm'))
-        .setBlendMode(Phaser.BlendModes.ADD).setDepth(188).setAlpha(0.14)
-        .setScale(1.6 + i * 0.15, 1.0);
-      void p;
-    });
+    // QA 0904B.8: the old screen-fraction "ceiling light pools" hovered at
+    // arbitrary points and read as grey smudges of dirt on the deck. They are
+    // gone; the deck now gets soft amber pools only at real light fixtures —
+    // the bridge console and the cryo pod (same fixtures that carry lamp glows).
+    this.consolePool = this.add.image(40 * TILE_SIZE + TILE_SIZE / 2, 4 * TILE_SIZE + 16, tex('fx.poolWarm'))
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(188).setAlpha(0.14).setScale(1.1, 1.0);
+    this.cryoPool = this.add.image(12 * TILE_SIZE + TILE_SIZE / 2, 8 * TILE_SIZE + 16, tex('fx.poolWarm'))
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(188).setAlpha(0.11).setScale(0.9, 1.0);
     // soft cool lift in the corners (ambient occlusion feel — corners fall back)
     this.shipVignetteCool = this.add.tileSprite(width / 2, height / 2, width, height, tex('fx.vignette'))
       .setDepth(191).setAlpha(0.5).setScrollFactor(0);
@@ -269,10 +287,10 @@ class SpaceshipScene extends Phaser.Scene {
       .setStrokeStyle(1, 0xe0a860);
     this.bunkSpr.add(bunkBg);
     this.bunkSpr.add(this.add.text(0, -TILE_SIZE * 0.4, 'BUNK', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '7px', color: '#ffe9a0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#ffe9a0',
     }).setOrigin(0.5));
     this.bunkSpr.add(this.add.text(0, TILE_SIZE * 0.4, 'SLEEP →', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '6px', color: '#a8d8d8',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#a8d8d8',
     }).setOrigin(0.5));
 
     // ── POI signposts — every interactable glows and wears a labelled plate so
@@ -287,8 +305,8 @@ class SpaceshipScene extends Phaser.Scene {
       color: '#ffd74a', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5));
     this.objMarker.add(this.add.text(0, 17, 'GO HERE', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '8px', fontStyle: 'bold',
-      color: '#ffe9a0', stroke: '#000', strokeThickness: 2,
+      fontFamily: 'system-ui, sans-serif', fontSize: '10px', fontStyle: 'bold',
+      color: '#ffe9a0', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5));
     this.objMarker.setDepth(230).setVisible(false);
     this._markerBaseY = 0;
@@ -312,25 +330,25 @@ class SpaceshipScene extends Phaser.Scene {
     }).setScrollFactor(0);
 
     // ── Persistent tutorial tracker — top-left checklist + descent-fuel bar ──
-    const TRACK_W = 246, TRACK_H = 122;
+    const TRACK_H = 122;
     this.trackerBg = this.add.rectangle(12 + TRACK_W / 2, 12 + TRACK_H / 2, TRACK_W, TRACK_H, 0x0c1019, 0.85)
       .setScrollFactor(0).setDepth(984).setStrokeStyle(2, 0x39c5bb, 0.85);
     this.trackerTitle = this.add.text(26, 20, 'TUTORIAL', {
-      fontFamily: "system-ui, 'Segoe UI'", fontSize: '10px', fontStyle: 'bold',
+      fontFamily: "system-ui, 'Segoe UI'", fontSize: '12px', fontStyle: 'bold',
       color: '#39c5bb', stroke: '#000', strokeThickness: 3,
     }).setScrollFactor(0).setDepth(985);
     this.trackerText = this.add.text(26, 38, '', {
-      fontFamily: "system-ui, 'Segoe UI'", fontSize: '10px', color: '#dfe6ff', lineSpacing: 5,
+      fontFamily: "system-ui, 'Segoe UI'", fontSize: '12px', color: '#dfe6ff', lineSpacing: 5,
     }).setScrollFactor(0).setDepth(985);
-    const fuelX = 26, fuelY = 12 + TRACK_H - 22, fuelW = TRACK_W - 42;
+    const fuelX = 26, fuelW = TRACK_W - 42;
     this.fuelW = fuelW;
-    this.fuelBg = this.add.rectangle(fuelX + fuelW / 2, fuelY, fuelW, 11, 0x1b2230, 1)
+    this.fuelBg = this.add.rectangle(fuelX + fuelW / 2, 140, fuelW, 11, 0x1b2230, 1)
       .setScrollFactor(0).setDepth(985).setStrokeStyle(1, 0x3a4a5e, 1);
-    this.fuelFill = this.add.rectangle(fuelX, fuelY, 2, 9, 0xffcf5e, 1)
+    this.fuelFill = this.add.rectangle(fuelX, 140, 2, 9, 0xffcf5e, 1)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(986);
-    this.fuelLabel = this.add.text(fuelX + fuelW, fuelY - 10, '', {
-      fontFamily: "system-ui, 'Segoe UI'", fontSize: '9px', fontStyle: 'bold',
-      color: '#ffd98a', stroke: '#000', strokeThickness: 2,
+    this.fuelLabel = this.add.text(fuelX + fuelW, 130, '', {
+      fontFamily: "system-ui, 'Segoe UI'", fontSize: '10px', fontStyle: 'bold',
+      color: '#ffd98a', stroke: '#000', strokeThickness: 3,
     }).setOrigin(1, 1).setScrollFactor(0).setDepth(986);
 
     // ── Dialogue system (shared component: warm framed panel, cozy JRPG) ──
@@ -382,7 +400,7 @@ class SpaceshipScene extends Phaser.Scene {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '14px', color: '#9dffec',
     }).setOrigin(0.5));
     this.backpackPanel.add(this.add.text(0, 156, '[1-5] EQUIP    [SPACE/B] CLOSE', {
-      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '9px', color: '#8a90b0',
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '10px', color: '#8a90b0',
     }).setOrigin(0.5));
     this._backpackDynamic = [];
 
@@ -393,7 +411,7 @@ class SpaceshipScene extends Phaser.Scene {
     this.tapGfx.fillStyle(0x67e1cd, 0.95).fillCircle(tapX, tapY, 4);
     this.tapGfx.lineStyle(1.2, 0x9dffec, 0.6).strokeCircle(tapX, tapY, 7);
     this.tapLabel = this.add.text(tapX, tapY + 14, 'WATER TAP', {
-      fontFamily: "system-ui,'Segoe UI'", fontSize: '9px', color: '#a8eeff', stroke: '#000', strokeThickness: 2,
+      fontFamily: "system-ui,'Segoe UI'", fontSize: '10px', color: '#a8eeff', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(206);
 
     // rework: persistent guidance state (checklist + active objective)
@@ -616,8 +634,10 @@ class SpaceshipScene extends Phaser.Scene {
       const spr = this.tileSprites[i];
       const val = this.mapData[i];
       const tileInfo = TILE_TYPES[val] || TILE_TYPES[0];
-      // planters (val 4) are handled below; give them a base for now
-      const texKey = val === 4 ? tex('ship.floor') : tileInfo.tex();
+      // deck plates choose their seam variant by tile coordinate; planters
+      // (val 4) keep the plain deck base below the crop sprites
+      let texKey = val === 0 ? deckVariant(i % MAP_W, Math.floor(i / MAP_W)) : tileInfo.tex();
+      if (val === 4) texKey = tex('ship.floor');
       spr.setTexture(texKey);
     }
 
@@ -792,13 +812,13 @@ class SpaceshipScene extends Phaser.Scene {
         ...f, fontSize: '12px', color: cur ? '#9dffec' : '#e8ecff', fontStyle: 'bold',
       }).setOrigin(0, 0.5);
       const sub = this.add.text(-186, y + 16, d.sub, {
-        ...f, fontSize: '9px', color: '#8fb8ae',
+        ...f, fontSize: '10px', color: '#8fb8ae',
       }).setOrigin(0, 0.5);
       this._backpackDynamic.push(rect, name, sub);
       this.backpackPanel.add([rect, name, sub]);
     });
     const foot = this.add.text(0, 150, 'Starter kit — tools are yours. The planet smithy can upgrade them for credits.', {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '9px', color: '#8fb8ae', align: 'center',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', color: '#8fb8ae', align: 'center',
       wordWrap: { enable: true, width: 420 },
     }).setOrigin(0.5);
     this.backpackPanel.add(foot);
@@ -861,7 +881,7 @@ class SpaceshipScene extends Phaser.Scene {
     card.add(this.add.rectangle(0, 0, 58, 24, 0x0d121c, 0.9).setStrokeStyle(1, 0x67e1cd, 0.9));
     card.add(this.add.image(0, 0, tex(`tool.${toolId}`)).setScale(1.1));
     card.add(this.add.text(0, 8, label, {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '7px', fontStyle: 'bold',
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', fontStyle: 'bold',
       color: '#a8eeff', stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5));
     this.tweens.add({
@@ -1001,10 +1021,23 @@ class SpaceshipScene extends Phaser.Scene {
       line('sleep', 'Sleep so it grows'),
       line('fuel', 'Reach 500 cr & descend'),
     ].join('\n'));
+    // The fuel bar must never sit under the checklist: derive its Y from the
+    // rendered text bounds, and grow the panel to contain text + bar + padding.
+    const fuelX = 26, fuelW = this.fuelW;
+    const textBottom = this.trackerText.y + this.trackerText.height;
+    const fuelY = Math.round(textBottom + 8);
+    this.fuelY = fuelY;
+    this.fuelBg.setPosition(fuelX + fuelW / 2, fuelY);
+    this.fuelFill.setPosition(fuelX, fuelY);
+    this.fuelLabel.setPosition(fuelX + fuelW, fuelY - 10);
+    const trackH = Math.round(fuelY - 12 + 11 + 10);
+    this.trackerBg.setPosition(12 + TRACK_W / 2, 12 + trackH / 2);
+    this.trackerBg.setSize(TRACK_W, trackH);
     const frac = Math.min(1, this.credits / 500);
     this.fuelFill.setDisplaySize(Math.max(2, frac * this.fuelW), 9);
     this.fuelLabel.setText(`${Math.min(500, Math.floor(this.credits))} / 500 cr`);
   }
+
 
   // a labelled, glowing signpost so every interactable reads as a "building"
   _buildPOIBadge(p) {
@@ -1019,10 +1052,10 @@ class SpaceshipScene extends Phaser.Scene {
       .setStrokeStyle(1, color, 0.9).setDepth(158).setOrigin(0.5, 1);
     const txt = this.add.text(wx, wy - 22, p.label, {
       fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif",
-      fontSize: '9px', fontStyle: 'bold', color: p.c, stroke: '#000', strokeThickness: 2,
+      fontSize: '11px', fontStyle: 'bold', color: p.c, stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(160);
     const sub = this.add.text(wx, wy - 4, p.sub, {
-      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '6.5px', color: '#cfd6ea', stroke: '#000', strokeThickness: 2,
+      fontFamily: "system-ui, 'Segoe UI', sans-serif", fontSize: '10px', color: '#cfd6ea', stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5, 1).setDepth(159).setAlpha(0.95);
     badge.plate = plate;
     badge.txt = txt;
@@ -1041,13 +1074,13 @@ class SpaceshipScene extends Phaser.Scene {
         }
         planter.state = 'tilled';
         this._swingTool();
-        this.showDialogue(['[C.O.R.A.]: Tilled the soil. Press SPACE again to plant a seed.']);
+        this.showToast('[C.O.R.A.]: Tilled the soil. Press SPACE again to plant a seed.');
         break;
       case 'tilled':
         planter.crop = 'space-wheat';
         planter.state = 'seeded';
         this.cropsPlanted++;
-        this.showDialogue(['[C.O.R.A.]: Seed planted. Now equip the WATERING CAN and press SPACE to water it.']);
+        this.showToast('[C.O.R.A.]: Seed planted. Now equip the WATERING CAN and press SPACE to water it.');
         break;
       case 'seeded':
         // watering needs the can, and the can needs water in the tank
@@ -1064,7 +1097,7 @@ class SpaceshipScene extends Phaser.Scene {
         planter.watered = true;
         planter.state = 'growing';
         this._swingTool();
-        this.showDialogue(['[C.O.R.A.]: Watered! The crop will grow overnight. Sleep to advance the day.']);
+        this.showToast('[C.O.R.A.]: Watered! The crop will grow overnight. Sleep to advance the day.');
         if (!this.checks.plant) {
           this.checks.plant = true;
           this.setObjective('sleep', 'Sleep in the BUNK so the crop grows overnight.', 21.5, 4);
@@ -1077,7 +1110,7 @@ class SpaceshipScene extends Phaser.Scene {
           planter.state = 'mature';
           this.handleHarvest(planter);
         } else {
-          this.showDialogue([`[C.O.R.A.]: Still growing. Day ${planter.growth + 1}/3.`]);
+          this.showToast(`[C.O.R.A.]: Still growing. Day ${planter.growth + 1}/3.`);
         }
         break;
       case 'mature':
@@ -1099,7 +1132,7 @@ class SpaceshipScene extends Phaser.Scene {
     planter.growth = 0;
     planter.watered = false;
     this.cropsHarvested++;
-    this.showDialogue([`[C.O.R.A.]: Harvested! +${reward} credits. Total: ${this.credits} cr.`]);
+    this.showToast(`[C.O.R.A.]: Harvested! +${reward} credits. Total: ${this.credits} cr.`);
     if (this.objective && (this.objective.id === 'sleep' || this.objective.id === 'plant' || this.objective.id === 'tap')) {
       this.setObjective('fuel', 'Earn 500 cr — mine with the PICKAXE and harvest with HANDS.', this.bridgeConsole.x, this.bridgeConsole.y);
     } else {
@@ -1112,7 +1145,7 @@ class SpaceshipScene extends Phaser.Scene {
     this.credits += reward;
     this.bridgeConsole.mined = true;
     this._swingTool();
-    this.showDialogue([`[Console]: Asteroid mined with the pickaxe! +${reward} credits. Total: ${this.credits} cr.`]);
+    this.showToast(`[Console]: Asteroid mined with the pickaxe! +${reward} credits. Total: ${this.credits} cr.`);
     if (!this.checks.power) {
       this.checks.power = true;
       this.tutorialStep = 2;
@@ -1123,9 +1156,30 @@ class SpaceshipScene extends Phaser.Scene {
     this.time.delayedCall(5000, () => { this.bridgeConsole.mined = false; });
   }
 
+  // ── Non-blocking toast (ported from PlanetScene.showToast, amber ship accent) ──
+  showToast(msg) {
+    const { width } = this.game.config;
+    const toast = this.add.text(width / 2, 44, msg, {
+      fontFamily: "system-ui, 'Segoe UI', 'Trebuchet MS', sans-serif", fontSize: '11px', color: '#f7d698',
+      backgroundColor: '#070714cc', padding: { x: 10, y: 6 },
+      stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(1100);
+    this.tweens.add({
+      targets: toast, alpha: 0, y: 24, duration: 900, delay: 1800,
+      onComplete: () => toast.destroy(),
+    });
+  }
+
   showDialogue(lines, footer = 'Press SPACE to continue') {
     const text = Array.isArray(lines) ? lines.join('\n') : lines;
     this.dialog.setText(text, { footer });
+    // ART-06: C.O.R.A.'s painted bust stands on the tutorial box's top-left edge
+    const coraKey = paintedPortrait(this, 'cora');
+    if (coraKey && this.dialog.box) {
+      const b = this.dialog.box, size = Math.round(Math.min(150, this.game.config.height * 0.22));
+      if (!this.coraBust) this.coraBust = this.add.image(0, 0, coraKey).setOrigin(0.5, 1).setScrollFactor(0).setDepth(998);
+      this.coraBust.setPosition(b.x - b.width / 2 + size / 2 + 12, b.y - b.height / 2 + 2).setDisplaySize(size, size).setVisible(true);
+    }
 
     if (this.dialogueTimer) this.dialogueTimer.remove();
     this.dialogueTimer = this.time.delayedCall(14000, () => this.dismissDialogue());
@@ -1134,6 +1188,7 @@ class SpaceshipScene extends Phaser.Scene {
   dismissDialogue() {
     if (this.dialogueTimer) { this.dialogueTimer.remove(); this.dialogueTimer = null; }
     if (this.dialog) this.dialog.hide();
+    if (this.coraBust) this.coraBust.setVisible(false);
   }
 
   // ── Go to bed (Harvest Moon-style sleep to end the day) ──
@@ -1196,12 +1251,29 @@ class SpaceshipScene extends Phaser.Scene {
     this.renderSprites();
   }
 
+  _drainDescentFuel() {
+    if (!this.fuelFill || !this.tweens) return;
+    const startW = this.fuelFill.displayWidth || this.fuelW || 2;
+    const fuel = { w: startW };
+    this.tweens.add({
+      targets: fuel, w: 2, duration: 2400, ease: 'Sine.easeIn',
+      onUpdate: () => {
+        this.fuelFill.setDisplaySize(Math.max(2, fuel.w), 9);
+        const left = Math.round(500 * Math.max(0, fuel.w - 2) / Math.max(1, startW - 2));
+        if (this.fuelLabel) this.fuelLabel.setText(`fuel ${left} / 500 cr`);
+      },
+    });
+  }
+
   landOnPlanet() {
     const net = window.SpaceFarmer.net;
     if (net && net.connected) net.send('completeTutorial');
-    this.showDialogue(['[C.O.R.A.]: Planetary landing sequence initiated.']);
+    this.showDialogue(['[C.O.R.A.]: Planetary landing sequence initiated. 500 cr of descent fuel burning.']);
+    // SF19: the 500 cr is the landing-fuel fee — drain the fuel bar visibly,
+    // then land. The planet's credits come from the server, never from here.
+    this._drainDescentFuel();
     this.time.delayedCall(3000, () => {
-      this.scene.start('PlanetScene', { credits: this.credits });
+      this.scene.start('PlanetScene');
     });
   }
 }

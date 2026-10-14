@@ -29,3 +29,7 @@ reports/evals/trials/
 
 # Generated QA sprite-sheet captures (regenerable via client/_qa/cdp_*)
 client/_qa/*.png
+
+# DSH agent run reports (local QA notes)
+client/_qa/*.dsh-report.md
+client/_qa/probe_*_tmp.mjs

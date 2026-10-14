@@ -17,6 +17,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function main() {
   const room = await new Client('http://localhost:8900').joinOrCreate('farm', { name: 'e2e-' + Math.random().toString(36).slice(2) });
+  // Raw client: no-op catch-all so server messages this probe does not await
+  // (milestone toasts, festival phases) never warn "onMessage() not registered".
+  room.onMessage('*', () => {});
   await sleep(400);
   const sid = room.sessionId;
   const me = room.state.players.get(sid);

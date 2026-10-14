@@ -1,6 +1,6 @@
 {
   "name": "space-farmer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A cozy multiplayer space-farming game and deterministic reinforcement-learning environment.",
   "main": "server.js",
   "scripts": {
@@ -21,7 +21,8 @@
     "transcript": "python3 -m rl.python.transcript",
     "eval:alignment": "python3 -m rl.python.eval_alignment",
     "mcp": "node mcp/server.cjs",
-    "test:mcp": "node mcp/smoke.cjs"
+    "test:mcp": "node mcp/smoke.cjs",
+    "qa:seasons": "node client/_qa/season_sheet.mjs"
   },
   "keywords": [
     "game",
